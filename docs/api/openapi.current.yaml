@@ -1,0 +1,1054 @@
+openapi: 3.1.1
+info:
+  title: 高校综合测评管理 — 现有业务接口
+  version: 0.1.0-audit-20261020
+  description: |
+    静态源码契约；非目标功能清单，未进行本轮HTTP运行验收。
+    覆盖18个应用自有路由文件；NextAuth catch-all由认证库处理，见认证边界说明。
+    不包含尚未实现的发布、异议、排名、快照、设置、模板下载及结果HTTP接口。
+    POST/PATCH业务入口校验Origin等于NEXTAUTH_URL的origin，缺少也拒绝。
+    首次改密会话除/api/password及认证库入口外不能访问业务接口。
+    unknown error/损坏JSON在部分入口返回500，不能假定所有语法错误均为400。
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+x-contract-status: audited-source-not-runtime-verified
+x-auth-library-route:
+  path: /api/auth/{nextauth}
+  source: src/app/api/auth/[...nextauth]/route.ts
+  methods: [GET, POST]
+  description: NextAuth 4.24.15处理会话、CSRF、凭据回调、退出等协议；不是任意单段path接口，不用虚构通用payload代替库契约。
+paths:
+  /api/health/live:
+    get:
+      operationId: healthLive
+      security: []
+      responses:
+        '200':
+          description: 进程可响应；不检查数据库和文件存储
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: alive }
+  /api/health/ready:
+    get:
+      operationId: healthReady
+      security: []
+      description: SELECT 1、User可查询及已登记迁移无未完成项；不比较本地迁移目录，不校验附件、备份或安全配置。
+      responses:
+        '200':
+          description: 当前检查通过
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: ready }
+        '503':
+          description: 数据库/表/迁移检查失败，不返回内部错误
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: not_ready }
+  /api/admin/session:
+    get:
+      operationId: readAdminSession
+      x-roles: [ADMIN]
+      responses:
+        '200':
+          description: 管理员姓名与基础角色，不返回会话ID
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, role]
+                properties:
+                  name: { type: string }
+                  role: { const: ADMIN }
+        default: { $ref: '#/components/responses/Error' }
+  /api/password:
+    post:
+      operationId: changeOwnPassword
+      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      description: 允许首次改密；每账号15分钟10次。成功撤销全部旧会话，必须重新登录。此入口未统一捕获服务异常。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, minLength: 1, maxLength: 128, writeOnly: true }
+                newPassword:
+                  type: string
+                  minLength: 12
+                  maxLength: 72
+                  pattern: '^(?=.*[A-Za-z])(?=.*[0-9]).+$'
+                  writeOnly: true
+                  description: 另检查UTF-8不超过72字节；不得在日志和普通示例中保存密码。
+      responses:
+        '200':
+          description: 密码已更换
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { const: true }
+        default: { $ref: '#/components/responses/Error' }
+  /api/admin/accounts:
+    get:
+      operationId: listAccounts
+      x-roles: [ADMIN]
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+        - name: q
+          in: query
+          description: 服务端截取前80字符；匹配姓名、登录名、学院或班级，不匹配专业。
+          schema: { type: string }
+      responses:
+        '200':
+          description: 每页20条，createdAt desc及id desc
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, page]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Account' } }
+                  total: { type: integer, minimum: 0 }
+                  page: { type: integer }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createAccount
+      x-roles: [ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccountInput' }
+      responses:
+        '201':
+          description: 创建账号；初始密码仅在本次响应交付，不应记录响应正文
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, initialPassword]
+                properties:
+                  user: { $ref: '#/components/schemas/Account' }
+                  initialPassword: { type: string, description: 敏感一次性交付值，不提供示例 }
+        default: { $ref: '#/components/responses/Error' }
+  /api/admin/accounts/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    patch:
+      operationId: updateAccount
+      x-roles: [ADMIN]
+      description: 禁止停用自身/移除自身管理员；已有学生档案不可改学号。角色/停用变化撤销会话。当前返回user在档案upsert前读取，profile可能是修改前值；此为缺陷不是目标行为。成功未显式设置no-store。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision, reason, disabled, account]
+              properties:
+                revision: { $ref: '#/components/schemas/Revision' }
+                reason: { type: string, minLength: 2, maxLength: 500 }
+                disabled: { type: boolean }
+                account: { $ref: '#/components/schemas/AccountInput' }
+      responses:
+        '200':
+          description: 账号视图（当前档案返回时机见说明）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/admin/accounts/{id}/reset-password:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    post:
+      operationId: resetAccountPassword
+      x-roles: [ADMIN]
+      description: 每管理员15分钟20次；不能重置自身；撤销目标全部旧会话并要求首次改密。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision, reason]
+              properties:
+                revision: { $ref: '#/components/schemas/Revision' }
+                reason: { type: string, minLength: 2, maxLength: 500 }
+      responses:
+        '200':
+          description: 一次性交付，不在日志中记录
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [login, initialPassword]
+                properties:
+                  login: { type: string }
+                  initialPassword: { type: string }
+        default: { $ref: '#/components/responses/Error' }
+  /api/students/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      operationId: readStudentProfile
+      x-roles: [ADMIN, STUDENT]
+      description: 学生只能本人；管理员当前全局读取。服务依studentProfile存在判断，不另检查目标role/disabled。
+      responses:
+        '200':
+          description: 档案视图
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, login, studentProfile]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  login: { type: string }
+                  studentProfile: { $ref: '#/components/schemas/StudentProfile' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/terms:
+    get:
+      operationId: listTerms
+      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      description: 当前无学生适用范围过滤、无分页，包含scheme。
+      responses:
+        '200':
+          description: createdAt desc及id desc
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Term' } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createTerm
+      x-roles: [ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                template: { type: boolean, default: true, description: 可选学校示例，不代表通用制度范围 }
+      responses:
+        '201':
+          description: CONFIGURATION周期；成功未显式设置no-store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Term' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/terms/{id}/scheme:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    post:
+      operationId: operateScheme
+      x-roles: [ADMIN]
+      description: save/activate仅CONFIGURATION且事务内校验周期；preview不查路径周期及阶段，直接纯计算。业务语义另由validateScheme验证，JSON Schema不能替代树结构校验。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, revision, scheme]
+                  properties:
+                    action: { const: save }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                    scheme: { $ref: '#/components/schemas/Scheme' }
+                - type: object
+                  required: [action, revision]
+                  properties:
+                    action: { const: activate }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                - type: object
+                  required: [action, scheme, input]
+                  properties:
+                    action: { const: preview }
+                    scheme: { $ref: '#/components/schemas/Scheme' }
+                    input:
+                      type: object
+                      required: [values, deductions]
+                      properties:
+                        values: { type: object, additionalProperties: { $ref: '#/components/schemas/DecimalInput' } }
+                        deductions: { type: object, additionalProperties: { $ref: '#/components/schemas/DecimalInput' } }
+      responses:
+        '200':
+          description: save/activate返回Term；preview返回计算明细
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Term' }
+                  - { $ref: '#/components/schemas/Calculation' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/activities:
+    get:
+      operationId: listActivitiesOrRecognitions
+      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      parameters:
+        - { $ref: '#/components/parameters/TermQuery' }
+        - name: view
+          in: query
+          description: reviews返回认定来源；其他任何值/缺省均返回活动。
+          schema: { type: string }
+      description: 两种列表均最多200，按时间倒序，没有完整分页。发布者活动限本人；来源学生限本人、发布者限本人负责活动。
+      responses:
+        '200':
+          description: 活动数组或认定来源数组
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Activity' } }
+                  - { type: array, maxItems: 200, items: { $ref: '#/components/schemas/RecognitionView' } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: operateActivityOrRecognition
+      description: 所有写入仅ACTIVE；入口放行三角色，服务按action进一步限制。
+      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, termId, activity]
+                  properties:
+                    action: { const: save }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    id: { type: string }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                    activity: { $ref: '#/components/schemas/ActivityInput' }
+                - type: object
+                  required: [action, termId, id, revision]
+                  properties:
+                    action: { const: confirm }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    id: { type: string }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                - type: object
+                  required: [action, termId, activityId, note, evidenceIds]
+                  properties:
+                    action: { const: submit }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    activityId: { type: string }
+                    studentId: { type: string }
+                    studentLogin: { type: string, maxLength: 64 }
+                    note: { type: string, minLength: 1, maxLength: 2000 }
+                    evidenceIds: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
+                - type: object
+                  required: [action, termId, id, revision, status, reason]
+                  properties:
+                    action: { const: review }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    id: { type: string }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                    status: { type: string, enum: [APPROVED, REJECTED] }
+                    reason: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        '200':
+          description: save/confirm返回Activity；submit/review返回RecognitionSource。review当前没有必须PENDING的前置检查。
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Activity' }
+                  - { $ref: '#/components/schemas/RecognitionSource' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/grades:
+    get:
+      operationId: listStudentGrades
+      x-roles: [ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { $ref: '#/components/parameters/StudentLoginQuery' }
+      responses:
+        '200':
+          description: ACTIVE有效学生的当前成绩输入
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [student, inputs]
+                properties:
+                  student: { $ref: '#/components/schemas/StudentLabel' }
+                  inputs: { type: array, items: { $ref: '#/components/schemas/Grade' } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: saveGrade
+      x-roles: [ADMIN]
+      description: ACTIVE；创建revision=null，覆盖必须匹配revision；相同值不重复写入。服务验证GRADE及节点范围。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [termId, studentLogin, nodeId, value, revision, reason]
+              properties:
+                termId: { type: string, minLength: 1 }
+                studentLogin: { type: string, minLength: 1, maxLength: 64 }
+                nodeId: { type: string, minLength: 1 }
+                value: { $ref: '#/components/schemas/DecimalInput' }
+                revision: { type: [integer, 'null'], minimum: 0 }
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        '200':
+          description: 当前成绩
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Grade' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/deductions:
+    get:
+      operationId: listStudentDeductions
+      x-roles: [ADMIN]
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { $ref: '#/components/parameters/StudentLoginQuery' }
+      responses:
+        '200':
+          description: ACTIVE学生当前扣分（含撤销记录）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [student, records]
+                properties:
+                  student: { $ref: '#/components/schemas/StudentLabel' }
+                  records: { type: array, items: { $ref: '#/components/schemas/Deduction' } }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: saveOrRevokeDeduction
+      x-roles: [ADMIN]
+      description: ACTIVE；amount严格大于0；每学生每项目仅一个当前输入，不是逐笔累加；不能撤销不存在记录。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [termId, studentLogin, projectId, amount, revision, reason]
+              properties:
+                termId: { type: string, minLength: 1 }
+                studentLogin: { type: string, minLength: 1, maxLength: 64 }
+                projectId: { type: string, minLength: 1 }
+                amount: { $ref: '#/components/schemas/DecimalInput' }
+                revision: { type: [integer, 'null'], minimum: 0 }
+                revoked: { type: boolean, default: false }
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        '200':
+          description: 当前扣分输入
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deduction' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/evidence:
+    post:
+      operationId: uploadEvidence
+      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      description: 原始二进制不为multipart；最大5MiB，部分PNG/JPEG/PDF签名识别；每账号15分钟30次，不代表完整安全扫描。
+      parameters:
+        - name: x-file-name
+          in: header
+          schema: { type: string }
+          description: encodeURIComponent编码显示名；缺省为证明文件。
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 已存储文件的安全元数据
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceLabel' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/evidence/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      operationId: downloadEvidence
+      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      description: 管理员、自有文件、本人参与事实的关联文件或本人负责活动关联文件；下载前哈希校验。
+      responses:
+        '200':
+          description: attachment；private no-store；nosniff；sandbox CSP
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        default: { $ref: '#/components/responses/Error' }
+  /api/admin/account-import:
+    post:
+      operationId: operateAccountImport
+      x-roles: [ADMIN]
+      description: 15分钟20次；columns/preview需文件，commit只需id。同批次重复提交不重建且不重交初始密码。映射JSON须五字段互不重复且对应存在列。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, file]
+                  properties:
+                    action: { const: columns }
+                    file: { type: string, format: binary }
+                - type: object
+                  required: [action, file, mapping]
+                  properties:
+                    action: { const: preview }
+                    file: { type: string, format: binary }
+                    mapping:
+                      type: string
+                      description: 'JSON对象，login/name/college/major/className均为0～29整数列索引。'
+                      example: '{"login":0,"name":1,"college":2,"major":3,"className":4}'
+                - type: object
+                  required: [action, id]
+                  properties:
+                    action: { const: commit }
+                    id: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: 分支分别返回列预检/账号预览/提交结果；错误行整批阻断
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/AccountColumns' }
+                  - { $ref: '#/components/schemas/AccountPreview' }
+                  - { $ref: '#/components/schemas/AccountCommit' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/participation-import:
+    post:
+      operationId: operateParticipationImport
+      x-roles: [ADMIN, PUBLISHER]
+      description: 15分钟30次；preview/commit仅ACTIVE。发布者限本人已确认活动，自有共享证明；提交形成待审来源，不自动通过。columns只鉴权并解析文件，不检查周期存在/阶段。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, termId, file]
+                  properties:
+                    action: { const: columns }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    file: { type: string, format: binary }
+                - type: object
+                  required: [action, termId, file, column, activityId, evidenceIds, note]
+                  properties:
+                    action: { const: preview }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    file: { type: string, format: binary }
+                    column: { type: integer, minimum: 0, maximum: 29 }
+                    activityId: { type: string, minLength: 1 }
+                    evidenceIds: { type: string, description: JSON数组，1～5个非空文件ID，必须当前操作者自有 }
+                    note: { type: string, minLength: 1, maxLength: 2000 }
+                - type: object
+                  required: [action, termId, id]
+                  properties:
+                    action: { const: commit }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    id: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: 列/预览/整批提交；重复提交返回replay=true，仍复核阶段和活动归属
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Columns' }
+                  - { $ref: '#/components/schemas/ParticipationPreview' }
+                  - { $ref: '#/components/schemas/ParticipationCommit' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/grade-import:
+    post:
+      operationId: operateGradeImport
+      x-roles: [ADMIN]
+      description: 15分钟30次；preview/commit仅ACTIVE。选择GRADE节点，成绩覆盖不叠加；columns只鉴权解析文件，不检查周期存在/阶段。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, termId, file]
+                  properties:
+                    action: { const: columns }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    file: { type: string, format: binary }
+                - type: object
+                  required: [action, termId, file, column, valueColumn, nodeId, reason]
+                  properties:
+                    action: { const: preview }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    file: { type: string, format: binary }
+                    column: { type: integer, minimum: 0, maximum: 29 }
+                    valueColumn: { type: integer, minimum: 0, maximum: 29, description: 不同于学号列且在表头范围内 }
+                    nodeId: { type: string, minLength: 1 }
+                    reason: { type: string, minLength: 2, maxLength: 1000 }
+                - type: object
+                  required: [action, termId, id]
+                  properties:
+                    action: { const: commit }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    id: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: 列/预览/提交结果；同值跳过、旧快照拒绝；成功后重放仍要求ACTIVE
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Columns' }
+                  - { $ref: '#/components/schemas/GradePreview' }
+                  - { $ref: '#/components/schemas/GradeCommit' }
+        default: { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: next-auth.session-token
+      description: 开发HTTP名称；HTTPS默认为__Secure-next-auth.session-token，长JWT可能分片；由NextAuth管理，不手工构造。
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    TermQuery:
+      name: termId
+      in: query
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    UnboundedTermQuery:
+      name: termId
+      in: query
+      required: true
+      schema: { type: string, minLength: 1 }
+    StudentLoginQuery:
+      name: studentLogin
+      in: query
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 64 }
+  responses:
+    Error:
+      description: |
+        JSON业务错误通常为400校验、401会话、403来源/权限、404对象不存在、409修订/状态/快照、429限流、500未知错误。
+        现有代码没有稳定code/requestId/fieldErrors；无统一Retry-After；部分框架/认证异常不保证本JSON格式。
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: { type: string }
+  schemas:
+    Id: { type: string, minLength: 1, maxLength: 100 }
+    Revision: { type: integer, minimum: 0 }
+    DecimalInput:
+      type: string
+      pattern: '^-?\d{1,10}(?:\.\d{1,12})?$'
+      description: 不支持科学计数法；字段业务正负及范围另检查。数字JSON不是合法输入。
+    DecimalOutput:
+      type: string
+      description: Prisma Decimal JSON字符串，可能采用指数表示；不能直接套用输入正则。列表显式toString同此。
+    StudentLabel:
+      type: object
+      required: [login, name]
+      properties:
+        login: { type: string }
+        name: { type: string }
+    StudentProfile:
+      type: object
+      required: [userId, studentNumber, college, major, className]
+      properties:
+        userId: { type: string }
+        studentNumber: { type: string }
+        college: { type: string }
+        major: { type: string }
+        className: { type: string }
+    AccountInput:
+      type: object
+      required: [name, login, role]
+      description: 所有文本trim；STUDENT要求college/major/className非空。普通账号这三字段缺省空字符串。
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        login: { type: string, minLength: 3, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$' }
+        role: { type: string, enum: [ADMIN, PUBLISHER, STUDENT] }
+        college: { type: string, maxLength: 80, default: '' }
+        major: { type: string, maxLength: 80, default: '' }
+        className: { type: string, maxLength: 80, default: '' }
+    Account:
+      type: object
+      required: [id, login, name, role, disabled, mustChangePassword, revision, createdAt, studentProfile]
+      properties:
+        id: { type: string }
+        login: { type: string }
+        name: { type: string }
+        role: { type: string, enum: [ADMIN, PUBLISHER, STUDENT] }
+        disabled: { type: boolean }
+        mustChangePassword: { type: boolean }
+        revision: { $ref: '#/components/schemas/Revision' }
+        createdAt: { type: string, format: date-time }
+        studentProfile:
+          anyOf:
+            - { $ref: '#/components/schemas/StudentProfile' }
+            - { type: 'null' }
+    Node:
+      type: object
+      required: [id, parentId, name, order, kind]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        parentId: { type: [string, 'null'], maxLength: 100 }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        order: { type: integer, minimum: 0, maximum: 100000 }
+        kind: { type: string, enum: [SUM, WEIGHTED, ACTIVITY, GRADE] }
+        weight: { allOf: [{ $ref: '#/components/schemas/DecimalInput' }], default: '1' }
+        cap: { anyOf: [{ $ref: '#/components/schemas/DecimalInput' }, { type: 'null' }], default: null }
+        floor: { anyOf: [{ $ref: '#/components/schemas/DecimalInput' }, { type: 'null' }], default: null }
+        normalize: { type: boolean, default: false }
+        rawMaximum: { anyOf: [{ $ref: '#/components/schemas/DecimalInput' }, { type: 'null' }], default: null }
+        targetMaximum: { anyOf: [{ $ref: '#/components/schemas/DecimalInput' }, { type: 'null' }], default: null }
+        minimum: { allOf: [{ $ref: '#/components/schemas/DecimalInput' }], default: '0' }
+        maximum: { allOf: [{ $ref: '#/components/schemas/DecimalInput' }], default: '100' }
+        required: { type: boolean, default: false }
+    Scheme:
+      type: object
+      required: [nodes, deductions]
+      properties:
+        nodes: { type: array, minItems: 1, maxItems: 5000, items: { $ref: '#/components/schemas/Node' } }
+        deductions:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [id, nodeId, name, coefficient]
+            properties:
+              id: { $ref: '#/components/schemas/Id' }
+              nodeId: { $ref: '#/components/schemas/Id' }
+              name: { type: string, minLength: 1, maxLength: 80 }
+              coefficient: { $ref: '#/components/schemas/DecimalInput' }
+    Term:
+      type: object
+      required: [id, name, phase, scheme, revision, inputRevision, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        phase: { type: string, enum: [CONFIGURATION, ACTIVE, CHECKING, LOCKED] }
+        scheme: { $ref: '#/components/schemas/Scheme' }
+        revision: { $ref: '#/components/schemas/Revision' }
+        inputRevision: { $ref: '#/components/schemas/Revision' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ActivityInput:
+      type: object
+      required: [name, organizer, content, requirements, startsAt, endsAt, nodeId, points]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        organizer: { type: string, minLength: 1, maxLength: 120 }
+        content: { type: string, minLength: 1, maxLength: 5000 }
+        requirements: { type: string, maxLength: 2000 }
+        startsAt: { type: string, format: date-time, description: Zod默认ISO UTC datetime，不接受任意本地时间文本 }
+        endsAt: { type: string, format: date-time }
+        nodeId: { $ref: '#/components/schemas/Id' }
+        points: { $ref: '#/components/schemas/DecimalInput' }
+    Activity:
+      type: object
+      required: [id, termId, ownerId, name, organizer, content, requirements, startsAt, endsAt, nodeId, points, confirmed, revision, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        termId: { type: string }
+        ownerId: { type: string }
+        name: { type: string }
+        organizer: { type: string }
+        content: { type: string }
+        requirements: { type: string }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        nodeId: { type: string }
+        points: { $ref: '#/components/schemas/DecimalOutput' }
+        confirmed: { type: boolean }
+        revision: { $ref: '#/components/schemas/Revision' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    RecognitionSource:
+      type: object
+      required: [id, participationId, submitterId, status, reviewReason, reviewerId, reviewedAt, note, revision, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        participationId: { type: string }
+        submitterId: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        reviewReason: { type: [string, 'null'] }
+        reviewerId: { type: [string, 'null'] }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        note: { type: string }
+        revision: { $ref: '#/components/schemas/Revision' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    RecognitionView:
+      allOf:
+        - { $ref: '#/components/schemas/RecognitionSource' }
+        - type: object
+          required: [participation, evidence, student]
+          properties:
+            participation:
+              type: object
+              required: [id, activityId, studentId, revision, createdAt, activity]
+              properties:
+                id: { type: string }
+                activityId: { type: string }
+                studentId: { type: string }
+                revision: { $ref: '#/components/schemas/Revision' }
+                createdAt: { type: string, format: date-time }
+                activity: { $ref: '#/components/schemas/Activity' }
+            evidence:
+              type: array
+              items:
+                type: object
+                required: [evidence]
+                properties:
+                  evidence:
+                    type: object
+                    required: [id, name]
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+            student:
+              anyOf:
+                - type: object
+                  required: [id, name, login]
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+                    login: { type: string }
+                - { type: 'null' }
+    Grade:
+      type: object
+      required: [id, termId, studentId, nodeId, value, revision, updatedAt]
+      properties:
+        id: { type: string }
+        termId: { type: string }
+        studentId: { type: string }
+        nodeId: { type: string }
+        value: { $ref: '#/components/schemas/DecimalOutput' }
+        revision: { $ref: '#/components/schemas/Revision' }
+        updatedAt: { type: string, format: date-time }
+    Deduction:
+      type: object
+      required: [id, termId, studentId, projectId, amount, revoked, reason, revision, updatedAt]
+      properties:
+        id: { type: string }
+        termId: { type: string }
+        studentId: { type: string }
+        projectId: { type: string }
+        amount: { $ref: '#/components/schemas/DecimalOutput' }
+        revoked: { type: boolean }
+        reason: { type: string }
+        revision: { $ref: '#/components/schemas/Revision' }
+        updatedAt: { type: string, format: date-time }
+    EvidenceLabel:
+      type: object
+      required: [id, name, size, mime]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        size: { type: integer, minimum: 1, maximum: 5242880 }
+        mime: { type: string, enum: [image/png, image/jpeg, application/pdf] }
+    Calculation:
+      type: object
+      required: [total, provisionalTotal, complete, missing, details]
+      properties:
+        total: { type: [string, 'null'], description: 不完整时null，完整时half-up两位字符串 }
+        provisionalTotal: { type: string }
+        complete: { type: boolean }
+        missing:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string }
+              name: { type: string }
+        details:
+          type: array
+          items:
+            type: object
+            required: [id, name, parentId, complete, gross, capped, normalized, deduction, beforeFloor, score, exact, normalization, parentContribution]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              parentId: { type: [string, 'null'] }
+              complete: { type: boolean }
+              gross: { type: string }
+              capped: { type: string }
+              normalized: { type: string }
+              deduction: { type: string }
+              beforeFloor: { type: string }
+              score: { type: string }
+              exact:
+                type: object
+                required: [gross, capped, normalized, deduction, beforeFloor, score]
+                additionalProperties:
+                  type: object
+                  required: [numerator, denominator]
+                  properties:
+                    numerator: { type: string, pattern: '^-?[0-9]+$' }
+                    denominator: { type: string, pattern: '^[1-9][0-9]*$' }
+              normalization:
+                anyOf:
+                  - type: object
+                    required: [rawMaximum, targetMaximum]
+                    properties:
+                      rawMaximum: { type: [string, 'null'] }
+                      targetMaximum: { type: [string, 'null'] }
+                  - { type: 'null' }
+              parentContribution: { type: string }
+    Columns:
+      type: object
+      required: [headers, count]
+      properties:
+        headers: { type: array, maxItems: 30, items: { type: string } }
+        count: { type: integer, minimum: 1, maximum: 100 }
+    AccountColumns:
+      allOf:
+        - { $ref: '#/components/schemas/Columns' }
+        - type: object
+          required: [sample]
+          properties:
+            sample: { type: array, maxItems: 3, items: { type: array, items: { type: string } } }
+    PreviewBase:
+      type: object
+      required: [id, expiresAt, errors, rows]
+      properties:
+        id: { type: string }
+        expiresAt: { type: string, format: date-time }
+        errors: { type: integer, minimum: 0, maximum: 100 }
+    AccountPreview:
+      allOf:
+        - { $ref: '#/components/schemas/PreviewBase' }
+        - type: object
+          properties:
+            rows:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items:
+                type: object
+                required: [line, data, state, message]
+                properties:
+                  line: { type: integer, minimum: 2 }
+                  data:
+                    type: object
+                    required: [login, name, college, major, className]
+                    properties:
+                      login: { type: string }
+                      name: { type: string }
+                      college: { type: string }
+                      major: { type: string }
+                      className: { type: string }
+                  state: { type: string, enum: [NEW, SKIP, ERROR] }
+                  message: { type: string }
+    ParticipationPreview:
+      allOf:
+        - { $ref: '#/components/schemas/PreviewBase' }
+        - type: object
+          properties:
+            rows:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items:
+                type: object
+                required: [line, login, name, state, message]
+                properties:
+                  line: { type: integer, minimum: 2 }
+                  login: { type: string }
+                  name: { type: string }
+                  state: { type: string, enum: [NEW, EXISTING, SKIP, ERROR] }
+                  message: { type: string }
+    GradePreview:
+      allOf:
+        - { $ref: '#/components/schemas/PreviewBase' }
+        - type: object
+          properties:
+            rows:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items:
+                type: object
+                required: [line, login, name, before, value, state, message]
+                properties:
+                  line: { type: integer, minimum: 2 }
+                  login: { type: string }
+                  name: { type: string }
+                  before: { type: [string, 'null'] }
+                  value: { type: string }
+                  state: { type: string, enum: [NEW, SAME, OVERWRITE, SKIP, ERROR] }
+                  message: { type: string }
+    AccountCommit:
+      type: object
+      required: [created, skipped, credentials, replay]
+      properties:
+        created: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        replay: { type: boolean }
+        credentials:
+          type: array
+          description: 仅首次成功响应交付，重放为空；数据库result不保存明文密码。
+          items:
+            type: object
+            required: [login, initialPassword]
+            properties:
+              login: { type: string }
+              initialPassword: { type: string }
+    ParticipationCommit:
+      type: object
+      required: [submitted, skipped, replay]
+      properties:
+        submitted: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        replay: { type: boolean }
+    GradeCommit:
+      type: object
+      required: [written, skipped, replay]
+      properties:
+        written: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        replay: { type: boolean }

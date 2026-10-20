@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "template_name": "2024—2025学年上期综合测评参考模板",
+  "basis": "附件表头规则与已核实公式；不复制原表部分行的重复汇总和漏填公式",
+  "display": {"decimals": 2, "rounding": "half_up"},
+  "root": {
+    "id": "total",
+    "name": "综合测评成绩",
+    "kind": "group",
+    "aggregation": "weighted_sum",
+    "children": [
+      {
+        "id": "foundation",
+        "name": "基础性素质",
+        "weight": "0.8",
+        "kind": "group",
+        "aggregation": "weighted_sum",
+        "children": [
+          {
+            "id": "red_culture",
+            "name": "红色文化引领工程",
+            "weight": "0.1",
+            "kind": "group",
+            "aggregation": "sum",
+            "cap": "100",
+            "children": [
+              {"id": "ideology", "name": "思想引领活动", "kind": "input", "missing": "zero"},
+              {"id": "training", "name": "培训学习经历", "kind": "input", "missing": "zero"},
+              {"id": "party_membership", "name": "学生入党", "kind": "input", "missing": "zero"},
+              {"id": "morality", "name": "道德品质", "kind": "input", "missing": "zero"}
+            ]
+          },
+          {"id": "academic", "name": "学业成绩", "weight": "0.8", "kind": "input", "missing": "required"},
+          {"id": "physical", "name": "体育素质", "weight": "0.1", "kind": "input", "missing": "required"}
+        ]
+      },
+      {
+        "id": "development",
+        "name": "发展性素质",
+        "weight": "0.2",
+        "kind": "group",
+        "aggregation": "sum",
+        "children": [
+          {
+            "id": "volunteering",
+            "name": "志愿服务实践工程",
+            "kind": "group",
+            "aggregation": "sum",
+            "cap": "30",
+            "children": [
+              {"id": "social_practice", "name": "社会实践", "kind": "input", "missing": "zero"},
+              {"id": "labor_practice", "name": "劳动实践", "kind": "input", "missing": "zero"},
+              {"id": "public_service", "name": "社会公益", "kind": "input", "missing": "zero"}
+            ]
+          },
+          {
+            "id": "humanities",
+            "name": "人文素质提升工程",
+            "kind": "group",
+            "aggregation": "sum",
+            "cap": "30",
+            "children": [
+              {"id": "basic_literacy", "name": "基础素养", "kind": "input", "missing": "zero"},
+              {"id": "cultural_sports", "name": "文体素养", "kind": "input", "missing": "zero"},
+              {"id": "psychological", "name": "心理素养", "kind": "input", "missing": "zero"}
+            ]
+          },
+          {
+            "id": "craftsmanship",
+            "name": "卓越工匠培养工程",
+            "kind": "group",
+            "aggregation": "sum",
+            "cap": "40",
+            "children": [
+              {"id": "professional", "name": "职业素养", "kind": "input", "missing": "zero"},
+              {"id": "innovation", "name": "双创精神", "kind": "input", "missing": "zero"},
+              {"id": "management", "name": "管理能力", "kind": "input", "missing": "zero"}
+            ]
+          }
+        ]
+      }
+    ],
+    "deductions": [
+      {"id": "disciplinary_deduction", "name": "法制与校规校纪扣分", "kind": "input", "missing": "zero", "weight": "1"}
+    ],
+    "floor": null
+  },
+  "reference_import_columns": {
+    "ideology": "D", "training": "E", "party_membership": "F", "morality": "G",
+    "academic": "J", "physical": "L",
+    "social_practice": "P", "labor_practice": "Q", "public_service": "R",
+    "basic_literacy": "U", "cultural_sports": "V", "psychological": "W",
+    "professional": "Z", "innovation": "AA", "management": "AB",
+    "disciplinary_deduction": "AH"
+  },
+  "reference_export_columns": {
+    "H": {"node": "red_culture", "stage": "score"},
+    "I": {"node": "red_culture", "stage": "score", "factor": "0.1"},
+    "K": {"node": "academic", "stage": "score", "factor": "0.8"},
+    "M": {"node": "physical", "stage": "score", "factor": "0.1"},
+    "N": {"node": "foundation", "stage": "score"},
+    "O": {"node": "foundation", "stage": "score", "factor": "0.8"},
+    "S": {"node": "volunteering", "stage": "score"},
+    "T": {"node": "volunteering", "stage": "score", "factor": "0.2"},
+    "X": {"node": "humanities", "stage": "score"},
+    "Y": {"node": "humanities", "stage": "score", "factor": "0.2"},
+    "AC": {"node": "craftsmanship", "stage": "score"},
+    "AD": {"node": "craftsmanship", "stage": "score", "factor": "0.2"},
+    "AE": {"node": "development", "stage": "score"},
+    "AF": {"node": "development", "stage": "score", "factor": "0.2"},
+    "AG": {"node": "total", "stage": "gross"},
+    "AH": {"node": "disciplinary_deduction", "stage": "score"},
+    "AI": {"node": "total", "stage": "score"}
+  },
+  "notes": [
+    "各模块保留原始分直接汇总，本模板不启用百分制归一化。",
+    "30、30、40是三个工程的原始分上限，不是必须填写的内部权重。",
+    "每个工程的0.2比例列只是发展贡献的分项展示，不能再与原始分、小计同时加一次。",
+    "红色文化100分封顶来自表头，原Excel公式未实际执行此上限。",
+    "原Excel最终公式直接减AH，没有MAX(0,...)；本模板不擅自加0分下限。",
+    "具体活动单次分值不在汇总表内，由管理员为活动或加分项目配置。"
+  ]
+}

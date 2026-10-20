@@ -1,0 +1,452 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  PUBLISHER
+  STUDENT
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  login              String   @unique
+  name               String
+  role               Role
+  passwordHash       String
+  mustChangePassword Boolean  @default(true)
+  disabled           Boolean  @default(false)
+  authVersion        Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  sessions           AuthSession[]
+  studentProfile     StudentProfile?
+  grades             GradeInput[]
+  deductions         DeductionInput[]
+  revision           Int      @default(0)
+}
+
+model StudentProfile {
+  userId        String @id
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentNumber String @unique
+  college       String
+  major         String
+  className     String
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version   Int
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId])
+}
+
+model AccountImport {
+  id          String   @id @default(cuid())
+  actorId     String
+  rows        Json
+  snapshot    String
+  status      String   @default("PREVIEW")
+  result      Json?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  @@index([actorId, createdAt])
+}
+
+enum TermPhase {
+  CONFIGURATION
+  ACTIVE
+  CHECKING
+  LOCKED
+}
+
+model Term {
+  id String @id @default(cuid())
+  name String
+  phase TermPhase @default(CONFIGURATION)
+  scheme Json
+  revision Int @default(0)
+  inputRevision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  activities Activity[]
+  grades GradeInput[]
+  deductions DeductionInput[]
+  publishedResultSetId String?
+  publicationSequence Int @default(0)
+  cohortPublicationId String?
+  cohortPolicy String @default("CURRENT")
+  publications ResultPublication[]
+  projects RecognitionProject[]
+  snapshots SettlementSnapshot[]
+  reopenings TermReopen[]
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_CHANGES
+  WITHDRAWN
+  REVOKED
+}
+
+model Activity {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  ownerId String
+  name String
+  organizer String
+  content String
+  requirements String
+  startsAt DateTime
+  endsAt DateTime
+  nodeId String
+  points Decimal @db.Decimal(22,12)
+  confirmed Boolean @default(false)
+  publishedAt DateTime?
+  publishRevision Int @default(0)
+  scoreMode String @default("FIXED")
+  audienceColleges String[] @default([])
+  audienceClasses String[] @default([])
+  audienceStudents String[] @default([])
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  participations Participation[]
+  @@index([termId, ownerId])
+  @@index([termId, publishedAt])
+}
+
+model Participation {
+  id String @id @default(cuid())
+  activityId String
+  activity Activity @relation(fields: [activityId], references: [id])
+  studentId String
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  sources RecognitionSource[]
+  registeredAt DateTime?
+  registeredBy String?
+  registrationSnapshot Json?
+  importBatchId String?
+  score Decimal? @db.Decimal(22,12)
+  history Json @default("[]")
+  @@unique([activityId, studentId])
+  @@index([studentId, registeredAt])
+}
+
+model RecognitionSource {
+  id String @id @default(cuid())
+  participationId String
+  participation Participation @relation(fields: [participationId], references: [id])
+  submitterId String
+  origin String @default("LEGACY")
+  importBatchId String?
+  status ReviewStatus @default(PENDING)
+  reviewReason String?
+  reviewerId String?
+  reviewedAt DateTime?
+  note String
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  evidence EvidenceReference[]
+  history Json @default("[]")
+  @@index([submitterId, status])
+}
+
+model Evidence {
+  id String @id @default(cuid())
+  ownerId String
+  name String
+  mime String
+  size Int
+  sha256 String
+  storageKey String @unique
+  createdAt DateTime @default(now())
+  references EvidenceReference[]
+  claimReferences ClaimEvidence[]
+  appealReferences AppealEvidence[]
+}
+
+model EvidenceReference {
+  id String @id @default(cuid())
+  evidenceId String
+  evidence Evidence @relation(fields: [evidenceId], references: [id])
+  sourceId String
+  source RecognitionSource @relation(fields: [sourceId], references: [id])
+  @@unique([evidenceId, sourceId])
+}
+
+model DeductionInput {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  studentId String
+  student User @relation(fields: [studentId], references: [id])
+  projectId String
+  amount Decimal @db.Decimal(22,12)
+  revoked Boolean @default(false)
+  reason String
+  revision Int @default(0)
+  updatedAt DateTime @updatedAt
+  @@unique([termId, studentId, projectId])
+}
+
+model GradeInput {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  studentId String
+  student User @relation(fields: [studentId], references: [id])
+  nodeId String
+  value Decimal @db.Decimal(22,12)
+  revision Int @default(0)
+  updatedAt DateTime @updatedAt
+  @@unique([termId, studentId, nodeId])
+}
+
+model GradeImport {
+  id String @id @default(cuid())
+  termId String
+  actorId String
+  nodeId String
+  rows Json
+  reason String
+  snapshot String
+  status String @default("PREVIEW")
+  result Json?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([termId, actorId])
+}
+
+model ParticipationImport {
+  id String @id @default(cuid())
+  termId String
+  activityId String
+  actorId String
+  rows Json
+  evidenceIds Json
+  note String
+  snapshot String
+  status String @default("PREVIEW")
+  result Json?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([termId, actorId])
+}
+
+model LoginAttempt {
+  key       String   @id
+  count     Int      @default(1)
+  expiresAt DateTime
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  targetId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+}
+
+model RecognitionProject {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  name String
+  description String
+  nodeId String
+  points Decimal @db.Decimal(22,12)
+  enabled Boolean @default(true)
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  claims PersonalClaim[]
+  @@index([termId, enabled])
+}
+
+model PersonalClaim {
+  id String @id @default(cuid())
+  projectId String
+  project RecognitionProject @relation(fields: [projectId], references: [id])
+  studentId String
+  activityId String?
+  factKey String
+  occurredOn String
+  note String
+  status ReviewStatus @default(PENDING)
+  reviewReason String?
+  reviewerId String?
+  reviewedAt DateTime?
+  revision Int @default(0)
+  history Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  evidence ClaimEvidence[]
+  @@unique([projectId, studentId, factKey])
+  @@index([activityId, studentId])
+  @@index([studentId, status])
+}
+
+model ClaimEvidence {
+  id String @id @default(cuid())
+  claimId String
+  claim PersonalClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  evidenceId String
+  evidence Evidence @relation(fields: [evidenceId], references: [id])
+  @@unique([claimId, evidenceId])
+}
+
+model ResultPublication {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  sequence Int
+  actorId String
+  requestId String
+  requestHash String
+  scheme Json
+  termRevision Int
+  inputRevision Int
+  studentCount Int
+  checkingEndsAt DateTime
+  requireConfirmation Boolean
+  publishedAt DateTime @default(now())
+  results PublishedResult[]
+  appeals ResultAppeal[]
+  extensions PublicationExtension[]
+  @@unique([termId, sequence])
+  @@unique([termId, requestId])
+}
+
+model PublicationExtension {
+  id String @id @default(cuid())
+  publicationId String
+  publication ResultPublication @relation(fields: [publicationId], references: [id])
+  actorId String
+  checkingEndsAt DateTime
+  reason String
+  createdAt DateTime @default(now())
+  @@index([publicationId, checkingEndsAt])
+}
+
+model PublishedResult {
+  id String @id @default(cuid())
+  publicationId String
+  publication ResultPublication @relation(fields: [publicationId], references: [id])
+  studentId String
+  login String
+  name String
+  college String
+  major String
+  className String
+  total Decimal @db.Decimal(30,2)
+  resultHash String
+  payload Json
+  confirmation ResultConfirmation?
+  @@unique([publicationId, studentId])
+  @@index([publicationId, college, major, className])
+}
+
+model ResultConfirmation {
+  id String @id @default(cuid())
+  resultId String @unique
+  result PublishedResult @relation(fields: [resultId], references: [id])
+  studentId String
+  resultHash String
+  confirmedAt DateTime @default(now())
+}
+
+enum AppealStatus {
+  OPEN
+  PROCESSING
+  RESOLVED
+  REJECTED
+  WITHDRAWN
+}
+
+model ResultAppeal {
+  id String @id @default(cuid())
+  termId String
+  publicationId String
+  publication ResultPublication @relation(fields: [publicationId], references: [id])
+  studentId String
+  resultHash String
+  target String
+  reason String
+  status AppealStatus @default(OPEN)
+  resolution String?
+  resolvedPublicationId String?
+  reviewerId String?
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  evidence AppealEvidence[]
+  @@index([termId, studentId, status])
+}
+
+model AppealEvidence {
+  id String @id @default(cuid())
+  appealId String
+  appeal ResultAppeal @relation(fields: [appealId], references: [id], onDelete: Cascade)
+  evidenceId String
+  evidence Evidence @relation(fields: [evidenceId], references: [id])
+  @@unique([appealId, evidenceId])
+}
+
+model SettlementSnapshot {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  publicationId String @unique
+  actorId String
+  requestId String
+  payload Json
+  sha256 String
+  createdAt DateTime @default(now())
+  @@unique([termId, requestId])
+}
+
+model TermReopen {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  publicationId String?
+  snapshotId String?
+  actorId String
+  reason String
+  previousPhase TermPhase
+  createdAt DateTime @default(now())
+}
+
+model SiteSettings {
+  id String @id @default("site")
+  content Json
+  revision Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model BrandAsset {
+  id String @id @default(cuid())
+  mime String
+  size Int
+  bytes Bytes
+  sha256 String
+  createdAt DateTime @default(now())
+}
+
+

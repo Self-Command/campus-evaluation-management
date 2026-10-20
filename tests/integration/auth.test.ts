@@ -1,0 +1,54 @@
+import { afterAll, beforeAll, expect, test } from "vitest";
+import { compare, hash } from "bcryptjs";
+import { db } from "@/server/db";
+import { initializeAdmin } from "@/server/initialize-admin";
+import { changePassword, getCurrentSession, revokeSession } from "@/server/auth";
+import { consumeLimit } from "@/server/rate-limit";
+if (!new URL(process.env.DATABASE_URL!).pathname.startsWith("/campus_test_")) throw new Error("测试必须使用独立临时数据库，请运行 npm test");
+beforeAll(async () => { await db.$connect(); await db.user.deleteMany(); await db.auditEvent.deleteMany(); });
+afterAll(async () => { await db.$disconnect(); });
+test("并发初始化仅产生一个管理员且不得重置密码", async () => {
+  const results = await Promise.allSettled([initializeAdmin("initial-a", "Initial-Password-123"), initializeAdmin("initial-b", "Initial-Password-456")]);
+  expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+  const admins = await db.user.findMany({ where: { role: "ADMIN" } });
+  expect(admins).toHaveLength(1);
+  expect(admins[0].mustChangePassword).toBe(true);
+  expect(admins[0].passwordHash).not.toContain("Initial");
+  await expect(initializeAdmin("another", "Another-Password-123")).rejects.toThrow("管理员已存在");
+  expect(await db.auditEvent.count({ where: { action: "INITIAL_ADMIN_CREATED" } })).toBe(1);
+});
+test("密码变更撤销所有旧会话并保留审计；错误密码不改变数据", async () => {
+  const user = await db.user.create({ data: { login: "password-case", name: "密码测试", role: "STUDENT", passwordHash: await hash("Initial-Password-123", 12) } });
+  const sessions = await Promise.all([1, 2].map(() => db.authSession.create({ data: { userId: user.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } })));
+  expect(await getCurrentSession(sessions[0].id)).not.toBeNull();
+  expect(await changePassword(sessions[0].id, "Wrong", "New-Password-456")).toBe(false);
+  expect(await changePassword(sessions[0].id, "Initial-Password-123", "New-Password-456")).toBe(true);
+  for (const session of sessions) expect(await getCurrentSession(session.id)).toBeNull();
+  const updated = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  expect(updated.mustChangePassword).toBe(false);
+  expect(await compare("New-Password-456", updated.passwordHash)).toBe(true);
+  expect(await compare("Initial-Password-123", updated.passwordHash)).toBe(false);
+  expect(await db.auditEvent.count({ where: { action: "PASSWORD_CHANGED", actorId: user.id } })).toBe(1);
+});
+test("会话撤销、到期、停用、角色和认证修订读取当前状态", async () => {
+  const user = await db.user.create({ data: { login: "session-case", name: "会话测试", role: "PUBLISHER", passwordHash: "not-used" } });
+  const session = await db.authSession.create({ data: { userId: user.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } });
+  await db.user.update({ where: { id: user.id }, data: { role: "STUDENT" } });
+  expect((await getCurrentSession(session.id))?.user.role).toBe("STUDENT");
+  await db.user.update({ where: { id: user.id }, data: { disabled: true } });
+  expect(await getCurrentSession(session.id)).toBeNull();
+  await db.user.update({ where: { id: user.id }, data: { disabled: false, authVersion: 1 } });
+  expect(await getCurrentSession(session.id)).toBeNull();
+  await db.authSession.update({ where: { id: session.id }, data: { version: 1 } });
+  expect(await getCurrentSession(session.id)).not.toBeNull();
+  await revokeSession(session.id);
+  expect(await getCurrentSession(session.id)).toBeNull();
+  const expired = await db.authSession.create({ data: { userId: user.id, version: 1, expiresAt: new Date(0) } });
+  expect(await getCurrentSession(expired.id)).toBeNull();
+});
+test("数据库限流在并发请求下精确限制，过期后重新计数", async () => {
+  const results = await Promise.all(Array.from({ length: 20 }, () => consumeLimit("test", "same", 5)));
+  expect(results.filter(Boolean)).toHaveLength(5);
+  await db.loginAttempt.updateMany({ data: { expiresAt: new Date(0) } });
+  expect(await consumeLimit("test", "same", 5)).toBe(true);
+});

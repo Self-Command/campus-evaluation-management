@@ -1,0 +1,26 @@
+node_modules/
+.next/
+.next-production/
+.env*
+!.env.example
+.local/
+playwright-report/
+test-results/
+coverage/
+*.tsbuildinfo
+测试账号（仅本地）.md
+
+# Local tooling, generated clients, historical scratch work and UI backups
+/.claude/
+/.trae-html-share-packages/
+/work/
+/src/generated/
+/next-env.d.ts
+
+# Credentials and local database exports
+*.pem
+*.key
+*.dump
+*.backup
+*.sqlite
+*.sqlite3
