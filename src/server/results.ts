@@ -14,13 +14,13 @@ export type ScoringOverride = { activity?: { id: string; nodeId: string; points:
 export async function collectStudentResults(tx: Prisma.TransactionClient, term: Term, students: ResultStudent[], override: ScoringOverride = {}) {
   const ids = students.map(s => s.id);
   const [facts, grades, deductions, claims] = await Promise.all([
-    tx.participation.findMany({ where: { studentId: { in: ids }, activity: { termId: term.id, confirmed: true }, sources: { some: { status: "APPROVED" } } }, include: { activity: true, sources: { where: { status: "APPROVED" }, select: { id: true, reviewReason: true, evidence: { select: { evidenceId: true } } } } }, orderBy: { id: "asc" } }),
+    tx.participation.findMany({ where: { studentId: { in: ids }, removedAt: null, activity: { termId: term.id, confirmed: true }, sources: { some: { status: "APPROVED" } } }, include: { activity: true, sources: { where: { status: "APPROVED" }, select: { id: true, reviewReason: true, evidence: { select: { evidenceId: true } } } } }, orderBy: { id: "asc" } }),
     tx.gradeInput.findMany({ where: { termId: term.id, studentId: { in: ids } }, orderBy: { id: "asc" } }),
     tx.deductionInput.findMany({ where: { termId: term.id, studentId: { in: ids }, revoked: false }, orderBy: { id: "asc" } }),
-    tx.personalClaim.findMany({ where: { studentId: { in: ids }, status: "APPROVED", project: { termId: term.id } }, include: { project: true, evidence: { select: { evidenceId: true } } }, orderBy: { id: "asc" } }),
+    tx.personalClaim.findMany({ where: { studentId: { in: ids }, status: "APPROVED", termId: term.id }, include: { project: true, evidence: { select: { evidenceId: true } } }, orderBy: { id: "asc" } }),
   ]);
   for (const fact of facts) if (override.activity?.id === fact.activityId) fact.activity = { ...fact.activity, ...override.activity, points: new Prisma.Decimal(override.activity.points) };
-  for (const claim of claims) if (override.project?.id === claim.projectId) claim.project = { ...claim.project, ...override.project, points: new Prisma.Decimal(override.project.points) };
+  for (const claim of claims) if (override.project?.id === claim.projectId && claim.project) claim.project = { ...claim.project, ...override.project, points: new Prisma.Decimal(override.project.points) };
   const { nodes, scheme } = validateScheme(term.scheme);
   return students.map(student => {
     const participations = facts.filter(f => f.studentId === student.id);
@@ -36,15 +36,25 @@ export async function collectStudentResults(tx: Prisma.TransactionClient, term: 
       totals.set(fact.activity.nodeId, (totals.get(fact.activity.nodeId) ?? Rational.from("0")).add(Rational.from(points.toFixed())));
     }
     for (const claim of personal) {
-      if (nodes.get(claim.project.nodeId)?.kind !== "ACTIVITY") throw new AccountError("个人申报的评分归属无效，请联系管理员", 409);
-      totals.set(claim.project.nodeId, (totals.get(claim.project.nodeId) ?? Rational.from("0")).add(Rational.from(claim.project.points.toFixed())));
+      // New claims carry the counselor-entered score; legacy claims keep the
+      // historical project node and fixed points as their explanation basis.
+      const nodeId = claim.scoreNodeId ?? claim.project?.nodeId;
+      const points = claim.score ?? claim.project?.points;
+      if (!nodeId || points === null || points === undefined) throw new AccountError("个人申报的评分归属无效，请联系管理员", 409);
+      if (nodes.get(nodeId)?.kind !== "ACTIVITY") throw new AccountError("个人申报的评分归属无效，请联系管理员", 409);
+      totals.set(nodeId, (totals.get(nodeId) ?? Rational.from("0")).add(Rational.from(points.toFixed())));
     }
     const values = Object.fromEntries([...totals].map(([id, value]) => [id, value.fixed(12)]));
     for (const grade of studentGrades) {
       if (nodes.get(grade.nodeId)?.kind !== "GRADE") throw new AccountError("成绩记录的评分归属无效，请联系管理员", 409);
       values[grade.nodeId] = grade.value.toFixed();
     }
-    const result = calculate(term.scheme, { values, deductions: Object.fromEntries(studentDeductions.map(d => [d.projectId, d.amount.toFixed()])) });
+    // A deduction project can carry several independent events. They accumulate per
+    // project here, so the scheme keeps one coefficient per project and no event
+    // overwrites a different event of the same project.
+    const deductionTotals = new Map<string, Rational>();
+    for (const item of studentDeductions) deductionTotals.set(item.projectId, (deductionTotals.get(item.projectId) ?? Rational.from("0")).add(Rational.from(item.amount.toFixed())));
+    const result = calculate(term.scheme, { values, deductions: Object.fromEntries([...deductionTotals].map(([id, value]) => [id, value.fixed(12)])) });
     if (missingActivityScores.length) { result.complete = false; result.total = null; result.missing.push(...missingActivityScores); }
     return {
       term: { id: term.id, name: term.name, phase: term.phase, disposition: term.disposition, revision: term.revision, inputRevision: term.inputRevision },
@@ -56,7 +66,11 @@ export async function collectStudentResults(tx: Prisma.TransactionClient, term: 
         return { id: item.id, projectId: item.projectId, name: project.name, nodeName: nodes.get(project.nodeId)!.name, coefficient: project.coefficient, amount: item.amount.toFixed(), reason: item.reason };
       }),
       participations: participations.map(fact => ({ id: fact.id, activityId: fact.activity.id, name: fact.activity.name, nodeId: fact.activity.nodeId, points: (fact.activity.scoreMode === "INDIVIDUAL" ? fact.score : fact.activity.points)?.toFixed() ?? null, approvedSourceCount: fact.sources.length, sources: fact.sources })),
-      claims: personal.map(c => ({ id: c.id, projectId: c.projectId, name: c.project.name, factKey: c.factKey, occurredOn: c.occurredOn, nodeId: c.project.nodeId, points: c.project.points.toFixed(), note: c.note, reviewReason: c.reviewReason, evidenceIds: c.evidence.map(e => e.evidenceId) })),
+      claims: personal.map(c => {
+        const nodeId = c.scoreNodeId ?? c.project?.nodeId ?? "";
+        const points = c.score ?? c.project?.points;
+        return { id: c.id, projectId: c.projectId, name: c.title, factKey: c.factKey, occurredOn: c.occurredOn, nodeId, points: points ? points.toFixed() : "0", note: c.note, reviewReason: c.reviewReason, evidenceIds: c.evidence.map(e => e.evidenceId) };
+      }),
     };
   });
 }

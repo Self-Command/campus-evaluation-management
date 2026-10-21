@@ -1,97 +1,764 @@
 import { z } from "zod";
+import type { Prisma } from "@/generated/prisma/client";
 import { AccountError } from "@/server/accounts";
 import { termTransaction } from "@/server/terms";
-import { appendHistory, historyEntry, jsonValue, ownEvidence, reviewStatusSchema } from "@/server/claims";
-import { assertActivityOwner, eligible } from "@/server/activity-policy";
-import { registerFact } from "@/server/activity-participants";
-import { activityView } from "@/server/activities";
-export async function submitParticipation(sessionId: string, termId: string, input: unknown) {
-  const data = z.object({ activityId: z.string(), studentId: z.string().optional(), studentLogin: z.string().max(64).optional(), note: z.string().trim().min(1).max(2000), evidenceIds: z.array(z.string()).min(1).max(5) }).parse(input);
-  return termTransaction(sessionId, termId, ["ADMIN", "PUBLISHER", "STUDENT"], ["ACTIVE"], async (tx, term, actorId) => {
-    const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
-    const activity = await tx.activity.findUnique({ where: { id: data.activityId } });
-    if (!activity || activity.termId !== term.id) throw new AccountError("活动不存在", 404);
-    if (!activity.confirmed) throw new AccountError("活动分值尚未确认", 409);
-    if (actor.role !== "STUDENT") assertActivityOwner(activity, actor);
-    if (actor.role === "STUDENT" && ((data.studentId && data.studentId !== actorId) || (data.studentLogin && data.studentLogin !== actor.login))) throw new AccountError("只能提交本人参与", 403);
-    if (actor.role !== "STUDENT" && !data.studentId && !data.studentLogin) throw new AccountError("请输入学生学号");
-    const student = await tx.user.findUnique({ where: actor.role === "STUDENT" ? { id: actorId } : data.studentId ? { id: data.studentId } : { login: data.studentLogin! }, include: { studentProfile: true } });
-    if (!student || student.role !== "STUDENT" || student.disabled || !student.studentProfile) throw new AccountError("学生账号或档案无效");
-    if (!eligible(activity, student) || (actor.role === "STUDENT" && !activity.publishedAt)) throw new AccountError("不符合当前已发布活动的学院、班级和学生范围", 403);
-    const ids = [...new Set(data.evidenceIds)];
-    const evidence = await tx.evidence.findMany({ where: { id: { in: ids }, ownerId: actorId } });
-    if (evidence.length !== ids.length) throw new AccountError("证明不存在或不属于当前提交者", 403);
-    const participation = actor.role === "STUDENT" ? await tx.participation.upsert({ where: { activityId_studentId: { activityId: activity.id, studentId: student.id } }, create: { activityId: activity.id, studentId: student.id }, update: {} }) : await registerFact(tx, activity.id, student, actorId);
-    const pending = await tx.recognitionSource.findFirst({ where: { participationId: participation.id, submitterId: actorId, status: "PENDING" } });
-    if (pending) throw new AccountError("已有待审核提交，请先等待处理", 409);
-    const source = await tx.recognitionSource.create({ data: { participationId: participation.id, submitterId: actorId, origin: actor.role === "STUDENT" ? "SELF" : "OWNER", note: data.note, history: jsonValue([historyEntry(actorId, "SUBMITTED", { note: data.note, evidenceIds: ids })]), evidence: { create: ids.map(evidenceId => ({ evidenceId })) } } });
-    await tx.auditEvent.create({ data: { actorId, action: "PARTICIPATION_SUBMITTED", targetId: source.id, details: { termId, participationId: participation.id, evidenceCount: ids.length } } });
-    return source;
-  });
-}
-export async function reviewParticipation(sessionId: string, termId: string, input: unknown) {
-  const data = z.object({ id: z.string(), revision: z.number().int().nonnegative(), status: z.enum(["APPROVED", "REJECTED", "NEEDS_CHANGES"]), reason: z.string().trim().min(2).max(1000) }).parse(input);
-  return termTransaction(sessionId, termId, ["ADMIN"], ["ACTIVE"], async (tx, term, actorId) => {
-    const source = await tx.recognitionSource.findUnique({ where: { id: data.id }, include: { participation: { include: { activity: true } } } });
-    if (!source || source.participation.activity.termId !== term.id) throw new AccountError("认定记录不存在", 404);
-    if (source.revision !== data.revision) throw new AccountError("认定记录已变化，请刷新", 409);
-    if (source.status === data.status) return source;
-    if (source.status !== "PENDING") throw new AccountError("仅待审核记录可审核；已通过记录请使用理由撤销", 409);
-    if (!source.participation.activity.confirmed) throw new AccountError("活动尚未确认", 409);
-    if (data.status === "APPROVED") {
-      if (source.participation.activity.scoreMode === "INDIVIDUAL" && (!source.participation.registeredAt || source.participation.score === null)) throw new AccountError("请先由发布者登记参与并录入个人活动分数", 409);
-      if (await tx.personalClaim.count({ where: { studentId: source.participation.studentId, activityId: source.participation.activityId, status: "APPROVED", project: { termId } } })) throw new AccountError("该学生已有同活动的个人申报通过，请先核对并撤销重复来源", 409);
-    }
-    const saved = await tx.recognitionSource.update({ where: { id: source.id }, data: { status: data.status, reviewReason: data.reason, reviewerId: actorId, reviewedAt: new Date(), revision: { increment: 1 }, history: appendHistory(source.history, historyEntry(actorId, "REVIEWED", { before: source.status, after: data.status, reason: data.reason })) } });
-    await tx.participation.update({ where: { id: source.participationId }, data: { revision: { increment: 1 } } });
-    await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "PARTICIPATION_REVIEWED", targetId: source.id, details: { reason: data.reason, before: source.status, after: data.status, termId } } });
-    return saved;
-  });
-}
-export async function listRecognitions(sessionId: string, termId: string, page = 1) { return pageRecognitions(sessionId, termId, page); }
-export async function pageRecognitions(sessionId: string, termId: string, page = 1, status?: string) {
-  const safePage = z.number().int().min(1).max(100000).parse(page);
-  const parsed = reviewStatusSchema.optional().parse(status || undefined);
-  return termTransaction(sessionId, termId, ["ADMIN", "PUBLISHER", "STUDENT"], ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"], async (tx, _term, actorId) => {
-    const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
-    const where = { ...(parsed ? { status: parsed } : {}), participation: { activity: { termId, ...(actor.role === "PUBLISHER" ? { ownerId: actorId } : {}) }, ...(actor.role === "STUDENT" ? { studentId: actorId } : {}) } };
-    const [items, total] = await Promise.all([tx.recognitionSource.findMany({ where, include: { participation: { include: { activity: true } }, evidence: { select: { evidence: { select: { id: true, name: true } } } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, skip: (safePage - 1) * 20 }), tx.recognitionSource.count({ where })]);
-    const students = await tx.user.findMany({ where: { id: { in: [...new Set(items.map(s => s.participation.studentId))] } }, select: { id: true, name: true, login: true } });
-    return { items: items.map(s => ({ ...s, participation: { ...s.participation, activity: activityView(s.participation.activity, actor.role), score: s.participation.score?.toFixed() ?? null }, student: students.find(u => u.id === s.participation.studentId) || null })), total, page: safePage };
-  }, "read");
+import { appendHistory, historyEntry } from "@/server/claims";
+import { canManageActivity } from "@/server/activity-policy";
+import { scopedStudentWhere } from "@/server/access-scope";
+import { decimalSchema } from "@/lib/scoring/types";
+import { Rational } from "@/lib/scoring/rational";
+
+export const recognitionStatusSchema = z.enum([
+	"PENDING_COUNSELOR",
+	"PENDING_COLLEGE",
+	"RETURNED",
+	"APPROVED",
+	"SUPERSEDED",
+	"WITHDRAWN",
+	"REVOKED",
+	"REJECTED",
+]);
+export const recognitionFilterSchema = z.enum([
+	"PENDING",
+	...recognitionStatusSchema.options,
+]);
+export const recognitionPendingStatuses = [
+	"PENDING_COUNSELOR",
+	"PENDING_COLLEGE",
+] as const;
+export const recognitionAttentionStatuses = ["RETURNED", "REJECTED"] as const;
+
+const reviewSchema = z
+	.object({
+		id: z.string().min(1).max(100),
+		revision: z.number().int().nonnegative(),
+		action: z.enum([
+			"counselorApprove",
+			"counselorReturn",
+			"collegeApprove",
+			"collegeReturn",
+			"revoke",
+		]),
+		reason: z.string().trim().min(2).max(1000).optional(),
+	})
+	.strict();
+
+const recognitionStudentSelect = {
+	id: true,
+	name: true,
+	login: true,
+	role: true,
+	disabled: true,
+	studentProfile: {
+		select: {
+			college: true,
+			major: true,
+			className: true,
+			schoolClass: {
+				select: {
+					id: true,
+					name: true,
+					enabled: true,
+					counselorId: true,
+					major: {
+						select: {
+							id: true,
+							name: true,
+							enabled: true,
+							collegeId: true,
+							college: { select: { id: true, name: true, enabled: true } },
+						},
+					},
+				},
+			},
+		},
+	},
+} as const;
+
+const recognitionActivitySelect = {
+	id: true,
+	name: true,
+	ownerId: true,
+	collegeId: true,
+	termId: true,
+	scoreMode: true,
+	points: true,
+	college: { select: { id: true, name: true } },
+} as const;
+
+const sourceInclude = {
+	participation: {
+		include: {
+			activity: { select: recognitionActivitySelect },
+			student: { select: recognitionStudentSelect },
+		},
+	},
+	activityEvidence: {
+		include: {
+			evidence: {
+				select: { id: true, name: true, mime: true, size: true },
+			},
+		},
+	},
+	evidence: {
+		select: {
+			evidence: { select: { id: true, name: true, mime: true, size: true } },
+		},
+	},
+} as const;
+
+type ReviewSource = Prisma.RecognitionSourceGetPayload<{
+	include: typeof sourceInclude;
+}>;
+
+function studentClass(source: ReviewSource) {
+	return source.participation.student.studentProfile?.schoolClass ?? null;
 }
 
-export async function changeParticipation(sessionId: string, termId: string, input: unknown) {
-  const data = z.object({ id: z.string(), revision: z.number().int().nonnegative(), action: z.enum(["withdraw", "resubmit", "revoke", "close"]), reason: z.string().trim().min(2).max(1000).optional(), note: z.string().trim().min(1).max(2000).optional(), evidenceIds: z.array(z.string()).min(1).max(5).optional() }).parse(input);
-  return termTransaction(sessionId, termId, ["ADMIN", "PUBLISHER", "STUDENT"], ["ACTIVE"], async (tx, _term, actorId) => {
-    const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
-    const source = await tx.recognitionSource.findUnique({ where: { id: data.id }, include: { participation: { include: { activity: true } } } });
-    if (!source || source.participation.activity.termId !== termId) throw new AccountError("认定记录不存在", 404);
-    if (source.revision !== data.revision) throw new AccountError("认定记录已变化，请刷新", 409);
-    if (["revoke", "close"].includes(data.action) ? actor.role !== "ADMIN" : source.submitterId !== actorId) throw new AccountError("没有操作该记录的权限", 403);
-    if (["withdraw", "resubmit"].includes(data.action)) {
-      if (actor.role === "STUDENT") { if (source.participation.studentId !== actorId) throw new AccountError("只能维护本人参与材料", 403); }
-      else assertActivityOwner(source.participation.activity, actor);
-    }
-    let status: "WITHDRAWN" | "PENDING" | "REVOKED" | "REJECTED";
-    let ids: string[] = [];
-    if (data.action === "close") { if (!["PENDING", "NEEDS_CHANGES"].includes(source.status) || !data.reason) throw new AccountError("仅待审或待补充记录可填写理由终结", 409); status = "REJECTED"; }
-    else if (data.action === "withdraw") { if (!["PENDING", "NEEDS_CHANGES"].includes(source.status)) throw new AccountError("仅待审核或待补充记录可撤回", 409); status = "WITHDRAWN"; }
-    else if (data.action === "resubmit") {
-      const student = await tx.user.findUnique({ where: { id: source.participation.studentId }, include: { studentProfile: true } });
-      if (!student || !eligible(source.participation.activity, student) || (actor.role === "STUDENT" && !source.participation.activity.publishedAt)) throw new AccountError("学生不符合当前活动范围，无法重新提交；可撤回或联系管理员终结", 403);
-      if (!["REJECTED", "NEEDS_CHANGES", "WITHDRAWN"].includes(source.status)) throw new AccountError("当前记录不允许重新提交", 409);
-      if (!data.note || !data.evidenceIds) throw new AccountError("请填写说明并选择证明");
-      const otherPending = await tx.recognitionSource.count({ where: { participationId: source.participationId, submitterId: actorId, status: "PENDING", id: { not: source.id } } });
-      if (otherPending) throw new AccountError("本人已有待审核提交", 409);
-      ids = await ownEvidence(tx, actorId, data.evidenceIds); status = "PENDING";
-    } else { if (source.status !== "APPROVED" || !data.reason) throw new AccountError("仅已通过记录可填写理由撤销", 409); status = "REVOKED"; }
-    const saved = await tx.recognitionSource.update({ where: { id: source.id }, data: { status, revision: { increment: 1 }, ...(data.action === "resubmit" ? { note: data.note, reviewReason: null, reviewerId: null, reviewedAt: null } : {}), ...(["revoke", "close"].includes(data.action) ? { reviewReason: data.reason, reviewerId: actorId, reviewedAt: new Date() } : {}), history: appendHistory(source.history, historyEntry(actorId, data.action.toUpperCase(), { before: source.status, after: status, note: data.note, evidenceIds: ids, reason: data.reason })) } });
-    if (ids.length) await tx.evidenceReference.createMany({ data: ids.map(evidenceId => ({ sourceId: source.id, evidenceId })), skipDuplicates: true });
-    if (source.status === "APPROVED") await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-    await tx.participation.update({ where: { id: source.participationId }, data: { revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "PARTICIPATION_CHANGED", targetId: source.id, details: { termId, before: source.status, after: status, reason: data.reason ?? null } } });
-    return saved;
-  });
+function assertReviewScope(
+	actor: { id: string; role: string; collegeId: string | null },
+	source: ReviewSource,
+) {
+	const schoolClass = studentClass(source);
+	if (
+		!schoolClass ||
+		!schoolClass.enabled ||
+		!schoolClass.major.enabled ||
+		!schoolClass.major.college.enabled
+	)
+		throw new AccountError("认定记录不存在或无权查看", 404);
+	if (actor.role === "COUNSELOR" && schoolClass.counselorId !== actor.id)
+		throw new AccountError("认定记录不存在或无权查看", 404);
+	if (
+		actor.role === "COLLEGE" &&
+		schoolClass.major.collegeId !== actor.collegeId
+	)
+		throw new AccountError("认定记录不存在或无权查看", 404);
+}
+
+async function assertMaterial(
+	tx: Prisma.TransactionClient,
+	source: ReviewSource,
+) {
+	if (source.participation.removedAt)
+		throw new AccountError("该参与事实已移除，不能继续审核", 409);
+	if (source.participation.activity.scoreMode === "INDIVIDUAL") {
+		if (
+			source.participation.score === null ||
+			source.participation.score === undefined
+		)
+			throw new AccountError(
+				"主办学院尚未录入该学生的活动原始分，不能通过初审",
+				409,
+			);
+	}
+	if (source.activityEvidenceId) {
+		const active = await tx.activityEvidence.findFirst({
+			where: {
+				activityId: source.participation.activityId,
+				active: true,
+			},
+			orderBy: [{ version: "desc" }, { id: "desc" }],
+		});
+		if (!active || active.id !== source.activityEvidenceId)
+			throw new AccountError(
+				"活动证明已更新或不再有效，请刷新后按当前版本重新核验",
+				409,
+			);
+		return;
+	}
+	// Historical sources may carry their own material rather than a shared
+	// activity version; they remain reviewable without inventing new evidence.
+	if (!source.evidence.length)
+		throw new AccountError("该参与记录缺少活动证明，不能通过审核", 409);
+}
+
+export async function reviewParticipation(
+	sessionId: string,
+	termId: string,
+	input: unknown,
+) {
+	const data = reviewSchema.parse(input);
+	const targetStatus = {
+		counselorApprove: "PENDING_COLLEGE",
+		counselorReturn: "RETURNED",
+		collegeApprove: "APPROVED",
+		collegeReturn: "RETURNED",
+		revoke: "REVOKED",
+	}[data.action] as
+		| "PENDING_COLLEGE"
+		| "RETURNED"
+		| "APPROVED"
+		| "REVOKED";
+	return termTransaction(
+		sessionId,
+		termId,
+		["ADMIN", "COUNSELOR", "COLLEGE"],
+		["ACTIVE"],
+		async (tx, term, actorId) => {
+			const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
+			const source = await tx.recognitionSource.findUnique({
+				where: { id: data.id },
+				include: sourceInclude,
+			});
+			if (!source || source.participation.activity.termId !== term.id)
+				throw new AccountError("认定记录不存在", 404);
+			const alreadyCurrent =
+				(data.action === "counselorApprove" &&
+					source.status === "PENDING_COLLEGE" &&
+					source.counselorId === actorId) ||
+				(data.action === "counselorReturn" &&
+					source.status === "RETURNED" &&
+					source.returnedByRole === "COUNSELOR" &&
+					source.reviewerId === actorId) ||
+				(data.action === "collegeApprove" &&
+					source.status === "APPROVED" &&
+					source.collegeReviewerId === actorId) ||
+				(data.action === "collegeReturn" &&
+					source.status === "RETURNED" &&
+					source.returnedByRole === "COLLEGE" &&
+					source.reviewerId === actorId) ||
+				(data.action === "revoke" &&
+					source.status === "REVOKED" &&
+					source.reviewerId === actorId);
+			if (alreadyCurrent) return source;
+			if (source.revision !== data.revision)
+				throw new AccountError("认定记录已变化，请刷新", 409);
+			const fields: Prisma.RecognitionSourceUpdateInput = {};
+			let next: typeof targetStatus = targetStatus;
+			if (data.action === "counselorApprove") {
+				if (actor.role !== "COUNSELOR")
+					throw new AccountError("没有辅导员初审权限", 403);
+				assertReviewScope(actor, source);
+				if (source.status !== "PENDING_COUNSELOR")
+					throw new AccountError("仅待辅导员初核的记录可通过初审", 409);
+				await assertMaterial(tx, source);
+				fields.counselorId = actorId;
+				fields.counseledAt = new Date();
+				fields.reviewerId = actorId;
+				fields.reviewedAt = new Date();
+				fields.reviewReason = data.reason ?? null;
+				fields.returnedByRole = null;
+				fields.collegeReviewerId = null;
+				fields.collegeReviewedAt = null;
+				next = "PENDING_COLLEGE";
+			} else if (data.action === "counselorReturn") {
+				if (actor.role !== "COUNSELOR")
+					throw new AccountError("没有辅导员初审权限", 403);
+				assertReviewScope(actor, source);
+				if (source.status !== "PENDING_COUNSELOR")
+					throw new AccountError("仅待辅导员初核的记录可退回", 409);
+				if (!data.reason) throw new AccountError("请填写退回理由");
+				fields.reviewerId = actorId;
+				fields.reviewedAt = new Date();
+				fields.reviewReason = data.reason;
+				fields.returnedByRole = "COUNSELOR";
+				next = "RETURNED";
+			} else if (data.action === "collegeApprove") {
+				if (actor.role !== "COLLEGE")
+					throw new AccountError("没有学院终审权限", 403);
+				assertReviewScope(actor, source);
+				if (source.status !== "PENDING_COLLEGE")
+					throw new AccountError("仅待学院终审的记录可通过", 409);
+				await assertMaterial(tx, source);
+				if (
+					await tx.recognitionSource.count({
+						where: {
+							participationId: source.participationId,
+							status: "APPROVED",
+							id: { not: source.id },
+						},
+					})
+				)
+					throw new AccountError(
+						"同一参与事实已有有效认定，请先核对并撤销重复来源",
+						409,
+					);
+				if (
+					await tx.personalClaim.count({
+						where: {
+							studentId: source.participation.studentId,
+							activityId: source.participation.activityId,
+							status: "APPROVED",
+							termId,
+						},
+					})
+				)
+					throw new AccountError(
+						"该学生同活动已有个人申报通过，请先核对并撤销重复来源",
+						409,
+					);
+				fields.collegeReviewerId = actorId;
+				fields.collegeReviewedAt = new Date();
+				fields.reviewerId = actorId;
+				fields.reviewedAt = new Date();
+				fields.reviewReason = data.reason ?? null;
+				fields.returnedByRole = null;
+				next = "APPROVED";
+			} else if (data.action === "collegeReturn") {
+				if (actor.role !== "COLLEGE")
+					throw new AccountError("没有学院终审权限", 403);
+				assertReviewScope(actor, source);
+				if (source.status !== "PENDING_COLLEGE")
+					throw new AccountError("仅待学院终审的记录可退回", 409);
+				if (!data.reason) throw new AccountError("请填写退回理由");
+				fields.reviewerId = actorId;
+				fields.reviewedAt = new Date();
+				fields.reviewReason = data.reason;
+				fields.returnedByRole = "COLLEGE";
+				next = "RETURNED";
+			} else {
+				if (actor.role !== "ADMIN")
+					throw new AccountError("没有受控撤销权限", 403);
+				if (source.status !== "APPROVED")
+					throw new AccountError("仅已通过记录可撤销", 409);
+				if (!data.reason) throw new AccountError("请填写撤销理由");
+				fields.reviewerId = actorId;
+				fields.reviewedAt = new Date();
+				fields.reviewReason = data.reason;
+				next = "REVOKED";
+			}
+			const saved = await tx.recognitionSource.update({
+				where: { id: source.id },
+				data: {
+					...fields,
+					status: next,
+					revision: { increment: 1 },
+					history: appendHistory(
+						source.history,
+						historyEntry(actorId, data.action.toUpperCase(), {
+							before: source.status,
+							after: next,
+							reason: data.reason ?? null,
+							role: actor.role,
+						}),
+					),
+				},
+			});
+			await tx.participation.update({
+				where: { id: source.participationId },
+				data: { revision: { increment: 1 } },
+			});
+			if ((source.status === "APPROVED") !== (next === "APPROVED"))
+				await tx.term.update({
+					where: { id: termId },
+					data: { inputRevision: { increment: 1 } },
+				});
+			await tx.auditEvent.create({
+				data: {
+					actorId,
+					action: "PARTICIPATION_REVIEWED",
+					targetId: source.id,
+					details: {
+						termId,
+						action: data.action,
+						before: source.status,
+						after: next,
+						reason: data.reason ?? null,
+						activityId: source.participation.activityId,
+						studentId: source.participation.studentId,
+					},
+				},
+			});
+			return saved;
+		},
+	);
+}
+
+export async function listRecognitions(
+	sessionId: string,
+	termId: string,
+	page = 1,
+) {
+	return pageRecognitions(sessionId, termId, page);
+}
+
+export async function pageRecognitions(
+	sessionId: string,
+	termId: string,
+	page = 1,
+	status?: string,
+	query = "",
+) {
+	const safePage = z.number().int().min(1).max(100000).parse(page);
+	const parsed = recognitionFilterSchema.optional().parse(status || undefined);
+	const search = query.slice(0, 80);
+	return termTransaction(
+		sessionId,
+		termId,
+		["ADMIN", "COLLEGE", "COUNSELOR", "PUBLISHER", "STUDENT"],
+		["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"],
+		async (tx, _term, actorId) => {
+			const actor = await tx.user.findUniqueOrThrow({
+				where: { id: actorId },
+			});
+			const membership = (where: Prisma.ParticipationWhereInput) => ({
+				participation: where,
+			});
+			const scope: Prisma.RecognitionSourceWhereInput =
+				actor.role === "ADMIN"
+					? { participation: { activity: { termId } } }
+					: actor.role === "STUDENT"
+						? membership({ studentId: actorId, activity: { termId } })
+						: actor.role === "COUNSELOR"
+							? membership({
+									student: scopedStudentWhere(actor),
+									activity: { termId },
+								})
+							: actor.role === "COLLEGE"
+								? {
+										OR: [
+											membership({
+												student: scopedStudentWhere(actor),
+												activity: { termId },
+											}),
+											membership({
+												activity: {
+													termId,
+													collegeId: actor.collegeId ?? "__none__",
+												},
+											}),
+										],
+									}
+								: membership({
+										activity: {
+											termId,
+											ownerId: actorId,
+											collegeId: { not: null },
+										},
+									});
+			const where: Prisma.RecognitionSourceWhereInput = {
+				AND: [
+					scope,
+					...(search
+						? [
+								{
+									OR: [
+										{
+											participation: {
+												student: {
+													OR: [
+														{
+															name: {
+																contains: search,
+																mode: "insensitive" as const,
+															},
+														},
+														{
+															login: {
+																contains: search,
+																mode: "insensitive" as const,
+															},
+														},
+													],
+												},
+											},
+										},
+										{
+											participation: {
+												activity: {
+													name: {
+														contains: search,
+														mode: "insensitive" as const,
+													},
+												},
+											},
+										},
+									],
+								},
+							]
+						: []),
+				],
+				...(parsed
+					? {
+							status:
+								parsed === "PENDING"
+									? { in: [...recognitionPendingStatuses] }
+									: parsed,
+						}
+					: {}),
+			};
+			const [items, total] = await Promise.all([
+				tx.recognitionSource.findMany({
+					where,
+					include: sourceInclude,
+					orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+					take: 20,
+					skip: (safePage - 1) * 20,
+				}),
+				tx.recognitionSource.count({ where }),
+			]);
+			const staffIds = [
+				...new Set(
+					items.flatMap((source) => [
+						source.submitterId,
+						source.reviewerId,
+						source.counselorId,
+						source.collegeReviewerId,
+					]),
+				),
+			].filter((id): id is string => !!id);
+			const staff = staffIds.length
+				? await tx.user.findMany({
+						where: { id: { in: staffIds } },
+						select: { id: true, name: true, role: true },
+					})
+				: [];
+			const staffName = new Map(staff.map((user) => [user.id, user.name]));
+			return {
+				items: items.map((source) => {
+					const student = source.participation.student;
+					const schoolClass = student.studentProfile?.schoolClass;
+					const activity = source.participation.activity;
+					return {
+						...source,
+						student: {
+							id: student.id,
+							name: student.name,
+							login: student.login,
+							college: student.studentProfile?.college ?? null,
+							major: student.studentProfile?.major ?? null,
+							className: student.studentProfile?.className ?? null,
+							counselorId: schoolClass?.counselorId ?? null,
+							collegeId: schoolClass?.major.collegeId ?? null,
+						},
+						participation: {
+							...source.participation,
+							score: source.participation.score?.toFixed() ?? null,
+							student,
+							activity,
+						},
+						reviewerName: source.reviewerId
+							? (staffName.get(source.reviewerId) ?? null)
+							: null,
+						submitterName: staffName.get(source.submitterId) ?? null,
+						counselorName: source.counselorId
+							? (staffName.get(source.counselorId) ?? null)
+							: null,
+						collegeReviewerName: source.collegeReviewerId
+							? (staffName.get(source.collegeReviewerId) ?? null)
+							: null,
+						canReview:
+							(actor.role === "COUNSELOR" &&
+								source.status === "PENDING_COUNSELOR" &&
+								schoolClass?.counselorId === actorId) ||
+							(actor.role === "COLLEGE" &&
+								source.status === "PENDING_COLLEGE" &&
+								schoolClass?.major.collegeId === actor.collegeId),
+						canManage: canManageActivity(activity, actor),
+					};
+				}),
+				total,
+				page: safePage,
+			};
+		},
+		"read",
+	);
+}
+
+const changeSchema = z
+	.object({
+		id: z.string().min(1).max(100),
+		revision: z.number().int().nonnegative(),
+		action: z.enum(["resubmit", "remove"]),
+		reason: z.string().trim().min(2).max(1000).optional(),
+		note: z.string().trim().min(2).max(2000).optional(),
+		score: decimalSchema.optional(),
+	})
+	.strict();
+
+export async function changeParticipation(
+	sessionId: string,
+	termId: string,
+	input: unknown,
+) {
+	const data = changeSchema.parse(input);
+	return termTransaction(
+		sessionId,
+		termId,
+		["ADMIN", "COLLEGE", "PUBLISHER"],
+		["ACTIVE"],
+		async (tx, term, actorId) => {
+			const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
+			const source = await tx.recognitionSource.findUnique({
+				where: { id: data.id },
+				include: sourceInclude,
+			});
+			if (!source || source.participation.activity.termId !== term.id)
+				throw new AccountError("认定记录不存在", 404);
+			if (!canManageActivity(source.participation.activity, actor))
+				throw new AccountError("仅活动主办学院可维护参与记录", 403);
+			if (source.revision !== data.revision)
+				throw new AccountError("认定记录已变化，请刷新", 409);
+			if (data.action === "resubmit") {
+				if (source.status !== "RETURNED")
+					throw new AccountError("仅退回修改的记录可重新提交", 409);
+				if (!data.note) throw new AccountError("请填写补充说明");
+				if (
+					source.participation.activity.scoreMode === "INDIVIDUAL" &&
+					data.score === undefined &&
+					source.participation.score === null
+				)
+					throw new AccountError("请填写活动原始分后再提交");
+				if (data.score !== undefined) {
+					const value = Rational.from(data.score);
+					if (
+						value.compare(Rational.from("0")) < 0 ||
+						value.compare(
+							Rational.from(source.participation.activity.points.toFixed()),
+						) > 0
+					)
+						throw new AccountError("活动原始分须在0与活动分值上限之间");
+				}
+				const active = await tx.activityEvidence.findFirst({
+					where: {
+						activityId: source.participation.activityId,
+						active: true,
+					},
+					orderBy: [{ version: "desc" }, { id: "desc" }],
+				});
+				if (!active)
+					throw new AccountError(
+						"请先在活动详情上传当前有效的活动证明，再重新提交",
+						409,
+					);
+				if (
+					data.score !== undefined &&
+					!source.participation.score?.equals(data.score)
+				) {
+					await tx.participation.update({
+						where: { id: source.participationId },
+						data: {
+							score: data.score,
+							revision: { increment: 1 },
+							history: appendHistory(
+								source.participation.history,
+								historyEntry(actorId, "SCORE_CORRECTED", {
+									before: source.participation.score?.toFixed() ?? null,
+									after: data.score,
+									reason: data.reason ?? null,
+								}),
+							),
+						},
+					});
+				}
+				const saved = await tx.recognitionSource.update({
+					where: { id: source.id },
+					data: {
+						status: "PENDING_COUNSELOR",
+						note: data.note,
+						activityEvidenceId: active.id,
+						reviewReason: null,
+						reviewerId: null,
+						reviewedAt: null,
+						returnedByRole: null,
+						counselorId: null,
+						counseledAt: null,
+						collegeReviewerId: null,
+						collegeReviewedAt: null,
+						revision: { increment: 1 },
+						history: appendHistory(
+							source.history,
+							historyEntry(actorId, "RESUBMIT", {
+								before: source.status,
+								after: "PENDING_COUNSELOR",
+								note: data.note,
+								reason: data.reason ?? null,
+							}),
+						),
+					},
+				});
+				await tx.participation.update({
+					where: { id: source.participationId },
+					data: { revision: { increment: 1 } },
+				});
+				await tx.auditEvent.create({
+					data: {
+						actorId,
+						action: "PARTICIPATION_CHANGED",
+						targetId: source.id,
+						details: {
+							termId,
+							action: data.action,
+							before: source.status,
+							after: "PENDING_COUNSELOR",
+							reason: data.reason ?? null,
+						},
+					},
+				});
+				return saved;
+			}
+			if (!data.reason) throw new AccountError("请填写移除理由");
+			const participation = await tx.participation.findUniqueOrThrow({
+				where: { id: source.participationId },
+				include: { sources: true },
+			});
+			if (participation.removedAt)
+				throw new AccountError("该参与事实已移除", 409);
+			const approved = participation.sources.some(
+				(candidate) => candidate.status === "APPROVED",
+			);
+			await tx.participation.update({
+				where: { id: source.participationId },
+				data: {
+					removedAt: new Date(),
+					removedBy: actorId,
+					removalReason: data.reason,
+					revision: { increment: 1 },
+					history: appendHistory(
+						participation.history,
+						historyEntry(actorId, "PARTICIPATION_REMOVED", {
+							reason: data.reason,
+						}),
+					),
+				},
+			});
+			for (const candidate of participation.sources) {
+				const next =
+					candidate.status === "APPROVED"
+						? "SUPERSEDED"
+						: ["PENDING_COUNSELOR", "PENDING_COLLEGE", "RETURNED"].includes(
+									candidate.status,
+								)
+							? "WITHDRAWN"
+							: null;
+				if (!next) continue;
+				await tx.recognitionSource.update({
+					where: { id: candidate.id },
+					data: {
+						status: next,
+						reviewReason: data.reason,
+						revision: { increment: 1 },
+						history: appendHistory(
+							candidate.history,
+							historyEntry(actorId, "PARTICIPATION_REMOVED", {
+								before: candidate.status,
+								after: next,
+								reason: data.reason,
+							}),
+						),
+					},
+				});
+			}
+			if (approved)
+				await tx.term.update({
+					where: { id: termId },
+					data: { inputRevision: { increment: 1 } },
+				});
+			await tx.auditEvent.create({
+				data: {
+					actorId,
+					action: "PARTICIPATION_CHANGED",
+					targetId: source.id,
+					details: {
+						termId,
+						action: "remove",
+						reason: data.reason,
+						approved,
+					},
+				},
+			});
+			return source;
+		},
+	);
 }

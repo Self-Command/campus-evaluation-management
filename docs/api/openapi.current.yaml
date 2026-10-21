@@ -1,12 +1,13 @@
 openapi: 3.1.1
 info:
   title: 高校综合测评管理 — 现有业务接口
-  version: 0.1.0-audit-20261020
+  version: 0.1.1-audit-20261022
   description: |
     静态源码契约；非目标功能清单，未进行本轮HTTP运行验收。
-    覆盖18个应用自有路由文件；NextAuth catch-all由认证库处理，见认证边界说明。
-    不包含尚未实现的发布、异议、排名、快照、设置、模板下载及结果HTTP接口。
-    POST/PATCH业务入口校验Origin等于NEXTAUTH_URL的origin，缺少也拒绝。
+    路由覆盖按各次审计日期的文件清单维护；2026-10-22 增补成绩与扣分两级审核接口。
+    NextAuth catch-all由认证库处理，见认证边界说明。
+    未覆盖发布、异议、排名、快照、设置、模板下载及结果HTTP接口。
+    POST/PATCH业务入口校验Origin与请求URL同源，或精确匹配NEXTAUTH_URL/APP_TRUSTED_ORIGINS；缺少也拒绝。
     首次改密会话除/api/password及认证库入口外不能访问业务接口。
     unknown error/损坏JSON在部分入口返回500，不能假定所有语法错误均为400。
 servers:
@@ -445,7 +446,7 @@ paths:
     post:
       operationId: saveOrRevokeDeduction
       x-roles: [ADMIN]
-      description: ACTIVE；amount严格大于0；每学生每项目仅一个当前输入，不是逐笔累加；不能撤销不存在记录。
+      description: ACTIVE；amount严格大于0；管理员例外更正入口，按 occurrence 定位单条事件；同一项目可有多条独立事件（逐笔累加），不能再撤销不存在或无 occurrence 的记录。
       requestBody:
         required: true
         content:
@@ -467,6 +468,213 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Deduction' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/grades/roster:
+    get:
+      operationId: readGradeRoster
+      x-roles: [ADMIN, COLLEGE, COUNSELOR]
+      description: 服务端按已配置班级/责任辅导员/学院限域的学生成绩进度（已录/应录、待审、退回），20条分页；不支持按请求参数扩大范围。
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { name: q, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: college, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: major, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: className, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: 学生名录及成绩进度计数
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewRoster' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/grades/{studentId}:
+    get:
+      operationId: readGradeDetail
+      x-roles: [ADMIN, COLLEGE, COUNSELOR]
+      description: 逐成绩模块返回有效值、待审修订与最近60条审核历史；跨范围学生一律404/403，不回传越权档案。
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { name: studentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 学生成绩明细与修订记录
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+  /api/grade-changes:
+    get:
+      operationId: readGradeQueue
+      x-roles: [ADMIN, COLLEGE, COUNSELOR]
+      description: 成绩修订队列与计数；学院看本院、辅导员看本人提交。
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, PENDING_COLLEGE, RETURNED, APPROVED, ABANDONED], default: PENDING } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: 成绩修订队列
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: submitGradeChange
+      x-roles: [COUNSELOR]
+      description: ACTIVE；仅本人责任班级学生；同一成绩项只允许一条待审或退回修订；requestId 幂等重放返回原修订；待审期间有效成绩不变。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [termId, studentId, nodeId, value, reason, requestId]
+              properties:
+                termId: { type: string, minLength: 1 }
+                studentId: { type: string, minLength: 1 }
+                nodeId: { type: string, minLength: 1 }
+                value: { $ref: '#/components/schemas/DecimalInput' }
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+                requestId: { type: string, minLength: 8, maxLength: 100 }
+      responses:
+        '200':
+          description: 待学院审核的成绩修订
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GradeChange' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/grade-changes/{id}:
+    patch:
+      operationId: changeGradeChange
+      x-roles: [COUNSELOR, COLLEGE]
+      description: approve/return 由学院执行（退回理由必填）；resubmit/abandon 只能由原提交辅导员执行；批准前核对基线输入id与revision，已变化则409。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [termId, revision, action]
+              properties:
+                termId: { type: string, minLength: 1 }
+                revision: { type: integer, minimum: 0 }
+                action: { type: string, enum: [approve, return, resubmit, abandon] }
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+                value: { $ref: '#/components/schemas/DecimalInput' }
+      responses:
+        '200':
+          description: 更新后的成绩修订
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GradeChange' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/deductions/roster:
+    get:
+      operationId: readDeductionRoster
+      x-roles: [ADMIN, COLLEGE, COUNSELOR]
+      description: 服务端限域的学生扣分事件计数（有效事件、待审、退回）、项目目录与范围选项。
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { name: q, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: college, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: major, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: className, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: 学生名录及扣分事件计数
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewRoster' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/deductions/{studentId}:
+    get:
+      operationId: readDeductionDetail
+      x-roles: [ADMIN, COLLEGE, COUNSELOR]
+      description: 逐条扣分事件（occurrence、扣分额、系数、状态）与最近60条提交/审核记录。
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { name: studentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: 学生扣分事件与修订记录
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+  /api/deduction-changes:
+    get:
+      operationId: readDeductionQueue
+      x-roles: [ADMIN, COLLEGE, COUNSELOR]
+      description: 扣分事件/撤销申请队列与计数，范围同成绩修订。
+      parameters:
+        - { $ref: '#/components/parameters/UnboundedTermQuery' }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, PENDING_COLLEGE, RETURNED, APPROVED, ABANDONED], default: PENDING } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: 扣分修订队列
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      operationId: submitDeductionChange
+      x-roles: [COUNSELOR]
+      description: ACTIVE；CREATE 需正数扣分额，同一项目的多个事件各自成条；REVOKE 需目标事件id与revision且不能重复申请；requestId 幂等。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [termId, studentId, projectId, action, reason, requestId]
+              properties:
+                termId: { type: string, minLength: 1 }
+                studentId: { type: string, minLength: 1 }
+                projectId: { type: string, minLength: 1 }
+                action: { type: string, enum: [CREATE, REVOKE] }
+                amount: { $ref: '#/components/schemas/DecimalInput' }
+                targetInputId: { type: string }
+                targetRevision: { type: integer, minimum: 0 }
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+                requestId: { type: string, minLength: 8, maxLength: 100 }
+      responses:
+        '200':
+          description: 待学院审核的扣分修订
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeductionChange' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/deduction-changes/{id}:
+    patch:
+      operationId: changeDeductionChange
+      x-roles: [COUNSELOR, COLLEGE]
+      description: 同成绩修订的四动作；批准 CREATE 时按项目现有最大 occurrence 追加新事件，批准 REVOKE 时校验目标事件版本后置撤销。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [termId, revision, action]
+              properties:
+                termId: { type: string, minLength: 1 }
+                revision: { type: integer, minimum: 0 }
+                action: { type: string, enum: [approve, return, resubmit, abandon] }
+                reason: { type: string, minLength: 2, maxLength: 1000 }
+                amount: { $ref: '#/components/schemas/DecimalInput' }
+      responses:
+        '200':
+          description: 更新后的扣分修订
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeductionChange' }
         default: { $ref: '#/components/responses/Error' }
   /api/evidence:
     post:
@@ -596,8 +804,8 @@ paths:
   /api/grade-import:
     post:
       operationId: operateGradeImport
-      x-roles: [ADMIN]
-      description: 15分钟30次；preview/commit仅ACTIVE。选择GRADE节点，成绩覆盖不叠加；columns只鉴权解析文件，不检查周期存在/阶段。
+      x-roles: [ADMIN, COUNSELOR]
+      description: 15分钟30次；preview/commit仅ACTIVE。选择GRADE节点。辅导员导入逐行校验本人责任班级与既有待审修订，提交后生成待学院审核的修订，结果含 submittedForReview；管理员导入为受控直接写入。columns只鉴权解析文件，不检查周期存在/阶段。
       requestBody:
         required: true
         content:
@@ -680,6 +888,64 @@ components:
   schemas:
     Id: { type: string, minLength: 1, maxLength: 100 }
     Revision: { type: integer, minimum: 0 }
+    ReviewRoster:
+      type: object
+      required: [items, total, page, scopeOptions, canSubmit, canReview, canCorrect]
+      description: 学生名录响应；范围由服务端按当前账号已配置组织关系决定，筛选只能继续缩小。
+      properties:
+        items: { type: array, items: { type: object, additionalProperties: true } }
+        total: { type: integer, minimum: 0 }
+        page: { $ref: '#/components/schemas/Revision' }
+        scopeOptions:
+          type: object
+          required: [colleges, majors, classes]
+          properties:
+            colleges: { type: array, items: { type: string } }
+            majors: { type: array, items: { type: string } }
+            classes: { type: array, items: { type: string } }
+        canSubmit: { type: boolean, description: COUNSELOR 可提交修订 }
+        canReview: { type: boolean, description: COLLEGE 可审核 }
+        canCorrect: { type: boolean, description: ADMIN 可例外更正 }
+    GradeChange:
+      type: object
+      required: [id, termId, studentId, nodeId, value, reason, status, revision, submittedBy, submittedAt]
+      description: 成绩修订；status 为 PENDING_COLLEGE/RETURNED/APPROVED/ABANDONED，批准前不改变 GradeInput。
+      properties:
+        id: { type: string }
+        termId: { type: string }
+        studentId: { type: string }
+        nodeId: { type: string }
+        value: { $ref: '#/components/schemas/DecimalOutput' }
+        baseValue: { type: [string, 'null'] }
+        reason: { type: string }
+        status: { type: string, enum: [PENDING_COLLEGE, RETURNED, APPROVED, ABANDONED] }
+        revision: { $ref: '#/components/schemas/Revision' }
+        submittedBy: { type: string }
+        submittedAt: { type: string, format: date-time }
+        reviewerId: { type: [string, 'null'] }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewReason: { type: [string, 'null'] }
+    DeductionChange:
+      type: object
+      required: [id, termId, studentId, projectId, action, reason, status, revision, submittedBy, submittedAt]
+      description: 扣分修订；action=CREATE 追加独立事件，action=REVOKE 校验目标事件版本后撤销；批准前不计入总分。
+      properties:
+        id: { type: string }
+        termId: { type: string }
+        studentId: { type: string }
+        projectId: { type: string }
+        action: { type: string, enum: [CREATE, REVOKE] }
+        amount: { type: [string, 'null'] }
+        reason: { type: string }
+        status: { type: string, enum: [PENDING_COLLEGE, RETURNED, APPROVED, ABANDONED] }
+        targetInputId: { type: [string, 'null'] }
+        targetRevision: { type: [integer, 'null'], minimum: 0 }
+        revision: { $ref: '#/components/schemas/Revision' }
+        submittedBy: { type: string }
+        submittedAt: { type: string, format: date-time }
+        reviewerId: { type: [string, 'null'] }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewReason: { type: [string, 'null'] }
     DecimalInput:
       type: string
       pattern: '^-?\d{1,10}(?:\.\d{1,12})?$'

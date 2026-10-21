@@ -17,8 +17,8 @@ export default async function Page({
 	return (
 		<>
 			<PageHeading
-				title="发布与结算"
-				description="检查完整成绩，发布学生核对，再保存不可变结算快照。"
+				title="结果发布"
+				description="核对成绩和参评名单，发布后让学生确认，确认无误再锁定存档。"
 			/>
 			<TermContext terms={terms} selected={term?.id} />
 			{term ? (

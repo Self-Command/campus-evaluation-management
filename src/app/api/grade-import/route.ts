@@ -9,7 +9,7 @@ import { apiError, sameOrigin } from "@/server/http";
 import { consumeLimit } from "@/server/rate-limit";
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "请求来源无效" }, { status: 403 });
-  const auth = await authorize(["ADMIN"]);
+  const auth = await authorize(["ADMIN", "COUNSELOR"]);
   if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
   try {
     if (!await consumeLimit("grade-import", auth.user.id, 30)) throw new AccountError("操作频繁，请稍后重试", 429);

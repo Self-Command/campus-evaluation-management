@@ -70,7 +70,7 @@ export function InputHistory({
 							{kind === "grade" ? "成绩" : "扣分"}变更历史
 						</DialogTitle>
 						<DialogDescription>
-							录入、更正及撤销保留操作人、前后值和业务理由；所选发布版本的分数仍以冻结结果为准。
+							每次录入、更正和撤销都会保留操作人、修改前后内容和原因；已发布版本仍以发布时的成绩为准。
 						</DialogDescription>
 					</DialogHeader>
 					<RemoteState {...remote} />

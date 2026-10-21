@@ -137,20 +137,20 @@ export function Students({
 		},
 		{
 			id: "counselor",
-			header: "责任辅导员 / 归属",
+			header: "责任辅导员",
 			cell: ({ row }) => (
 				<div>
 					<p>
 						{row.original.studentProfile.schoolClass?.counselor?.name ||
-							"待完善"}
+							"未设置"}
 					</p>
 					{!row.original.studentProfile.classId && (
-						<Badge variant="secondary">归属待完善</Badge>
+						<Badge variant="secondary">未分班</Badge>
 					)}
 				</div>
 			),
 		},
-		{ accessorKey: "revision", header: "档案修订" },
+		{ accessorKey: "revision", header: "档案版本" },
 		{
 			accessorKey: "createdAt",
 			header: "建档时间",
@@ -171,8 +171,8 @@ export function Students({
 			<RemoteState {...remote} />
 			{remote.data && (
 				<TemplateDirectory
-					title="学生档案名录"
-					description={`共 ${remote.data.total} 位匹配学生。维护当前组织归属，已发布版本使用当时冻结的档案。`}
+					title="学生档案"
+					description={`共 ${remote.data.total} 位学生。已发布的成绩使用发布时的班级记录。`}
 					data={remote.data.items}
 					columns={columns}
 					actions={
@@ -181,7 +181,7 @@ export function Students({
 								href="/imports?kind=accounts"
 								className={buttonVariants({ variant: "outline", size: "sm" })}
 							>
-								导入学生档案
+								导入学生
 							</Link>
 						)
 					}
@@ -205,7 +205,7 @@ export function Students({
 									value={draft}
 									maxLength={80}
 									onChange={(event) => setDraft(event.target.value)}
-									placeholder="搜索姓名或学号"
+									placeholder="输入姓名或学号"
 								/>
 							</Field>
 							{(
@@ -250,7 +250,7 @@ export function Students({
 									</NativeSelect>
 								</Field>
 							))}
-							<Button variant="outline">筛选档案</Button>
+							<Button type="submit" variant="outline">搜索</Button>
 							<Button
 								type="button"
 								variant="ghost"
@@ -294,12 +294,12 @@ export function Students({
 								{row.studentProfile.className}
 							</p>
 							<p className="text-xs text-muted-foreground">
-								修订 {row.revision} · {dateText(row.createdAt)}
+								第 {row.revision} 版 · {dateText(row.createdAt)}
 							</p>
 							<p className="text-sm">
 								责任辅导员：
-								{row.studentProfile.schoolClass?.counselor?.name || "待完善"}
-								{!row.studentProfile.classId ? " · 归属待完善" : ""}
+								{row.studentProfile.schoolClass?.counselor?.name || "未设置"}
+								{!row.studentProfile.classId ? " · 未分班" : ""}
 							</p>
 							<Button
 								variant="outline"
@@ -329,7 +329,7 @@ export function Students({
 					<SheetHeader>
 						<SheetTitle>{selected?.name} 的学生档案</SheetTitle>
 						<SheetDescription>
-							学号与身份标识只读，档案更正保留理由和修订。
+							档案只能更正姓名和班级；每次更正都会记录原因。
 						</SheetDescription>
 					</SheetHeader>
 					{selected && (
@@ -349,13 +349,13 @@ export function Students({
 									[
 										"责任辅导员",
 										selected.studentProfile.schoolClass?.counselor?.name ||
-											"待完善",
+											"未设置",
 									],
 									[
-										"组织归属状态",
-										selected.studentProfile.classId ? "已配置班级" : "待完善",
+										"班级状态",
+										selected.studentProfile.classId ? "已分班" : "未分班",
 									],
-									["档案修订", String(selected.revision)],
+									["档案版本", String(selected.revision)],
 									["建档时间", dateText(selected.createdAt)],
 								].map(([label, value]) => (
 									<div className="flex flex-col gap-1" key={label}>
@@ -369,13 +369,13 @@ export function Students({
 							</Badge>
 							{details.data && (
 								<section className="flex flex-col gap-3 border-t pt-5">
-									<h2 className="font-medium text-base">归属变更历史</h2>
+									<h2 className="font-medium text-base">班级变更记录</h2>
 									<p className="text-xs text-muted-foreground">
-										最近20条归属记录；已发布身份快照保持不变。
+										显示最近 20 条记录；已发布的成绩使用发布时的班级。
 									</p>
 									{!details.data.affiliationHistory?.length && (
 										<p className="text-sm text-muted-foreground">
-											暂无归属变更记录。
+											暂无班级变更记录。
 										</p>
 									)}
 									{details.data.affiliationHistory?.map((item) => (
@@ -385,21 +385,21 @@ export function Students({
 										>
 											{[
 												[
-													"归属",
+													"学院 / 专业 / 班级",
 													[
 														item.identity.college,
 														item.identity.major,
 														item.identity.className,
 													]
 														.filter(Boolean)
-														.join(" / ") || "未绑定班级",
+														.join(" / ") || "未分班",
 												],
 												["生效时间", dateText(item.startedAt)],
 												[
 													"结束时间",
 													item.endedAt ? dateText(item.endedAt) : "当前有效",
 												],
-												["变更理由", item.reason],
+												["变更原因", item.reason],
 											].map(([label, value]) => (
 												<div key={label} className="flex flex-col gap-1">
 													<dt className="text-xs text-muted-foreground">
@@ -423,7 +423,7 @@ export function Students({
 											setSuccess("");
 										}}
 									>
-										更正学生档案
+										更正档案
 									</Button>
 								)
 							) : (
@@ -485,7 +485,7 @@ export function Students({
 										)}
 										<Field>
 											<FieldLabel htmlFor="student-edit-reason">
-												更正理由
+												更正原因
 											</FieldLabel>
 											<Textarea
 												id="student-edit-reason"
@@ -498,8 +498,8 @@ export function Students({
 										</Field>
 									</FieldGroup>
 									<div className="flex flex-wrap gap-3">
-										<Button disabled={busy || !organizations.data}>
-											保存档案更正
+										<Button type="submit" disabled={busy || !organizations.data}>
+											保存更正
 										</Button>
 										<Button
 											type="button"

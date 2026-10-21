@@ -1,24 +1,39 @@
 "use client";
-// Full users.tsx/users-table.tsx directory adapted to hierarchical organization records.
-// Editing retains invoice-form field groups and profile-personal-details sections.
+// Grouped college/major/class directory adapted from the selected template's
+// infrastructure project groups, users directory and invoice form field groups.
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus } from "lucide-react";
-import type { ColumnDef } from "@tanstack/react-table";
-import type { DataTableFeatures } from "@/lib/data-table-features";
+import { ChevronDown, Plus, Search } from "lucide-react";
 import type {
+	College,
+	Major,
 	OrganizationData,
 	OrganizationNode,
+	SchoolClass,
 } from "@/lib/organization-types";
-import { TemplateDirectory } from "@/components/dashboard/template-directory";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
 import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
+import { NoData } from "@/components/dashboard/page-heading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import {
+	Card,
+	CardAction,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
 	Field,
 	FieldGroup,
@@ -36,6 +51,14 @@ import {
 	SheetTitle,
 	SheetDescription,
 } from "@/components/ui/sheet";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 type Kind = "college" | "major" | "class";
 type Row = OrganizationNode & {
 	kind: Kind;
@@ -46,6 +69,17 @@ type Row = OrganizationNode & {
 	counselorName?: string;
 	studentCount: number;
 	childCount: number;
+};
+type CollegeView = Omit<College, "majors"> & {
+	majors: MajorView[];
+	allMajorCount: number;
+	allClassCount: number;
+	allStudentCount: number;
+};
+type MajorView = Omit<Major, "classes"> & {
+	classes: SchoolClass[];
+	allClassCount: number;
+	allStudentCount: number;
 };
 const labels = { college: "学院", major: "专业", class: "班级" };
 function flatten(data: OrganizationData): Row[] {
@@ -80,52 +114,76 @@ function flatten(data: OrganizationData): Row[] {
 				counselorId: s.counselor?.id || null,
 				counselorName: s.counselor
 					? `${s.counselor.name}（${s.counselor.login}）`
-					: "待分配",
+					: "未分配",
 				childCount: 0,
 			})),
 		]),
 	]);
 }
+function collegeTree(data: OrganizationData, query: string): CollegeView[] {
+	const keyword = query.trim().toLocaleLowerCase();
+	return data.colleges
+		.map((college) => {
+			const collegeHit =
+				!keyword ||
+				`${college.name} ${college.code}`.toLocaleLowerCase().includes(keyword);
+			const majors = college.majors
+				.map((major) => {
+					const majorHit =
+						!keyword ||
+						`${major.name} ${major.code}`.toLocaleLowerCase().includes(keyword);
+					const classes = major.classes.filter((schoolClass) => {
+						if (!keyword || collegeHit || majorHit) return true;
+						return `${schoolClass.name} ${schoolClass.code} ${schoolClass.counselor?.name || ""} ${schoolClass.counselor?.login || ""}`
+							.toLocaleLowerCase()
+							.includes(keyword);
+					});
+					return {
+						...major,
+						classes,
+						allClassCount: major.classes.length,
+						allStudentCount: major.classes.reduce(
+							(sum, schoolClass) => sum + schoolClass.studentCount,
+							0,
+						),
+					};
+				})
+				.filter(
+					(major) =>
+						!keyword ||
+						`${major.name} ${major.code}`.toLocaleLowerCase().includes(keyword) ||
+						major.classes.length > 0,
+				);
+			return {
+				...college,
+				majors,
+				allMajorCount: college.majors.length,
+				allClassCount: college.majors.reduce(
+					(sum, major) => sum + major.classes.length,
+					0,
+				),
+				allStudentCount: college.majors.reduce(
+					(sum, major) =>
+						sum +
+						major.classes.reduce(
+							(classSum, schoolClass) => classSum + schoolClass.studentCount,
+							0,
+						),
+					0,
+				),
+			};
+		})
+		.filter(
+			(college) =>
+				!keyword ||
+				`${college.name} ${college.code}`.toLocaleLowerCase().includes(keyword) ||
+				college.majors.length > 0,
+		);
+}
 export function Organizations() {
 	const params = useSearchParams();
 	const remote = useRemote<OrganizationData>("/api/organizations");
 	const [query, setQuery] = useState((params.get("q") || "").slice(0, 80));
-	const [kind, setKind] = useState(
-		["college", "major", "class"].includes(params.get("kind") || "")
-			? params.get("kind")!
-			: "",
-	);
-	const [collegeId, setCollegeId] = useState(params.get("collegeId") || "");
-	const [status, setStatus] = useState(
-		["true", "false"].includes(params.get("enabled") || "")
-			? params.get("enabled")!
-			: "",
-	);
-	const [page, setPage] = useState(
-		Math.max(1, Math.min(100000, Math.floor(Number(params.get("page")) || 1))),
-	);
-	function location(
-		next: { q: string; kind: string; collegeId: string; enabled: string },
-		nextPage: number,
-	) {
-		return `/organizations?${new URLSearchParams({ ...next, page: String(nextPage) })}`;
-	}
-	function filter(
-		change: Partial<{
-			q: string;
-			kind: string;
-			collegeId: string;
-			enabled: string;
-		}>,
-	) {
-		const next = { q: query, kind, collegeId, enabled: status, ...change };
-		setQuery(next.q);
-		setKind(next.kind);
-		setCollegeId(next.collegeId);
-		setStatus(next.enabled);
-		setPage(1);
-		window.history.replaceState(null, "", location(next, 1));
-	}
 	const [edit, setEdit] = useState<Row | "new" | null>(null);
 	const [editKind, setEditKind] = useState<Kind>("class");
 	const [parentId, setParentId] = useState("");
@@ -134,220 +192,247 @@ export function Organizations() {
 	const [error, setError] = useState("");
 	const [success, setSuccess] = useState("");
 	useUnsavedChanges(dirty || busy);
-	const rows = remote.data ? flatten(remote.data) : [];
-	const filtered = rows.filter(
-		(r) =>
-			(!kind || r.kind === kind) &&
-			(!collegeId || r.collegeId === collegeId) &&
-			(!status || String(r.enabled) === status) &&
-			(!query ||
-				`${r.path} ${r.code} ${r.counselorName || ""}`
-					.toLowerCase()
-					.includes(query.toLowerCase())),
-	);
-	const currentPage = Math.min(
-		page,
-		Math.max(1, Math.ceil(filtered.length / 20)),
-	);
+	const data = remote.data;
+	const rows = data ? flatten(data) : [];
+	const colleges = data ? collegeTree(data, query) : [];
 	const current = edit && edit !== "new" ? edit : null;
 	const parents = rows.filter(
-		(r) =>
-			(r.enabled || r.id === current?.parentId) &&
-			r.kind === (editKind === "class" ? "major" : "college"),
+		(row) =>
+			(row.enabled || row.id === current?.parentId) &&
+			row.kind === (editKind === "class" ? "major" : "college"),
 	);
 	const targetCollegeId =
-		current?.collegeId || rows.find((r) => r.id === parentId)?.collegeId;
-	function start(row: Row | "new") {
+		current?.collegeId || rows.find((row) => row.id === parentId)?.collegeId;
+	const visibleClassCount = colleges.reduce(
+		(sum, college) =>
+			sum +
+			college.majors.reduce(
+				(majorSum, major) => majorSum + major.classes.length,
+				0,
+			),
+		0,
+	);
+	function search(next: string) {
+		setQuery(next);
+		window.history.replaceState(
+			null,
+			"",
+			next ? `/organizations?q=${encodeURIComponent(next)}` : "/organizations",
+		);
+	}
+	function rowById(id: string) {
+		return rows.find((row) => row.id === id);
+	}
+	function start(row: Row) {
 		setEdit(row);
-		setEditKind(row === "new" ? "class" : row.kind);
-		setParentId(row === "new" ? "" : row.parentId || "");
+		setEditKind(row.kind);
+		setParentId(row.parentId || "");
 		setDirty(false);
 		setError("");
 	}
-	const columns: ColumnDef<DataTableFeatures, Row>[] = [
-		{
-			accessorKey: "name",
-			header: "组织名称 / 编码",
-			cell: ({ row }) => (
-				<div>
-					<p className="font-medium">
-						{row.original.kind !== "college" ? "↳ " : ""}
-						{row.original.name}
-					</p>
-					<p className="text-xs text-muted-foreground">{row.original.code}</p>
-				</div>
-			),
-		},
-		{
-			accessorKey: "kind",
-			header: "层级",
-			cell: ({ row }) => (
-				<Badge variant="outline">{labels[row.original.kind]}</Badge>
-			),
-		},
-		{ accessorKey: "path", header: "完整归属" },
-		{
-			id: "responsibility",
-			header: "责任辅导员 / 下级",
-			cell: ({ row }) =>
-				row.original.kind === "class"
-					? row.original.counselorName
-					: `${row.original.childCount} 个${row.original.kind === "college" ? "专业" : "班级"}`,
-		},
-		{ accessorKey: "studentCount", header: "在册学生" },
-		{
-			id: "status",
-			header: "状态 / 修订",
-			cell: ({ row }) => (
-				<div className="flex flex-col gap-1">
-					<Badge variant={row.original.enabled ? "outline" : "secondary"}>
-						{row.original.enabled
-							? row.original.kind === "class" && !row.original.counselorId
-								? "待完善"
-								: "启用"
-							: "停用"}
-					</Badge>
-					<span className="text-xs text-muted-foreground">
-						修订 {row.original.revision}
-					</span>
-				</div>
-			),
-		},
-		{
-			id: "actions",
-			header: "操作",
-			cell: ({ row }) => (
-				<Button variant="ghost" size="sm" onClick={() => start(row.original)}>
-					详情 / 维护
-				</Button>
-			),
-		},
-	];
+	function startNew(kind: Kind, parent?: string) {
+		setEdit("new");
+		setEditKind(kind);
+		setParentId(parent || "");
+		setDirty(false);
+		setError("");
+	}
+	function editOrganization(id: string) {
+		const row = rowById(id);
+		if (row) start(row);
+	}
 	return (
 		<>
 			<RemoteState {...remote} />
 			<Feedback success={success} />
-			{remote.data && (
-				<TemplateDirectory
-					title="学院、专业与班级"
-					description={`当前范围共 ${rows.filter((r) => r.kind === "college").length} 个学院、${rows.filter((r) => r.kind === "major").length} 个专业、${rows.filter((r) => r.kind === "class").length} 个班级。未分配辅导员的班级需先完成责任配置。`}
-					data={filtered.slice((currentPage - 1) * 20, currentPage * 20)}
-					columns={columns}
-					actions={
-						remote.data.canManage && (
-							<Button size="sm" onClick={() => start("new")}>
-								<Plus data-icon="inline-start" />
-								新建组织
-							</Button>
-						)
-					}
-					filters={
-						<div className="flex w-full flex-wrap items-end gap-3">
-							<Field className="w-full sm:w-60">
-								<FieldLabel htmlFor="organization-query">
-									名称、编码或辅导员
-								</FieldLabel>
-								<Input
-									id="organization-query"
+			{data && (
+				<Card className="min-w-0">
+					<CardHeader>
+						<CardTitle>学院目录</CardTitle>
+						<CardDescription>
+							共 {data.totals.colleges} 个学院、{data.totals.majors} 个专业、
+							{data.totals.classes} 个班级。先展开学院查看专业，再展开专业查看班级。
+						</CardDescription>
+						{data.canManage && data.role === "ADMIN" && (
+							<CardAction>
+								<Button size="sm" onClick={() => startNew("college")}>
+									<Plus data-icon="inline-start" />
+									新增学院
+								</Button>
+							</CardAction>
+						)}
+					</CardHeader>
+					<CardContent className="flex min-w-0 flex-col gap-4">
+						<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+							<InputGroup className="min-w-0 sm:w-96">
+								<InputGroupAddon align="inline-start">
+									<Search />
+								</InputGroupAddon>
+								<InputGroupInput
 									value={query}
 									maxLength={80}
-									onChange={(e) => {
-										filter({ q: e.target.value });
-									}}
+									onChange={(event) => search(event.target.value)}
+									placeholder="搜索学院、专业、班级或辅导员"
+									aria-label="搜索学院、专业、班级或辅导员"
 								/>
-							</Field>
-							<Field className="w-full sm:w-40">
-								<FieldLabel htmlFor="organization-kind">组织层级</FieldLabel>
-								<NativeSelect
-									id="organization-kind"
-									value={kind}
-									onChange={(e) => {
-										filter({ kind: e.target.value });
-									}}
-								>
-									<NativeSelectOption value="">全部层级</NativeSelectOption>
-									{Object.entries(labels).map(([k, l]) => (
-										<NativeSelectOption key={k} value={k}>
-											{l}
-										</NativeSelectOption>
-									))}
-								</NativeSelect>
-							</Field>
-							<Field className="w-full sm:w-44">
-								<FieldLabel htmlFor="organization-college">所属学院</FieldLabel>
-								<NativeSelect
-									id="organization-college"
-									value={collegeId}
-									onChange={(e) => {
-										filter({ collegeId: e.target.value });
-									}}
-								>
-									<NativeSelectOption value="">全部学院</NativeSelectOption>
-									{remote.data.colleges.map((c) => (
-										<NativeSelectOption key={c.id} value={c.id}>
-											{c.name}
-										</NativeSelectOption>
-									))}
-								</NativeSelect>
-							</Field>
-							<Field className="w-full sm:w-36">
-								<FieldLabel htmlFor="organization-status">启停状态</FieldLabel>
-								<NativeSelect
-									id="organization-status"
-									value={status}
-									onChange={(e) => {
-										filter({ enabled: e.target.value });
-									}}
-								>
-									<NativeSelectOption value="">全部状态</NativeSelectOption>
-									<NativeSelectOption value="true">启用</NativeSelectOption>
-									<NativeSelectOption value="false">停用</NativeSelectOption>
-								</NativeSelect>
-							</Field>
-						</div>
-					}
-					pagination={{
-						page: currentPage,
-						total: filtered.length,
-						href: (next) =>
-							location({ q: query, kind, collegeId, enabled: status }, next),
-						onPageChange: (next) => {
-							setPage(next);
-							window.history.replaceState(
-								null,
-								"",
-								location({ q: query, kind, collegeId, enabled: status }, next),
-							);
-						},
-					}}
-					mobile={(r) => (
-						<div className="flex flex-col gap-3">
-							<div className="flex items-center justify-between gap-3">
-								<p className="font-medium">
-									{r.name} · {r.code}
+							</InputGroup>
+							{query && (
+								<p className="text-sm text-muted-foreground">
+									找到 {colleges.length} 个学院、{visibleClassCount} 个班级
 								</p>
-								<Badge variant="outline">{labels[r.kind]}</Badge>
-							</div>
-							<p className="text-sm">{r.path}</p>
-							<p className="text-sm">
-								{r.kind === "class"
-									? `辅导员：${r.counselorName}`
-									: `下级 ${r.childCount} 个`}{" "}
-								· 学生 {r.studentCount} 人
-							</p>
-							<p className="text-xs text-muted-foreground">
-								{r.enabled ? "启用" : "停用"} · 修订 {r.revision}
-							</p>
-							<Button
-								variant="outline"
-								className="self-start"
-								onClick={() => start(r)}
-							>
-								详情 / 维护
-							</Button>
+							)}
 						</div>
-					)}
-				/>
+						{colleges.length ? (
+							<div
+								key={query}
+								className="flex min-w-0 flex-col gap-3"
+							>
+								{colleges.map((college, index) => (
+									<Collapsible
+										key={college.id}
+										defaultOpen={!!query || index === 0}
+										className="flex flex-col overflow-hidden rounded-xl border bg-card py-3 data-open:gap-3 data-open:pb-0"
+									>
+										<div className="flex flex-col gap-3 px-4 lg:flex-row lg:items-center lg:justify-between">
+											<CollapsibleTrigger
+												render={
+													<Button
+														type="button"
+														variant="ghost"
+														className="group -ml-2 h-auto min-w-0 justify-start gap-2 px-2 py-1 hover:bg-transparent aria-expanded:bg-transparent"
+													/>
+												}
+											>
+												<ChevronDown className="shrink-0 transition-transform group-data-panel-open:rotate-180" />
+												<div className="flex min-w-0 flex-col items-start gap-1 text-left">
+													<div className="flex flex-wrap items-center gap-2">
+														<span className="font-medium">{college.name}</span>
+														<Badge
+															variant={college.enabled ? "outline" : "secondary"}
+														>
+															{college.enabled ? "启用" : "停用"}
+														</Badge>
+													</div>
+													<span className="text-xs text-muted-foreground">
+														{college.code} · {college.allMajorCount} 个专业 ·{" "}
+														{college.allClassCount} 个班级 ·{" "}
+														{college.allStudentCount} 名学生
+													</span>
+												</div>
+											</CollapsibleTrigger>
+											<div className="flex flex-wrap gap-2 lg:justify-end">
+												{data.canManage && (
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														onClick={() => startNew("major", college.id)}
+													>
+														<Plus data-icon="inline-start" />
+														新增专业
+													</Button>
+												)}
+												{data.canManage && data.role === "ADMIN" && (
+													<Button
+														type="button"
+														variant="ghost"
+														size="sm"
+														onClick={() => editOrganization(college.id)}
+													>
+														编辑学院
+													</Button>
+												)}
+											</div>
+										</div>
+										<CollapsibleContent>
+											<div className="flex flex-col gap-3 border-t bg-muted/20 p-3 sm:p-4">
+												{college.majors.length ? (
+													college.majors.map((major) => (
+														<Collapsible
+															key={major.id}
+															defaultOpen={!!query && major.classes.length > 0}
+															className="overflow-hidden rounded-lg border bg-card"
+														>
+															<div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+																<CollapsibleTrigger
+																	render={
+																		<Button
+																			type="button"
+																			variant="ghost"
+																			className="group -ml-2 h-auto min-w-0 justify-start gap-2 px-2 py-1 hover:bg-transparent aria-expanded:bg-transparent"
+																		/>
+																	}
+																>
+																	<ChevronDown className="shrink-0 transition-transform group-data-panel-open:rotate-180" />
+																	<div className="flex min-w-0 flex-col items-start gap-1 text-left">
+																		<div className="flex flex-wrap items-center gap-2">
+																			<span className="font-medium">{major.name}</span>
+																			<Badge
+																				variant={major.enabled ? "outline" : "secondary"}
+																			>
+																				{major.enabled ? "启用" : "停用"}
+																			</Badge>
+																		</div>
+																		<span className="text-xs text-muted-foreground">
+																			{major.code} · {major.allClassCount} 个班级 ·{" "}
+																			{major.allStudentCount} 名学生
+																		</span>
+																	</div>
+																</CollapsibleTrigger>
+																<div className="flex flex-wrap gap-2 sm:justify-end">
+																	{data.canManage && (
+																		<Button
+																			type="button"
+																			variant="outline"
+																			size="sm"
+																			onClick={() => startNew("class", major.id)}
+																		>
+																			<Plus data-icon="inline-start" />
+																			新增班级
+																		</Button>
+																	)}
+																	{data.canManage && (
+																		<Button
+																			type="button"
+																			variant="ghost"
+																			size="sm"
+																			onClick={() => editOrganization(major.id)}
+																		>
+																			编辑专业
+																		</Button>
+																	)}
+																</div>
+															</div>
+															<CollapsibleContent>
+																<ClassTable
+																	classes={major.classes}
+																	onEdit={editOrganization}
+																/>
+															</CollapsibleContent>
+														</Collapsible>
+													))
+												) : (
+													<p className="py-3 text-sm text-muted-foreground">
+														本学院还没有专业。
+													</p>
+												)}
+											</div>
+										</CollapsibleContent>
+									</Collapsible>
+								))}
+							</div>
+						) : (
+							<NoData
+								title={query ? "没有找到匹配的学院、专业或班级" : "还没有学院"}
+								description={
+									query
+										? "换个名称、编码或辅导员姓名试试。"
+										: "先新增学院，再在学院下添加专业和班级。"
+								}
+							/>
+						)}
+					</CardContent>
+				</Card>
 			)}
 			<Sheet
 				open={!!edit}
@@ -355,7 +440,7 @@ export function Organizations() {
 					if (
 						!open &&
 						!busy &&
-						(!dirty || window.confirm("放弃尚未保存的组织修改？"))
+						(!dirty || window.confirm("放弃尚未保存的修改？"))
 					) {
 						setEdit(null);
 						setDirty(false);
@@ -365,46 +450,50 @@ export function Organizations() {
 				<SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
 					<SheetHeader>
 						<SheetTitle>
-							{current ? `${current.name} · 组织维护` : "新建组织"}
+							{current
+								? `${current.name} · 编辑${labels[current.kind]}`
+								: `新增${labels[editKind]}`}
 						</SheetTitle>
 						<SheetDescription>
-							{current?.kind === "college" && remote.data?.role !== "ADMIN"
-								? "学院基本信息由学校管理员维护；学院管理人员可维护本院专业和班级。"
-								: "学院、专业和班级编码保持唯一，责任交接与停用均保留理由。上级组织创建后不可直接更改；有在册学生的班级需先转班，方可停用。"}
+							{current?.kind === "college" && data?.role !== "ADMIN"
+								? "学院基本信息由学校管理员维护；学院可以维护本院专业和班级。"
+								: current
+									? "编码不能重复。已有下级组织或学生时不能停用。"
+									: "选择所属上级组织。编码在全校唯一，保存后可在目录中继续添加下级。"}
 						</SheetDescription>
 					</SheetHeader>
-					{edit && remote.data && (
+					{edit && data && (
 						<form
 							key={current?.id || "new"}
 							className="flex flex-col gap-5 px-5 pb-6"
 							onChange={() => setDirty(true)}
-							onSubmit={async (e) => {
-								e.preventDefault();
+							onSubmit={async (event) => {
+								event.preventDefault();
 								if (busy) return;
-								const f = new FormData(e.currentTarget);
+								const form = new FormData(event.currentTarget);
 								setBusy(true);
 								setError("");
 								try {
 									await requestJson<OrganizationData>("/api/organizations", {
 										kind: editKind,
-										code: f.get("code"),
-										name: f.get("name"),
-										enabled: f.get("enabled") === "true",
+										code: form.get("code"),
+										name: form.get("name"),
+										enabled: form.get("enabled") === "true",
 										...(editKind !== "college" ? { parentId } : {}),
 										...(editKind === "class"
-											? { counselorId: f.get("counselorId") || null }
+											? { counselorId: form.get("counselorId") || null }
 											: {}),
 										...(current
 											? {
 													id: current.id,
 													revision: current.revision,
-													reason: f.get("reason"),
+													reason: form.get("reason"),
 												}
 											: {}),
 									});
 									setDirty(false);
 									setEdit(null);
-									setSuccess("组织目录已保存。");
+									setSuccess("已保存。");
 									remote.reload();
 								} catch (err) {
 									setError((err as Error).message);
@@ -417,44 +506,42 @@ export function Organizations() {
 							{current && (
 								<dl className="grid gap-6 sm:grid-cols-2">
 									{[
-										["完整归属", current.path],
-										["在册学生", String(current.studentCount)],
-										["当前责任辅导员", current.counselorName || "不适用"],
-										["组织修订", String(current.revision)],
-									].map(([l, v]) => (
-										<div key={l} className="flex flex-col gap-1">
-											<dt className="text-xs text-muted-foreground">{l}</dt>
-											<dd className="break-words text-sm">{v}</dd>
+										["所属", current.path],
+										["学生人数", String(current.studentCount)],
+										["责任辅导员", current.counselorName || "不适用"],
+										["版本", String(current.revision)],
+									].map(([label, value]) => (
+										<div key={label} className="flex flex-col gap-1">
+											<dt className="text-xs text-muted-foreground">{label}</dt>
+											<dd className="break-words text-sm">{value}</dd>
 										</div>
 									))}
 								</dl>
 							)}
-							{remote.data.canManage &&
-								(remote.data.role === "ADMIN" || editKind !== "college") && (
+							{data.canManage &&
+								(data.role === "ADMIN" || editKind !== "college") && (
 									<>
 										<FieldGroup>
 											<Field>
-												<FieldLabel htmlFor="org-edit-kind">
-													组织层级
-												</FieldLabel>
+												<FieldLabel htmlFor="org-edit-kind">类型</FieldLabel>
 												<NativeSelect
 													id="org-edit-kind"
 													value={editKind}
 													disabled={!!current}
-													onChange={(e) => {
-														setEditKind(e.target.value as Kind);
+													onChange={(event) => {
+														setEditKind(event.target.value as Kind);
 														setParentId("");
 													}}
 												>
 													{Object.entries(labels)
 														.filter(
-															([k]) =>
-																k !== "college" ||
-																remote.data!.role === "ADMIN",
+															([kind]) =>
+																kind !== "college" ||
+																data.role === "ADMIN",
 														)
-														.map(([k, l]) => (
-															<NativeSelectOption key={k} value={k}>
-																{l}
+														.map(([kind, label]) => (
+															<NativeSelectOption key={kind} value={kind}>
+																{label}
 															</NativeSelectOption>
 														))}
 												</NativeSelect>
@@ -469,19 +556,19 @@ export function Organizations() {
 														required
 														disabled={!!current}
 														value={parentId}
-														onChange={(e) => setParentId(e.target.value)}
+														onChange={(event) => setParentId(event.target.value)}
 													>
 														<NativeSelectOption value="">
-															请选择上级组织
+															请选择上级
 														</NativeSelectOption>
-														{parents.map((p) => (
-															<NativeSelectOption key={p.id} value={p.id}>
-																{p.path}
+														{parents.map((parent) => (
+															<NativeSelectOption key={parent.id} value={parent.id}>
+																{parent.path}
 															</NativeSelectOption>
 														))}
 													</NativeSelect>
 													<FieldDescription>
-														创建后不直接更改上级组织。
+														保存后不能直接更换上级。
 													</FieldDescription>
 												</Field>
 											)}
@@ -496,7 +583,7 @@ export function Organizations() {
 													pattern="[A-Za-z0-9._-]+"
 												/>
 												<FieldDescription>
-													使用字母、数字、点、下划线或连字符。
+													可用字母、数字、点、下划线或连字符。
 												</FieldDescription>
 											</Field>
 											<Field>
@@ -523,27 +610,28 @@ export function Organizations() {
 														<NativeSelectOption value="">
 															暂不分配
 														</NativeSelectOption>
-														{remote.data.counselors
+														{data.counselors
 															.filter(
-																(c) =>
-																	c.collegeId === targetCollegeId &&
-																	!c.disabled,
+																(counselor) =>
+																	counselor.collegeId === targetCollegeId &&
+																	!counselor.disabled,
 															)
-															.map((c) => (
-																<NativeSelectOption key={c.id} value={c.id}>
-																	{c.name}（{c.login}）
+															.map((counselor) => (
+																<NativeSelectOption
+																	key={counselor.id}
+																	value={counselor.id}
+																>
+																	{counselor.name}（{counselor.login}）
 																</NativeSelectOption>
 															))}
 													</NativeSelect>
 													<FieldDescription>
-														只能分配本院启用的辅导员；有学生的班级应先完成责任交接。
+														只显示本学院在职辅导员。
 													</FieldDescription>
 												</Field>
 											)}
 											<Field>
-												<FieldLabel htmlFor="org-edit-enabled">
-													组织状态
-												</FieldLabel>
+												<FieldLabel htmlFor="org-edit-enabled">状态</FieldLabel>
 												<NativeSelect
 													id="org-edit-enabled"
 													name="enabled"
@@ -557,13 +645,13 @@ export function Organizations() {
 													</NativeSelectOption>
 												</NativeSelect>
 												<FieldDescription>
-													有启用下级、在册学生或责任账号时不能停用。
+													有下级组织、学生或绑定账号时不能停用。
 												</FieldDescription>
 											</Field>
 											{current && (
 												<Field>
 													<FieldLabel htmlFor="org-edit-reason">
-														修改 / 交接理由
+														修改理由
 													</FieldLabel>
 													<Textarea
 														id="org-edit-reason"
@@ -576,8 +664,8 @@ export function Organizations() {
 												</Field>
 											)}
 										</FieldGroup>
-										<Button disabled={busy}>
-											{busy ? "正在保存…" : "保存组织"}
+										<Button type="submit" disabled={busy}>
+											{busy ? "正在保存…" : "保存"}
 										</Button>
 									</>
 								)}
@@ -585,6 +673,99 @@ export function Organizations() {
 					)}
 				</SheetContent>
 			</Sheet>
+		</>
+	);
+}
+function ClassTable({
+	classes,
+	onEdit,
+}: {
+	classes: SchoolClass[];
+	onEdit: (id: string) => void;
+}) {
+	if (!classes.length)
+		return (
+			<p className="border-t px-4 py-4 text-sm text-muted-foreground">
+				本专业还没有班级。
+			</p>
+		);
+	return (
+		<>
+			<div className="hidden overflow-x-auto border-t md:block">
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>班级</TableHead>
+							<TableHead>编码</TableHead>
+							<TableHead>责任辅导员</TableHead>
+							<TableHead className="text-right">学生</TableHead>
+							<TableHead>状态</TableHead>
+							<TableHead />
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{classes.map((schoolClass) => (
+							<TableRow key={schoolClass.id}>
+								<TableCell className="font-medium">{schoolClass.name}</TableCell>
+								<TableCell className="text-muted-foreground">
+									{schoolClass.code}
+								</TableCell>
+								<TableCell>
+									{schoolClass.counselor?.name || "未分配"}
+								</TableCell>
+								<TableCell className="text-right tabular-nums">
+									{schoolClass.studentCount}
+								</TableCell>
+								<TableCell>
+									<Badge variant={schoolClass.enabled ? "outline" : "secondary"}>
+										{schoolClass.enabled ? "启用" : "停用"}
+									</Badge>
+								</TableCell>
+								<TableCell className="text-right">
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={() => onEdit(schoolClass.id)}
+									>
+										编辑
+									</Button>
+								</TableCell>
+							</TableRow>
+						))}
+					</TableBody>
+				</Table>
+			</div>
+			<div className="divide-y border-t md:hidden">
+				{classes.map((schoolClass) => (
+					<div key={schoolClass.id} className="flex flex-col gap-2 p-3">
+						<div className="flex items-start justify-between gap-3">
+							<div>
+								<p className="font-medium">{schoolClass.name}</p>
+								<p className="text-xs text-muted-foreground">
+									{schoolClass.code}
+								</p>
+							</div>
+							<Badge variant={schoolClass.enabled ? "outline" : "secondary"}>
+								{schoolClass.enabled ? "启用" : "停用"}
+							</Badge>
+						</div>
+						<p className="text-sm">
+							辅导员：{schoolClass.counselor?.name || "未分配"} · 学生{" "}
+							{schoolClass.studentCount} 人
+						</p>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="self-start"
+							onClick={() => onEdit(schoolClass.id)}
+						>
+							编辑班级
+						</Button>
+					</div>
+				))}
+			</div>
 		</>
 	);
 }

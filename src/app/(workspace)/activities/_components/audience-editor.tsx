@@ -187,13 +187,13 @@ export function AudienceEditor({
 			<Field>
 				<FieldLabel>发布范围</FieldLabel>
 				<FieldDescription>
-					学院、完整班级、指定学生三组各至少选择一项。每组内满足任一项，三组必须同时满足。调整学院不会自动删除已选班级或学生。
+					学院、班级、指定学生三组各至少选择一项。组内任选一项，三组需同时满足。调整学院不会自动删除已选班级或学生。
 				</FieldDescription>
 			</Field>
 			<Feedback error={current?.error} />
 			{!current && (
 				<p className="text-sm text-muted-foreground" role="status">
-					正在读取可选名录…
+					正在读取学生名单…
 				</p>
 			)}
 			{current?.error && (
@@ -202,7 +202,7 @@ export function AudienceEditor({
 					variant="outline"
 					onClick={() => setRetry((count) => count + 1)}
 				>
-					重试名录
+					重试
 				</Button>
 			)}
 			<Field>
@@ -223,7 +223,7 @@ export function AudienceEditor({
 				</FieldDescription>
 			</Field>
 			<Field>
-				<FieldLabel>完整班级（多选）</FieldLabel>
+				<FieldLabel>班级（多选）</FieldLabel>
 				<MultiSelect
 					disabled={disabled || !options}
 					label="选择班级"
@@ -255,7 +255,7 @@ export function AudienceEditor({
 				</FieldDescription>
 			</Field>
 			<Field>
-				<FieldLabel htmlFor="audience-search">查找系统已有学生</FieldLabel>
+				<FieldLabel htmlFor="audience-search">查找学生</FieldLabel>
 				<div className="flex flex-wrap gap-2">
 					<Input
 						id="audience-search"
@@ -285,7 +285,7 @@ export function AudienceEditor({
 				</div>
 				<MultiSelect
 					disabled={disabled || !options}
-					label="指定学生"
+					label="选择学生"
 					options={(options?.students || []).map((item) => ({
 						value: item.id,
 						label: `${item.name} · ${item.login} · ${classLabel(item)}`,
@@ -296,7 +296,7 @@ export function AudienceEditor({
 					}
 				/>
 				<FieldDescription>
-					搜索结果共 {options?.total ?? "—"} 人，当前第 {page}{" "}
+					共 {options?.total ?? "—"} 人，第 {page}{" "}
 					页。已选学生跨页保留。
 				</FieldDescription>
 				<div className="flex flex-wrap gap-2">
@@ -321,14 +321,14 @@ export function AudienceEditor({
 				</div>
 			</Field>
 			<Field>
-				<FieldLabel>已指定 {value.studentIds.length} 位学生</FieldLabel>
+				<FieldLabel>已选 {value.studentIds.length} 位学生</FieldLabel>
 				<div className="flex flex-wrap gap-2">
 					{value.studentIds.map((id) => (
 						<Badge key={id} variant="outline" className="max-w-full">
 							<span className="min-w-0 break-all whitespace-normal">
 								{known[id]
-									? `${known[id].name} · ${known[id].login}${known[id].invalid ? "（身份已失效）" : ""}`
-									: `学生标识 ${id}`}
+									? `${known[id].name} · ${known[id].login}${known[id].invalid ? "（已失效）" : ""}`
+									: `学生 ${id}`}
 							</span>
 							<Button
 								type="button"
@@ -353,13 +353,13 @@ export function AudienceEditor({
 				error={[
 					...invalidStudents.map(
 						(item) =>
-							`${item.name}（${item.login}）的学生身份已失效，请明确移除或重新选择。`,
+							`${item.name}（${item.login}）的学生账号已失效，请移除或重新选择。`,
 					),
 					...conflicts.map(
 						(item) => `班级 ${classLabel(item)} 不属于已选学院。`,
 					),
 					...studentConflicts.map(
-						(item) => `${item.name}（${item.login}）未同时命中所选学院和班级。`,
+						(item) => `${item.name}（${item.login}）不属于已选学院和班级。`,
 					),
 				].join(" ")}
 			/>

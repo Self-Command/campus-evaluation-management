@@ -58,7 +58,11 @@ async function main() {
       }
       async json(path: string, body?: unknown, method = "POST") {
         const response = await this.fetch(path, body === undefined ? {} : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        const data = await response.json(); check(response.ok, `${method} ${path.split("?")[0]} 状态${response.status}`); return data;
+        const data = await response.json(); check(response.ok, `${method} ${path.split("?")[0]} 状态${response.status}${data?.error ? `：${data.error}` : ""}`); return data;
+      }
+      async form(path: string, body: FormData) {
+        const response = await this.fetch(path, { method: "POST", body });
+        const data = await response.json(); check(response.ok, `POST ${path.split("?")[0]} 状态${response.status}${data?.error ? `：${data.error}` : ""}`); return data;
       }
       async challenge() {
         const response = await this.fetch("/api/auth/captcha");
@@ -151,7 +155,7 @@ async function main() {
       check(deniedPassword.status === 400, `${role}改密接口应正常鉴权并拒绝错误旧密码`);
       results.push({ label: `${role} correct landing, own account and password validation`, status: 200 });
     }
-    for (const [role, session, paths] of [["ADMIN", admin, ["/organizations"]], ["COLLEGE", college, ["/organizations", "/students", "/account"]], ["COUNSELOR", counselor, ["/students", "/account"]]] as const) {
+    for (const [role, session, paths] of [["ADMIN", admin, ["/organizations"]], ["COLLEGE", college, ["/organizations", "/students", "/account", "/activities", "/recognitions", "/imports"]], ["COUNSELOR", counselor, ["/students", "/account", "/activities", "/recognitions"]]] as const) {
       for (const path of paths) { await session.page(path); results.push({ label: `${role} ${path} configured organization`, status: 200 }); }
     }
     check((await college.json("/api/students")).items[0].id === selfId && (await counselor.json("/api/students")).items[0].id === selfId, "学院和辅导员授权名录错误");
@@ -197,34 +201,61 @@ async function main() {
     const term = await admin.json("/api/terms", { name: "隔离HTTP测评", template: false });
     await admin.json(`/api/terms/${term.id}/scheme`, { action: "activate", revision: term.revision });
     const emptyClaims = await student.page(`/claims?termId=${term.id}`);
-    check(emptyClaims.includes("暂无可申报项目"), "学生无项目时应明确说明，而不是静默隐藏申报入口");
-    check(!buttonTexts(emptyClaims).includes("新建认定项目"), "学生不能创建管理员认定项目");
-    results.push({ label: "STUDENT /claims empty project explanation", status: 200 });
+    check(emptyClaims.includes("没有匹配的记录") && buttonTexts(emptyClaims).includes("新建个人申报"), "学生默认申报页应直接提供新建申报，而不是等待项目配置");
+    check(!buttonTexts(emptyClaims).includes("新建认定项目"), "学生不能创建已取消的认定项目");
+    results.push({ label: "STUDENT /claims direct submission action without project catalog", status: 200 });
     const audience = { colleges: ["学院"], classes: [{ college: "学院", major: "专业", className: "班级" }], studentIds: [selfId] };
-    const activity = await admin.json("/api/activities", { termId: term.id, action: "save", activity: { name: "完整工作区活动", organizer: "学院", content: "活动内容与参与要求", requirements: "提交参与证明", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "1", audience } });
+    const activity = await college.json("/api/activities", { termId: term.id, action: "save", activity: { name: "完整工作区活动", organizer: "学院", content: "活动内容与参与要求", requirements: "提交参与证明", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "1", scoreMode: "INDIVIDUAL", audience } });
+    check(activity.college?.id === collegeId, "主办学院创建活动未归属本院");
     await admin.json("/api/activities", { termId: term.id, action: "confirm", id: activity.id, revision: activity.revision });
-    const publisherActivity = await publisher.json("/api/activities", { termId: term.id, action: "save", activity: { name: "发布者专属运营活动", organizer: "学院", content: "本人负责活动的完整内容", requirements: "提交参加证明", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "2", audience } });
-    await admin.json("/api/activities", { termId: term.id, action: "confirm", id: publisherActivity.id, revision: publisherActivity.revision });
-    const audiencePreview = await admin.json("/api/activities/audience", { action: "preview", termId: term.id, audience });
+    check((await publisher.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, action: "save", activity: { name: "发布者新建应被阻断", organizer: "学院", content: "内容", requirements: "要求", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "2", audience } }) })).status === 403, "历史发布者不应创建新活动");
+    // 历史发布者的既有活动以隔离夹具数据保留，由管理员受控移交主办学院。
+    const publisherActivityId = `http-${runId}-pubact`;
+    await fixture.query('INSERT INTO "Activity" (id,"termId","ownerId",name,organizer,content,requirements,"startsAt","endsAt","nodeId",points,confirmed,"publishRevision","scoreMode","audienceColleges","audienceClasses","audienceStudents",revision,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,0,$12,$13,$14,$15,0,now(),now())', [publisherActivityId, term.id, `http-${runId}-PUBLISHER`, "发布者专属运营活动", "学院", "本人负责活动的完整内容", "提交参加证明", "2026-10-01T08:00:00.000Z", "2026-10-02T08:00:00.000Z", "total", "2", "FIXED", audience.colleges, audience.classes.map(item => JSON.stringify([item.college, item.major, item.className])), audience.studentIds]);
+    await admin.json("/api/activities", { termId: term.id, action: "reassign", id: publisherActivityId, revision: 0, collegeId, reason: "隔离检查历史活动归属移交" });
+    await admin.json("/api/activities", { termId: term.id, action: "confirm", id: publisherActivityId, revision: 1 });
+    const audiencePreview = await college.json("/api/activities/audience", { action: "preview", termId: term.id, audience });
     check(audiencePreview.count === 1 && audiencePreview.errors.length === 0, "三组范围预检失败");
-    await admin.json("/api/activities", { termId: term.id, action: "publish", id: activity.id, revision: 1, token: audiencePreview.token });
+    const publishedActivity = await college.json("/api/activities", { termId: term.id, action: "publish", id: activity.id, revision: 1, token: audiencePreview.token });
+    check(publishedActivity.publishedAt, "主办学院发布活动失败");
     check((await student.json(`/api/activities?termId=${term.id}&view=feed`)).total === 1, "学生信息流未按已发布范围显示");
     check((await student.json(`/api/activities?termId=${term.id}`)).total === 0, "发布活动不应冒充后台参与登记");
-    const ownerFile = await admin.fetch("/api/evidence", { method: "POST", headers: { "Content-Type": "application/octet-stream", "x-file-name": encodeURIComponent("登记证明.png") }, body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64") });
-    check(ownerFile.status === 201, "活动本人证明上传失败");
+    const ownerFile = await college.fetch("/api/evidence", { method: "POST", headers: { "Content-Type": "application/octet-stream", "x-file-name": encodeURIComponent("活动签到与合影.png") }, body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64") });
+    check(ownerFile.status === 201, "活动共享证明上传失败");
     const ownerEvidence = await ownerFile.json();
-    const registration = await admin.json("/api/activities", { action: "submit", termId: term.id, activityId: activity.id, studentId: selfId, evidenceIds: [ownerEvidence.id], note: "正式后台参与登记" });
-    await admin.json("/api/activities", { action: "close", termId: term.id, id: registration.id, revision: 0, reason: "保留参与事实，本次材料不计分" });
-    check((await student.json(`/api/activities?termId=${term.id}`)).total === 1, "登记后本人活动目录未出现");
-    const participants = await admin.json(`/api/activities/participants?termId=${term.id}&activityId=${activity.id}`);
-    check(participants.total === 1 && participants.items[0].login === "http-student", "活动本人名录缺少登记快照");
-    check(participants.items[0].sources[0].evidence[0].evidence.id === ownerEvidence.id, "活动名录详情缺少真实证明元数据");
+    const sharedEvidence = await college.json("/api/activities", { termId: term.id, action: "evidence", activityId: activity.id, revision: publishedActivity.revision, evidenceId: ownerEvidence.id, note: "活动签到表与现场合影" });
+    check(sharedEvidence.version === 1 && sharedEvidence.active && sharedEvidence.evidence.id === ownerEvidence.id, "活动证明版本未建立");
+    const rosterForm = () => {
+      const form = new FormData();
+      form.append("termId", term.id); form.append("action", "preview"); form.append("activityId", activity.id); form.append("kind", "INITIAL"); form.append("note", "正式参与名单");
+      form.append("file", new Blob(["\uFEFF学号,姓名,学院,专业,班级,活动原始分\r\nhttp-student,HTTP学生,学院,专业,班级,1\r\n"], { type: "text/csv" }), "参与名单.csv");
+      return form;
+    };
+    const importPreview = await college.form("/api/participation-import", rosterForm());
+    check(importPreview.errors === 0 && importPreview.rows[0]?.state === "NEW" && importPreview.rows[0]?.login === "http-student", "完整身份名单预检失败");
+    await college.form("/api/participation-import", (() => { const form = new FormData(); form.append("termId", term.id); form.append("action", "commit"); form.append("id", importPreview.id); return form; })());
+    check((await college.fetch("/api/participation-import", { method: "POST", body: rosterForm() })).status === 409, "首份正式名单提交后未封存普通导入");
+    check((await student.json(`/api/activities?termId=${term.id}`)).total === 1, "名单提交后本人活动目录未出现");
+    const participants = await college.json(`/api/activities/participants?termId=${term.id}&activityId=${activity.id}`);
+    check(participants.total === 1 && participants.items[0].login === "http-student" && participants.items[0].score === "1", "参与名录缺少身份快照或原始分");
+    const source = participants.items[0].sources[0];
+    check(source.status === "PENDING_COUNSELOR" && source.activityEvidenceId === sharedEvidence.id, "参与来源未绑定当前活动证明或初审状态");
+    check((await publisher.fetch(`/api/activities/participants?termId=${term.id}&activityId=${activity.id}`)).status === 404, "非主办发布者不得查看活动参与名单");
+    check((await student.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, action: "counselorApprove", id: source.id, revision: source.revision }) })).status === 403, "学生不得自行通过活动参与审核");
+    const counselorApproved = await counselor.json("/api/activities", { termId: term.id, action: "counselorApprove", id: source.id, revision: source.revision });
+    check(counselorApproved.status === "PENDING_COLLEGE", "辅导员初核未提交归属学院");
+    const activityApproved = await college.json("/api/activities", { termId: term.id, action: "collegeApprove", id: source.id, revision: counselorApproved.revision, reason: "材料与原始分核对无误" });
+    check(activityApproved.status === "APPROVED", "学院终审未通过活动参与");
     const ownActivities = await student.json(`/api/activities?termId=${term.id}`);
-    check(ownActivities.items[0].ownParticipation.sources[0].evidence[0].evidence.id === ownerEvidence.id, "本人活动详情缺少证明预览依据");
-    check((await publisher.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit", termId: term.id, activityId: activity.id, studentId: selfId, evidenceIds: [ownerEvidence.id], note: "越权登记" }) })).status === 403, "非本人不得登记活动");
+    check(ownActivities.items[0].ownParticipation.score === "1" && ownActivities.items[0].ownParticipation.sources[0].status === "APPROVED", "本人活动详情缺少分数或审核状态");
+    check((await student.json(`/api/results?termId=${term.id}`)).result.total === "1.00", "活动认定未进入真实结果计分");
     await student.page(`/activity-feed?termId=${term.id}`);
     await admin.page(`/activities/${activity.id}`);
-    results.push({ label: "STUDENT separate published feed and registered directory; owner participants", status: 200 });
+    await college.page(`/recognitions?termId=${term.id}`);
+    await counselor.page(`/recognitions?termId=${term.id}`);
+    const importPage = await college.page(`/imports?termId=${term.id}&kind=participation`);
+    check(importPage.includes("完整工作区活动"), "参与名单导入页未直接列出本人主办活动");
+    results.push({ label: "COLLEGE host activity, shared evidence, full roster import and two-stage review", status: 200 });
     for (const route of ["grades", "deductions"]) {
       const selected = await admin.page(`/${route}?termId=${term.id}&login=http-student`);
       check(selected.includes("HTTP学生") && selected.includes("http-student"), "指定学号未在首屏加载真实录入对象");
@@ -251,19 +282,31 @@ async function main() {
       results.push({ label: `${role} full readonly scheme list`, status: 200 });
     }
     const studentResults = await admin.json(`/api/results/students?termId=${term.id}&q=http-student`);
-    check(studentResults.total === 1 && studentResults.items[0].complete === true && studentResults.items[0].total === "0.00", "默认结果名录没有返回真实学生与计分");
+    check(studentResults.total === 1 && studentResults.items[0].complete === true && studentResults.items[0].total === "1.00", "默认结果名录没有返回真实学生与计分");
     check((await student.fetch(`/api/results/students?termId=${term.id}`)).status === 403, "结果名录泄露他人成绩");
-    const project = await admin.json("/api/projects", { termId: term.id, name: "个人成果", description: "成果证明审核", nodeId: "total", points: "3", enabled: true });
     const enabledClaims = await student.page(`/claims?termId=${term.id}`);
     const adminClaims = await admin.page(`/claims?termId=${term.id}`);
     check(buttonTexts(enabledClaims).includes("新建个人申报"), "学生默认申报记录页首屏缺少新建申报主操作");
     check(!buttonTexts(enabledClaims).includes("新建认定项目"), "学生误获管理员项目操作");
-    check(buttonTexts(adminClaims).includes("新建认定项目") && !buttonTexts(adminClaims).includes("新建个人申报"), "管理员项目配置与学生本人申报职责混淆");
+    check(!buttonTexts(adminClaims).includes("新建认定项目") && !buttonTexts(adminClaims).includes("新建个人申报"), "管理员不应恢复项目配置或代学生申报");
     results.push({ label: "STUDENT /claims visible primary submission action", status: 200 });
-    results.push({ label: "ADMIN /claims visible project action and role separation", status: 200 });
+    results.push({ label: "ADMIN /claims supervision without discontinued project action", status: 200 });
+    const projectWrite = await admin.fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, name: "应被拒绝的项目", description: "目录已取消", nodeId: "total", points: "3", enabled: true }) });
+    check(projectWrite.status === 403, "已取消的认定项目写接口仍可创建配置");
     const file = await student.fetch("/api/evidence", { method: "POST", headers: { "Content-Type": "application/octet-stream", "x-file-name": encodeURIComponent("证明.png") }, body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64") });
     check(file.status === 201, "证明上传失败"); const evidence = await file.json();
-    const claim = await student.json("/api/claims", { termId: term.id, projectId: project.id, factKey: "HTTP-1", occurredOn: "2026-10-01", note: "成果完整说明", evidenceIds: [evidence.id] });
+    const forgedClaim = await student.fetch("/api/claims", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, title: "伪造评分申报", occurredOn: "2026-10-01", note: "携带学生自报分数", evidenceIds: [evidence.id], score: "99", projectId: "forged", factKey: "HTTP-1", activityId: "forged" }) });
+    check(forgedClaim.status === 400, "学生伪造评分或旧关联字段未被拒绝");
+    check((await student.json(`/api/claims?termId=${term.id}`)).total === 0, "伪造申报不应产生任何记录");
+    const claim = await student.json("/api/claims", { termId: term.id, title: "个人成果", occurredOn: "2026-10-01", note: "成果完整说明", evidenceIds: [evidence.id] });
+    check(claim.status === "PENDING_COUNSELOR" && claim.score === null, "学生直接申报未进入辅导员初审");
+    check((await counselor.json(`/api/claims?termId=${term.id}`)).items.some((row: { id: string }) => row.id === claim.id), "责任辅导员初审队列缺少本人班级申报");
+    check((await college.json(`/api/claims?termId=${term.id}`)).items.some((row: { id: string }) => row.id === claim.id), "学院终审队列缺少本院学生申报");
+    check((await college.fetch(`/api/claims/${claim.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, revision: claim.revision, action: "approve" }) })).status === 409, "未经辅导员评分不应允许学院终审");
+    check((await admin.fetch(`/api/claims/${claim.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, revision: claim.revision, action: "submitScore", nodeId: "total", score: "3" }) })).status === 403, "管理员不应代替辅导员评分");
+    const scoredClaim = await counselor.json(`/api/claims/${claim.id}`, { termId: term.id, revision: claim.revision, action: "submitScore", nodeId: "total", score: "3" }, "PATCH");
+    check(scoredClaim.status === "PENDING_COLLEGE" && scoredClaim.score === "3", "辅导员评分未提交学院");
+    results.push({ label: "direct claim, forged score rejection and counselor scoring", status: 200 });
     for (const [role, session] of [["ADMIN", admin], ["STUDENT", student], ["COLLEGE", college], ["COUNSELOR", counselor]] as const) {
       const previewFile = await session.fetch(`/api/evidence/${evidence.id}?disposition=inline`);
       check(previewFile.ok && previewFile.headers.get("content-type") === "image/png" && previewFile.headers.get("content-disposition")?.startsWith("inline;") && previewFile.headers.get("cache-control") === "private, no-store" && previewFile.headers.get("x-content-type-options") === "nosniff" && previewFile.headers.get("x-frame-options") === "SAMEORIGIN", `${role}授权图片预览或私有响应头错误`);
@@ -292,14 +335,22 @@ async function main() {
     check(adminHome.includes("个人成果") && adminHome.includes("HTTP学生") && adminHome.includes("周期发布与确认概览"), "管理员工作台缺少真实审核和发布数据");
     const studentHome = await workbench(student, "STUDENT", "我的测评概览", term.id);
     check(studentHome.includes("个人成果") && studentHome.includes("本人评分模块概览") && !studentHome.includes("周期发布与确认概览"), "学生工作台未展示本人记录或误含管理主体");
-    await admin.json(`/api/claims/${claim.id}`, { termId: term.id, revision: claim.revision, action: "review", status: "APPROVED", reason: "证明完整属实" }, "PATCH");
+    for (const [role, session] of [["COLLEGE", college], ["COUNSELOR", counselor]] as const) {
+      const html = await session.page(`/claims?termId=${term.id}`);
+      check(html.includes("个人成果") && html.includes("待学院终审"), `${role}申报页面缺少待学院终审记录`);
+      results.push({ label: `${role} /claims pending college review visible`, status: 200 });
+    }
+    const approvedClaim = await college.json(`/api/claims/${claim.id}`, { termId: term.id, revision: scoredClaim.revision, action: "approve", reason: "材料完整属实" }, "PATCH");
+    check(approvedClaim.status === "APPROVED", "学院终审未通过");
+    results.push({ label: "college final approval after counselor scoring", status: 200 });
     const preview = await admin.json(`/api/terms/${term.id}/publication`, { action: "preview" }); check(preview.canPublish, "完整结果应可发布");
     const publication = await admin.json(`/api/terms/${term.id}/publication`, { action: "publish", revision: preview.termRevision, inputRevision: preview.inputRevision, token: preview.token, checkingEndsAt: new Date(Date.now() + 4500).toISOString(), requireConfirmation: true, requestId: randomUUID() });
-    const result = await student.json(`/api/results?termId=${term.id}`); check(result.result.total === "3.00", "结果计分不一致");
-    check(result.claims[0].evidenceIds.includes(evidence.id), "冻结结果丢失原证明关联");
+    const result = await student.json(`/api/results?termId=${term.id}`); check(result.result.total === "4.00", "结果计分不一致");
+    check(result.participations[0]?.name === "完整工作区活动" && result.participations[0]?.points === "1", "冻结结果丢失活动参与或原始分");
+    check(result.claims[0].name === "个人成果" && result.claims[0].evidenceIds.includes(evidence.id), "冻结结果丢失申报标题或原证明关联");
     await student.json(`/api/results/${publication.id}/confirm`, { termId: term.id, resultHash: result.resultHash });
     const publishedHome = await workbench(student, "STUDENT", "我的测评概览", term.id);
-    check(publishedHome.includes("已发布综合总分") && publishedHome.includes("3.00") && publishedHome.includes("固定发布版本"), "学生工作台没有使用固定发布成绩");
+    check(publishedHome.includes("已发布综合总分") && publishedHome.includes("4.00") && publishedHome.includes("固定发布版本"), "学生工作台没有使用固定发布成绩");
     const appeal = await student.json("/api/appeals", { termId: term.id, publicationId: publication.id, resultHash: result.resultHash, target: "总分", reason: "核对计分依据", evidenceIds: [] });
     await admin.json(`/api/appeals/${appeal.id}`, { termId: term.id, revision: 0, action: "reject", resolution: "依据计分规则核对无误" }, "PATCH");
     await new Promise(r => setTimeout(r, 4600));
@@ -308,7 +359,7 @@ async function main() {
     check((await admin.json(`/api/snapshots/${snapshot.id}`)).sha256 === snapshot.sha256, "快照校验失败");
     const lockedClaims = await student.page(`/claims?termId=${term.id}`);
     check(!buttonTexts(lockedClaims).includes("新建个人申报") && lockedClaims.includes("已锁定"), "锁定周期应说明不能新增申报，并保留历史查询");
-    check(lockedClaims.includes("http-1") && lockedClaims.includes("个人成果"), "锁定后应首屏保留本人真实申报记录");
+    check(lockedClaims.includes("个人成果") && lockedClaims.includes("已通过"), "锁定后应首屏保留本人真实申报记录");
     results.push({ label: "STUDENT /claims locked explanation and real history", status: 200 });
     check((await admin.fetch(`/api/rankings/export?termId=${term.id}`)).status === 200, "排名下载失败");
     check((await admin.json(`/api/grades?termId=${term.id}&studentLogin=http-student`)).student.name === "HTTP学生", "锁定周期成绩只读失败");
@@ -316,7 +367,7 @@ async function main() {
     const management = await admin.json(`/api/terms/${term.id}`);
     check(management.canArchive && !management.canDelete && !management.canVoid, "有发布/快照周期错误允许删除作废");
     const archived = await admin.json(`/api/terms/${term.id}`, { action: "archive", revision: management.revision, reason: "结算后归档验证" }, "PATCH");
-    check((await student.json(`/api/results?termId=${term.id}`)).result.total === "3.00", "归档后本人冻结成绩不可读");
+    check((await student.json(`/api/results?termId=${term.id}`)).result.total === "4.00", "归档后本人冻结成绩不可读");
     check((await admin.json(`/api/snapshots/${snapshot.id}`)).sha256 === snapshot.sha256, "归档错误改变快照");
     const archivedPublication = await admin.page(`/publication?termId=${term.id}`);
     check(archivedPublication.includes("归档") && !buttonTexts(archivedPublication).includes("重开周期"), "归档入口未正确只读");
@@ -324,8 +375,8 @@ async function main() {
     results.push({ label: "archived publication/snapshot frozen and reopen blocked", status: 200 });
     for (const path of ["activities", "claims", "results", "publication", "rankings", "appeals"]) { await admin.page(`/${path}?termId=${term.id}`); results.push({ label: `ADMIN /${path} with term`, status: 200 }); }
     await mkdir(".local", { recursive: true });
-    await writeFile(".local/http-check-summary.json", JSON.stringify({ at: new Date().toISOString(), mode: "standalone production / isolated database / temporary attachments / port 3012 / HTTP only", passed: true, pages: results, assets: assets.length, workflows: ["四类角色选择及历史身份登录", "一次性验证码及错误重放", "可配置失败锁定及关闭", "系统信息/主题PUT持久化与登录应用", "周期回收站/恢复/作废/归档及只读保护", "完整制度只读角色", "四类角色限域图片预览及PDF内联/下载", "旧三个工作台及真实归属（新学院工作台尚未开发）", "学生工作台固定发布成绩", "独立职责页面与静态资源", "默认周期直接加载真实活动", "学生档案名录及理由更正", "账号角色状态过滤", "真实学生结果名录", "权限拒绝", "旧个人申报及证明闭环（新两级申报尚未实施）", "审核与计分", "发布确认及异议", "结算快照校验", "锁定后成绩扣分只读", "排名CSV"], browser: "未操作，用户自行验收；HTTP不验证水合后的操作、筛选、拖动、图片/PDF实际绘制与视觉效果" }, null, 2));
-    console.log(`隔离生产HTTP检查通过：${results.length}个角色页面检查、${assets.length}个静态资源及申报到结算闭环；未运行浏览器。`);
+    await writeFile(".local/http-check-summary.json", JSON.stringify({ at: new Date().toISOString(), mode: "standalone production / isolated database / temporary attachments / port 3012 / HTTP only", passed: true, pages: results, assets: assets.length, workflows: ["四类角色选择及历史身份登录", "一次性验证码及错误重放", "可配置失败锁定及关闭", "系统信息/主题PUT持久化与登录应用", "周期回收站/恢复/作废/归档及只读保护", "完整制度只读角色", "四类角色限域图片预览及PDF内联/下载", "管理员、发布者、学生工作台及学院/辅导员真实入口", "学生工作台固定发布成绩", "独立职责页面与静态资源", "默认周期直接加载真实活动", "主办学院活动、共享证明与历史活动受控移交", "完整身份参与名单导入、首份封存与两级审核", "学生档案名录及理由更正", "账号角色状态过滤", "真实学生结果名录", "权限拒绝", "个人申报直接提交、辅导员评分、学院终审与伪造字段拒绝", "审核与计分", "发布确认及异议", "结算快照校验", "锁定后成绩扣分只读", "排名CSV"], browser: "未操作，用户自行验收；HTTP不验证水合后的操作、筛选、拖动、图片/PDF实际绘制与视觉效果" }, null, 2));
+    console.log(`隔离生产HTTP检查通过：${results.length}个角色页面检查、${assets.length}个静态资源及活动参与、申报到结算闭环；未运行浏览器。`);
   } finally {
     if (server && server.exitCode === null) { const stopped = new Promise<void>(done => server!.once("exit", () => done())); server.kill(); await stopped; }
     await fixture.end().catch(() => {});

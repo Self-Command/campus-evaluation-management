@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field";
 import {
 	NativeSelect,
 	NativeSelectOption,
@@ -27,10 +27,13 @@ import {
 	type AudiencePreview,
 } from "./audience-editor";
 import type { Scheme } from "@/lib/scoring/types";
+import type { AppRole } from "@/lib/business-labels";
 export type Activity = {
 	id: string;
 	termId: string;
 	ownerId: string;
+	collegeId?: string | null;
+	college?: { id: string; name: string; code?: string } | null;
 	name: string;
 	organizer: string;
 	content: string;
@@ -45,12 +48,27 @@ export type Activity = {
 	publishRevision?: number;
 	scoreMode?: "FIXED" | "INDIVIDUAL";
 	audience?: Audience | null;
+	canManage?: boolean;
+	canReview?: boolean;
+	rosterCommitted?: boolean;
+	rosterRevision?: number;
+	evidence?: {
+		id: string;
+		version: number;
+		active: boolean;
+		uploadedBy: string;
+		note: string;
+		createdAt: string;
+		evidence: { id: string; name: string; mime: string; size: number };
+	}[];
 	canSubmit?: boolean;
 	ownParticipation?: {
 		id: string;
 		registeredAt: string;
 		registrationSnapshot: Record<string, unknown> | null;
 		score: string | null;
+		removedAt?: string | null;
+		removalReason?: string | null;
 		revision: number;
 		sources: {
 			id: string;
@@ -86,10 +104,14 @@ function localTime(value?: string) {
 export function ActivityForm({
 	term,
 	activity,
+	role,
+	colleges = [],
 	onSaved,
 }: {
 	term: { id: string; phase: string; disposition?: string; scheme: Scheme };
 	activity?: Activity;
+	role?: AppRole;
+	colleges?: { id: string; name: string; code?: string }[];
 	onSaved: (id: string) => void;
 }) {
 	const writable =
@@ -152,6 +174,7 @@ export function ActivityForm({
 								? activity.scoreMode || "FIXED"
 								: f.get("scoreMode"),
 							audience,
+							...(role === "ADMIN" ? { collegeId: f.get("collegeId") || undefined } : {}),
 							startsAt: new Date(String(f.get("startsAt"))).toISOString(),
 							endsAt: new Date(String(f.get("endsAt"))).toISOString(),
 						},
@@ -173,22 +196,22 @@ export function ActivityForm({
 							<CardDescription>{draft.organizer}</CardDescription>
 						</CardHeader>
 						<CardContent className="flex flex-col gap-4">
-							<p className="text-sm text-muted-foreground">认定分值</p>
+							<p className="text-sm text-muted-foreground">活动得分</p>
 							<p className="text-3xl tabular-nums">{draft.points} 分</p>
 							<p className="text-sm text-muted-foreground">
 								{activity?.confirmed
 									? "本活动分值已确认。"
-									: "保存草稿后由管理员确认分值，再核对范围并发布。"}
+									: "保存后由管理员确认分值，再核对范围并发布。"}
 							</p>
 							<Separator />
-							<p className="text-sm font-medium">发布范围交集</p>
+							<p className="text-sm font-medium">符合条件人数</p>
 							<p className="text-3xl tabular-nums">
-								{audiencePreview ? `${audiencePreview.count} 人` : "尚未核对"}
+								{audiencePreview ? `${audiencePreview.count} 人` : "未核对"}
 							</p>
 							<p className="text-sm text-muted-foreground">
 								已选 {audience.colleges.length} 个学院、
-								{audience.classes.length} 个完整班级、
-								{audience.studentIds.length} 位指定学生。
+								{audience.classes.length} 个班级、
+								{audience.studentIds.length} 位学生。
 							</p>
 							<Feedback error={audiencePreview?.errors.join(" ")} />
 							{audiencePreview?.students.map((student) => (
@@ -201,7 +224,7 @@ export function ActivityForm({
 							))}
 							{audiencePreview && (
 								<p className="text-xs text-muted-foreground">
-									仅列前20人，交集总人数以核对结果为准。
+									仅显示前 20 人，总人数以核对结果为准。
 								</p>
 							)}
 							<Button
@@ -226,7 +249,7 @@ export function ActivityForm({
 									}
 								}}
 							>
-								{checking ? "正在核对…" : "核对发布范围"}
+								{checking ? "正在核对…" : "核对范围"}
 							</Button>
 						</CardContent>
 					</Card>
@@ -272,8 +295,36 @@ export function ActivityForm({
 					</div>
 					<div className="grid gap-5 sm:grid-cols-2">
 						<Field>
+							<FieldLabel htmlFor="activity-college">主办学院</FieldLabel>
+							{role === "ADMIN" && !activity ? (
+								<NativeSelect
+									id="activity-college"
+									name="collegeId"
+									defaultValue=""
+									required
+								>
+									<NativeSelectOption value="">选择主办学院</NativeSelectOption>
+									{colleges.map((college) => (
+										<NativeSelectOption key={college.id} value={college.id}>
+											{college.name}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
+							) : (
+								<p className="flex min-h-9 items-center text-sm">
+									{activity?.college?.name ||
+										(role === "ADMIN"
+											? "未设置，请在详情中移交"
+											: "保存后归入当前学院")}
+								</p>
+							)}
+							<FieldDescription>
+								参与记录由主办学院维护，学生所在学院负责审核。
+							</FieldDescription>
+						</Field>
+						<Field>
 							<FieldLabel htmlFor="activity-score-mode">
-								活动计分方式
+								计分方式
 							</FieldLabel>
 							<NativeSelect
 								id="activity-score-mode"
@@ -282,15 +333,15 @@ export function ActivityForm({
 								disabled={activity?.confirmed}
 							>
 								<NativeSelectOption value="FIXED">
-									固定分：参与者使用同一分值
+									统一分值：所有参与者相同
 								</NativeSelectOption>
 								<NativeSelectOption value="INDIVIDUAL">
-									逐人分：按已登记学生分别录入
+									每人单独录分：按学生分别录入
 								</NativeSelectOption>
 							</NativeSelect>
 						</Field>
 						<Field>
-							<FieldLabel htmlFor="activity-node">计分模块</FieldLabel>
+							<FieldLabel htmlFor="activity-node">计分项</FieldLabel>
 							<NativeSelect
 								id="activity-node"
 								name="nodeId"
@@ -299,7 +350,7 @@ export function ActivityForm({
 								required
 							>
 								<NativeSelectOption value="">
-									选择活动累计模块
+									选择计分项
 								</NativeSelectOption>
 								{term.scheme.nodes
 									.filter((n) => n.kind === "ACTIVITY")
@@ -312,7 +363,7 @@ export function ActivityForm({
 						</Field>
 						<Field>
 							<FieldLabel htmlFor="activity-points">
-								固定分值 / 逐人分上限
+								分值（统一或单人上限）
 							</FieldLabel>
 							<Input
 								id="activity-points"
@@ -325,7 +376,7 @@ export function ActivityForm({
 						</Field>
 					</div>
 					<Field>
-						<FieldLabel htmlFor="activity-content">活动内容</FieldLabel>
+						<FieldLabel htmlFor="activity-content">活动介绍</FieldLabel>
 						<Textarea
 							id="activity-content"
 							name="content"
@@ -359,7 +410,7 @@ export function ActivityForm({
 				/>
 			</TemplateEditor>
 			<Button type="submit" disabled={busy || !writable}>
-				{busy ? "正在保存…" : activity ? "保存活动信息" : "保存活动草稿"}
+				{busy ? "正在保存…" : "保存活动"}
 			</Button>
 		</form>
 	);

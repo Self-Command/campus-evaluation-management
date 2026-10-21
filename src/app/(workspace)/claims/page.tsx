@@ -4,23 +4,25 @@ import { measurementContext } from "@/lib/measurement-context";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { TermContext } from "@/components/dashboard/term-context";
 import { MeasurementEmpty } from "@/components/dashboard/measurement-empty";
-import { Claims, type Claim, type Project } from "./_components/claims";
+import { Claims, type Claim } from "./_components/claims";
 import { schemeSchema } from "@/lib/scoring/types";
-import { listProjects, pageClaims, reviewStatusSchema } from "@/server/claims";
+import { pageClaims, claimFilterSchema } from "@/server/claims";
 
-function projectView(
-	project: Awaited<ReturnType<typeof listProjects>>[number],
-): Project {
-	return {
-		id: project.id,
-		revision: project.revision,
-		name: project.name,
-		description: project.description,
-		nodeId: project.nodeId,
-		points: project.points.toFixed(),
-		enabled: project.enabled,
-	};
-}
+const titles = {
+	ADMIN: "成果申报监督",
+	COLLEGE: "成果申报审核",
+	COUNSELOR: "成果申报审核",
+	STUDENT: "成果申报",
+} as const;
+const descriptions = {
+	ADMIN:
+		"查看学生申报、辅导员评分和学院审核记录；已通过的申报可按规则撤销。",
+	COLLEGE:
+		"审核辅导员已评分的申报：通过、退回学生修改，或退回辅导员重新评分。",
+	COUNSELOR:
+		"核对学生提交的成果和证明，选择计分项并评分，再提交学院审核。",	STUDENT:
+		"提交成果、发生日期、说明和证明；辅导员评分、学院审核后可随时查看进度。",
+} as const;
 
 function claimView(
 	row: Awaited<ReturnType<typeof pageClaims>>["items"][number],
@@ -37,28 +39,51 @@ function claimView(
 				continue;
 			history.push({
 				at: entry.at,
-				...(typeof entry.id === "string" ? { id: entry.id } : {}),
 				...(typeof entry.action === "string" ? { action: entry.action } : {}),
+				...(typeof entry.before === "string" ? { before: entry.before } : {}),
 				...(typeof entry.after === "string" ? { after: entry.after } : {}),
 				...(typeof entry.reason === "string" ? { reason: entry.reason } : {}),
+				...(typeof entry.score === "string" ? { score: entry.score } : {}),
 			});
 		}
+	const profile = row.student?.studentProfile;
 	return {
 		id: row.id,
 		revision: row.revision,
 		status: row.status,
-		activityId: row.activityId,
-		factKey: row.factKey,
+		title: row.title,
 		occurredOn: row.occurredOn,
 		note: row.note,
 		reviewReason: row.reviewReason,
 		createdAt: row.createdAt.toISOString(),
-		project: projectView(row.project),
-		student: row.student ?? {
-			id: row.studentId,
-			name: "学生档案不可用",
-			login: "—",
-		},
+		scoreNodeId: row.scoreNodeId,
+		score: row.score?.toFixed() ?? null,
+		scorer: row.scorer,
+		reviewer: row.reviewer,
+		projectName: row.project?.name ?? null,
+		student: row.student
+			? {
+					id: row.student.id,
+					name: row.student.name,
+					login: row.student.login,
+					studentNumber: profile?.studentNumber ?? row.student.login,
+					className:
+						profile?.schoolClass?.name ?? profile?.className ?? "未分班",
+					organization: [
+						profile?.schoolClass?.major?.college?.name,
+						profile?.schoolClass?.major?.name,
+					]
+						.filter(Boolean)
+						.join(" · "),
+				}
+			: {
+					id: row.studentId,
+					name: "学生档案不可用",
+					login: "—",
+					studentNumber: "—",
+					className: "—",
+					organization: "",
+				},
 		evidence: row.evidence,
 		history,
 	};
@@ -69,27 +94,24 @@ export default async function Page({
 	searchParams: Promise<{ termId?: string; page?: string; status?: string }>;
 }) {
 	const user = await pageSession();
-	if (user.role !== "ADMIN" && user.role !== "STUDENT") notFound();
+	if (
+		user.role !== "ADMIN" &&
+		user.role !== "STUDENT" &&
+		user.role !== "COUNSELOR" &&
+		user.role !== "COLLEGE"
+	)
+		notFound();
+	const role = user.role as keyof typeof titles;
 	const p = await searchParams;
-	if (p.status && !reviewStatusSchema.safeParse(p.status).success) notFound();
+	if (p.status && !claimFilterSchema.safeParse(p.status).success) notFound();
 	const { terms, term } = await measurementContext(user.sessionId, p.termId);
 	const page = Math.max(1, Math.min(100000, Math.floor(Number(p.page) || 1)));
-	const [projects, claims] = term
-		? await Promise.all([
-				listProjects(user.sessionId, term.id),
-				pageClaims(user.sessionId, term.id, page, p.status),
-			])
-		: [[], null];
+	const claims = term
+		? await pageClaims(user.sessionId, term.id, page, p.status)
+		: null;
 	return (
 		<>
-			<PageHeading
-				title={user.role === "ADMIN" ? "个人申报审核" : "个人申报"}
-				description={
-					user.role === "ADMIN"
-						? "配置可申报项目，审核学生事实、证明材料与处理历史。"
-						: "选择认定项目，填写本人取得的成果与证明材料，提交后跟进审核。"
-				}
-			/>
+			<PageHeading title={titles[role]} description={descriptions[role]} />
 			<TermContext terms={terms} selected={term?.id} />
 			{term ? (
 				<Claims
@@ -101,10 +123,9 @@ export default async function Page({
 						revision: term.revision,
 						scheme: schemeSchema.parse(term.scheme),
 					}}
-					role={user.role}
+					role={role}
 					page={page}
 					status={p.status || ""}
-					initialProjects={projects.map(projectView)}
 					initialClaims={
 						claims
 							? {

@@ -5,6 +5,7 @@ import { collectStudentResults, ranked, resultStudentSelect, type StudentResultP
 import type { Prisma, Term, Role } from "@/generated/prisma/client";
 import { studentFeedWhere } from "@/server/activity-policy";
 import { effectiveCheckingDeadline } from "@/server/publication-window";
+import { claimPendingStatuses, claimAttentionStatuses } from "@/server/claims";
 
 export type WorkItem = {
   id: string; kind: "ACTIVITY" | "CLAIM" | "APPEAL"; title: string;
@@ -14,7 +15,7 @@ const sourceSelect = {
   id: true, status: true, submitterId: true, reviewReason: true, createdAt: true, updatedAt: true,
   participation: { select: { studentId: true, activity: { select: { id: true, name: true } } } },
 } as const;
-const claimSelect = { id: true, status: true, studentId: true, reviewReason: true, createdAt: true, updatedAt: true, project: { select: { name: true } } } as const;
+const claimSelect = { id: true, status: true, studentId: true, reviewReason: true, createdAt: true, updatedAt: true, title: true } as const;
 type Source = Prisma.RecognitionSourceGetPayload<{ select: typeof sourceSelect }>;
 type Claim = Prisma.PersonalClaimGetPayload<{ select: typeof claimSelect }>;
 type Identity = { id: string; name: string; login: string };
@@ -46,7 +47,7 @@ export type StudentWorkbench = Base & {
   opportunities: { id: string; name: string; organizer: string; startsAt: Date; endsAt: Date; points: string }[];
 };
 export type WorkbenchData = AdminWorkbench | PublisherWorkbench | StudentWorkbench;
-const attention = ["NEEDS_CHANGES", "REJECTED"] as const;
+const attention = ["RETURNED", "REJECTED"] as const;
 function url(path: string, termId: string, status?: string) {
   return `${path}?${new URLSearchParams({ termId, ...(status ? { status } : {}) })}`;
 }
@@ -56,7 +57,7 @@ function sourceItem(row: Source, termId: string, member?: Identity): WorkItem {
     status: row.status, at: row.updatedAt, href: url("/recognitions", termId, row.status) };
 }
 function claimItem(row: Claim, termId: string, member?: Identity): WorkItem {
-  return { id: row.id, kind: "CLAIM", title: row.project.name,
+  return { id: row.id, kind: "CLAIM", title: row.title,
     description: member ? `${member.name} · ${member.login}` : row.reviewReason || "个人成果申报",
     status: row.status, at: row.updatedAt, href: url("/claims", termId, row.status) };
 }
@@ -66,12 +67,12 @@ async function administrator(tx: Prisma.TransactionClient, base: Base): Promise<
   const id = base.term?.id;
   const [activeStudents, pendingRecognitions, pendingClaims, unconfirmedActivities, openAppeals, sources, claims, appeals, terms] = await Promise.all([
     tx.user.count({ where: { role: "STUDENT", disabled: false, studentProfile: { isNot: null } } }),
-    id ? tx.recognitionSource.count({ where: { status: "PENDING", participation: { activity: { termId: id } } } }) : 0,
-    id ? tx.personalClaim.count({ where: { status: "PENDING", project: { termId: id } } }) : 0,
+    id ? tx.recognitionSource.count({ where: { status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] }, participation: { activity: { termId: id } } } }) : 0,
+    id ? tx.personalClaim.count({ where: { termId: id, status: { in: [...claimPendingStatuses] } } }) : 0,
     id ? tx.activity.count({ where: { termId: id, confirmed: false } }) : 0,
     id ? tx.resultAppeal.count({ where: { termId: id, status: { in: ["OPEN", "PROCESSING"] } } }) : 0,
-    id ? tx.recognitionSource.findMany({ where: { status: "PENDING", participation: { activity: { termId: id } } }, select: sourceSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 8 }) : [],
-    id ? tx.personalClaim.findMany({ where: { status: "PENDING", project: { termId: id } }, select: claimSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 8 }) : [],
+    id ? tx.recognitionSource.findMany({ where: { status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] }, participation: { activity: { termId: id } } }, select: sourceSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 8 }) : [],
+    id ? tx.personalClaim.findMany({ where: { termId: id, status: { in: [...claimPendingStatuses] } }, select: claimSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 8 }) : [],
     id ? tx.resultAppeal.findMany({ where: { termId: id, status: { in: ["OPEN", "PROCESSING"] } }, select: { id: true, studentId: true, target: true, status: true, createdAt: true, publication: { select: { sequence: true } } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 6 }) : [],
     tx.term.findMany({ where: { disposition: "NORMAL" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8, select: { id: true, name: true, phase: true, revision: true, publishedResultSetId: true } }),
   ]);
@@ -80,8 +81,8 @@ async function administrator(tx: Prisma.TransactionClient, base: Base): Promise<
   const known = new Map(students.map(row => [row.id, row]));
   const periods = await Promise.all(terms.map(async term => {
     const [recognitions, personal, unresolved, publication, confirmed] = await Promise.all([
-      tx.recognitionSource.count({ where: { status: "PENDING", participation: { activity: { termId: term.id } } } }),
-      tx.personalClaim.count({ where: { status: "PENDING", project: { termId: term.id } } }),
+      tx.recognitionSource.count({ where: { status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] }, participation: { activity: { termId: term.id } } } }),
+      tx.personalClaim.count({ where: { termId: term.id, status: { in: [...claimPendingStatuses] } } }),
       tx.resultAppeal.count({ where: { termId: term.id, status: { in: ["OPEN", "PROCESSING"] } } }),
       term.publishedResultSetId ? tx.resultPublication.findUnique({ where: { id: term.publishedResultSetId }, select: { id: true, studentCount: true, checkingEndsAt: true } }) : null,
       term.publishedResultSetId ? tx.resultConfirmation.count({ where: { result: { publicationId: term.publishedResultSetId } } }) : 0,
@@ -102,16 +103,16 @@ async function publisher(tx: Prisma.TransactionClient, base: Base): Promise<Publ
   const sourceWhere = { participation: { activity: owned } };
   const [activities, unconfirmedActivities, pendingRecognitions, needsChanges, approvedRecognitions, rows, followUps] = await Promise.all([
     tx.activity.count({ where: owned }), tx.activity.count({ where: { ...owned, confirmed: false } }),
-    tx.recognitionSource.count({ where: { ...sourceWhere, status: "PENDING" } }),
-    tx.recognitionSource.count({ where: { ...sourceWhere, submitterId: base.user.id, status: { in: [...attention] } } }),
-    tx.participation.count({ where: { activity: owned, sources: { some: { status: "APPROVED" } } } }),
+    tx.recognitionSource.count({ where: { ...sourceWhere, status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] } } }),
+    tx.recognitionSource.count({ where: { ...sourceWhere, status: { in: [...attention] } } }),
+    tx.participation.count({ where: { activity: owned, removedAt: null, sources: { some: { status: "APPROVED" } } } }),
     tx.activity.findMany({ where: owned, orderBy: [{ startsAt: "desc" }, { id: "desc" }], take: 8, select: { id: true, name: true, organizer: true, startsAt: true, endsAt: true, confirmed: true, points: true, _count: { select: { participations: true } } } }),
-    tx.recognitionSource.findMany({ where: { ...sourceWhere, submitterId: base.user.id, status: { in: [...attention] } }, select: sourceSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
+    tx.recognitionSource.findMany({ where: { ...sourceWhere, status: { in: [...attention] } }, select: sourceSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
   ]);
   const activityRows = await Promise.all(rows.map(async row => {
     const [pendingCount, approvedCount] = await Promise.all([
-      tx.recognitionSource.count({ where: { participation: { activityId: row.id }, status: "PENDING" } }),
-      tx.participation.count({ where: { activityId: row.id, sources: { some: { status: "APPROVED" } } } }),
+      tx.recognitionSource.count({ where: { participation: { activityId: row.id }, status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] } } }),
+      tx.participation.count({ where: { activityId: row.id, removedAt: null, sources: { some: { status: "APPROVED" } } } }),
     ]);
     return { id: row.id, name: row.name, organizer: row.organizer, startsAt: row.startsAt, endsAt: row.endsAt, confirmed: row.confirmed, points: row.points.toFixed(), participantCount: row._count.participations, pendingCount, approvedCount };
   }));
@@ -124,15 +125,15 @@ async function student(tx: Prisma.TransactionClient, base: Base, term: Term | nu
   const id = term.id, actorId = base.user.id;
   const ownFacts = { studentId: actorId, activity: { termId: id } };
   const ownSources = { participation: ownFacts };
-  const ownClaims = { studentId: actorId, project: { termId: id } };
+  const ownClaims = { studentId: actorId, termId: id };
   const currentStudent = await tx.user.findUniqueOrThrow({ where: { id: actorId }, include: { studentProfile: true } });
   const [pendingRecognitions, pendingClaims, approvedRecognitions, approvedClaims, sourceAttention, claimAttention, openAppeals, sources, claims, profile, opportunities] = await Promise.all([
-    tx.recognitionSource.count({ where: { ...ownSources, status: "PENDING" } }),
-    tx.personalClaim.count({ where: { ...ownClaims, status: "PENDING" } }),
-    tx.participation.count({ where: { ...ownFacts, activity: { termId: id, confirmed: true }, sources: { some: { status: "APPROVED" } } } }),
+    tx.recognitionSource.count({ where: { ...ownSources, status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] } } }),
+    tx.personalClaim.count({ where: { ...ownClaims, status: { in: [...claimPendingStatuses] } } }),
+    tx.participation.count({ where: { ...ownFacts, removedAt: null, activity: { termId: id, confirmed: true }, sources: { some: { status: "APPROVED" } } } }),
     tx.personalClaim.count({ where: { ...ownClaims, status: "APPROVED" } }),
-    tx.recognitionSource.count({ where: { ...ownSources, submitterId: actorId, status: { in: [...attention] } } }),
-    tx.personalClaim.count({ where: { ...ownClaims, status: { in: [...attention] } } }),
+    tx.recognitionSource.count({ where: { ...ownSources, status: { in: [...attention] } } }),
+    tx.personalClaim.count({ where: { ...ownClaims, status: { in: [...claimAttentionStatuses] } } }),
     tx.resultAppeal.count({ where: { termId: id, studentId: actorId, status: { in: ["OPEN", "PROCESSING"] } } }),
     tx.recognitionSource.findMany({ where: ownSources, select: sourceSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
     tx.personalClaim.findMany({ where: ownClaims, select: claimSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
@@ -140,8 +141,8 @@ async function student(tx: Prisma.TransactionClient, base: Base, term: Term | nu
     term.phase === "ACTIVE" ? tx.activity.findMany({ where: { termId: id, ...studentFeedWhere(currentStudent), endsAt: { gte: new Date() } }, orderBy: [{ startsAt: "asc" }, { id: "asc" }], take: 5, select: { id: true, name: true, organizer: true, startsAt: true, endsAt: true, points: true } }) : [],
   ]);
   const [neededSources, neededClaims] = await Promise.all([
-    tx.recognitionSource.findMany({ where: { ...ownSources, submitterId: actorId, status: { in: [...attention] } }, select: sourceSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
-    tx.personalClaim.findMany({ where: { ...ownClaims, status: { in: [...attention] } }, select: claimSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
+    tx.recognitionSource.findMany({ where: { ...ownSources, status: { in: [...attention] } }, select: sourceSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
+    tx.personalClaim.findMany({ where: { ...ownClaims, status: { in: [...claimAttentionStatuses] } }, select: claimSelect, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 8 }),
   ]);
   const data: StudentWorkbench = { ...empty,
     stats: { pendingRecognitions, pendingClaims, approvedRecognitions, approvedClaims, needsChanges: sourceAttention + claimAttention, openAppeals },

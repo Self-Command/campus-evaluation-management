@@ -58,9 +58,9 @@ export function Rankings({ termId, filters }: { termId: string; filters: Filters
     { accessorKey: "className", header: "班级" },
     {
       id: "score",
-      header: "综合总分",
+      header: "综合成绩",
       cell: ({ row }) => (
-        <span className="tabular-nums">{row.original.displayTotal ?? row.original.total ?? "待补齐"}</span>
+        <span className="tabular-nums">{row.original.displayTotal ?? row.original.total ?? "未完成"}</span>
       ),
     },
   ];
@@ -69,13 +69,13 @@ export function Rankings({ termId, filters }: { termId: string; filters: Filters
       <RemoteState {...remote} />
       {remote.data && (
         <TemplateDirectory
-          title={`发布版本 ${remote.data.publication.sequence} 排名`}
-          description={`共 ${remote.data.total} 位学生。同分同名次，后续名次按占用人数递增。`}
+          title={`第 ${remote.data.publication.sequence} 版排名`}
+          description={`共 ${remote.data.total} 位学生。同分并列，后续名次按人数顺延。`}
           data={remote.data.items}
           columns={columns}
           actions={
             <a href={`/api/rankings/export?${query}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-              导出当前范围 CSV
+              导出 CSV
             </a>
           }
           filters={
@@ -144,7 +144,7 @@ export function Rankings({ termId, filters }: { termId: string; filters: Filters
                   </NativeSelect>
                 </Field>
               ))}
-              <Button variant="outline">筛选范围</Button>
+              <Button type="submit" variant="outline">搜索</Button>
             </form>
           }
           pagination={{

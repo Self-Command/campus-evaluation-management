@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { createHmac } from "node:crypto";
 import { consumeLoginCaptcha } from "@/server/login-captcha";
-import { settingsSchema, defaultSettings } from "@/lib/settings-schema";
+import { storedSettingsSchema, defaultSettings } from "@/lib/settings-schema";
 
 // NextAuth v4 publishes this provider as CJS exports.default. Native Node ESM
 // (local account tooling) receives that namespace; Next's bundler unwraps it.
@@ -36,8 +36,9 @@ export async function authenticateCredentials(raw: unknown) {
   const parsed = z.object({ login: z.string().trim().min(1).max(64), password: z.string().min(1).max(128), role: z.enum(["ADMIN", "COLLEGE", "COUNSELOR", "STUDENT"]).optional(), captchaId: z.string().uuid(), captcha: z.string().trim().regex(/^[a-zA-Z]{5}$/) }).safeParse(raw);
   if (!parsed.success) return null;
   const { login, password, role, captchaId, captcha } = parsed.data;
-  // Never trust proxy headers for authentication throttling.
-  if (!(await consumeLimit("login-global", "local", 200))) return null;
+  // Never trust proxy headers for authentication throttling. This is only a
+  // coarse flood guard; per-account failure limits are configured in 系统设置.
+  if (!(await consumeLimit("login-global", "local", 1200))) return null;
   if (!(await consumeLoginCaptcha(captchaId, captcha))) throw new Error("CaptchaInvalid");
   const key = createHmac("sha256", process.env.NEXTAUTH_SECRET!).update(`login-failure:${login.toLowerCase()}`).digest("hex");
   const user = await db.user.findUnique({ where: { login } });
@@ -47,7 +48,7 @@ export async function authenticateCredentials(raw: unknown) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(72109312)`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(72109315, ${Buffer.from(key, "hex").readInt32BE(0)})`;
     const settings = await tx.siteSettings.findUnique({ where: { id: "site" } });
-    const policy = settings ? settingsSchema.parse(settings.content) : defaultSettings;
+    const policy = settings ? storedSettingsSchema.parse(settings.content) : defaultSettings;
     const policyKey = `${policy.loginFailureMaxAttempts}:${policy.loginFailureLockMinutes}`;
     const now = new Date();
     let failures = 0;

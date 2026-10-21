@@ -40,7 +40,7 @@ export function calculate(input: unknown, raw: ScoringInput) {
     scores.set(node.id, score); complete.set(node.id, isComplete);
     const stages = { gross, capped, normalized, deduction, beforeFloor, score };
     const formatted = Object.fromEntries(Object.entries(stages).map(([key, value]) => [key, value.fixed()])) as Record<keyof typeof stages, string>;
-    details.push({ id: node.id, name: node.name, parentId: node.parentId, complete: isComplete, ...formatted, exact: Object.fromEntries(Object.entries(stages).map(([key, value]) => [key, value.exact()])), normalization: node.normalize ? { rawMaximum: node.rawMaximum, targetMaximum: node.targetMaximum } : null, parentContribution: node.parentId && nodes.get(node.parentId)!.kind === "WEIGHTED" ? score.mul(R.from(node.weight)).fixed() : score.fixed() });
+    details.push({ id: node.id, name: node.name, parentId: node.parentId, kind: node.kind, weight: node.weight, order: node.order, complete: isComplete, ...formatted, exact: Object.fromEntries(Object.entries(stages).map(([key, value]) => [key, value.exact()])), normalization: node.normalize ? { rawMaximum: node.rawMaximum, targetMaximum: node.targetMaximum } : null, parentContribution: node.parentId && nodes.get(node.parentId)!.kind === "WEIGHTED" ? score.mul(R.from(node.weight)).fixed() : score.fixed() });
   }
   return { total: complete.get(root.id) ? scores.get(root.id)!.fixed() : null, provisionalTotal: scores.get(root.id)!.fixed(), complete: complete.get(root.id)!, missing, details: details.reverse() };
 }

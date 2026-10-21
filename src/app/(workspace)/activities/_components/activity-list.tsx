@@ -23,11 +23,13 @@ export function ActivityList({
 	term,
 	role,
 	query,
+	colleges = [],
 }: {
 	data: { items: Activity[]; total: number; page: number };
 	term: { id: string; phase: string; disposition?: string; scheme: Scheme };
 	role: AppRole;
 	query: string;
+	colleges?: { id: string; name: string; code?: string }[];
 }) {
 	const router = useRouter();
 	const path = usePathname();
@@ -63,24 +65,29 @@ export function ActivityList({
 			),
 		},
 		{
+			accessorKey: "college",
+			header: "主办学院",
+			cell: ({ row }) => row.original.college?.name || "未设置",
+		},
+		{
 			accessorKey: "startsAt",
 			header: "活动时间",
 			cell: ({ row }) => dateText(row.original.startsAt),
 		},
 		{
 			accessorKey: "points",
-			header: "计分方式 / 分值",
+			header: "分值",
 			cell: ({ row }) =>
 				row.original.scoreMode === "INDIVIDUAL"
-					? `逐人分，上限 ${row.original.points}`
-					: `固定 ${row.original.points} 分`,
+					? `每人单独录分，最高 ${row.original.points} 分`
+					: `统一 ${row.original.points} 分`,
 		},
 		{
 			accessorKey: "confirmed",
 			header: "分值状态",
 			cell: ({ row }) => (
 				<Badge variant={row.original.confirmed ? "outline" : "secondary"}>
-					{row.original.confirmed ? "已确认" : "待确认"}
+					{row.original.confirmed ? "已确认" : "未确认"}
 				</Badge>
 			),
 		},
@@ -88,10 +95,10 @@ export function ActivityList({
 			? [
 					{
 						id: "registeredAt",
-						header: "本人参与登记",
+						header: "参与登记",
 						cell: ({ row }: { row: { original: Activity } }) => (
 							<div>
-								<Badge variant="outline">后台已登记</Badge>
+								<Badge variant="outline">已登记</Badge>
 								<p className="mt-1 text-xs text-muted-foreground">
 									{row.original.ownParticipation?.registeredAt
 										? dateText(row.original.ownParticipation.registeredAt)
@@ -102,12 +109,12 @@ export function ActivityList({
 					},
 					{
 						id: "ownScore",
-						header: "本人分数 / 审核",
+						header: "得分 / 审核",
 						cell: ({ row }: { row: { original: Activity } }) => (
 							<div>
 								<p>
 									{row.original.scoreMode === "INDIVIDUAL"
-										? (row.original.ownParticipation?.score ?? "尚未录分")
+										? (row.original.ownParticipation?.score ?? "未录分")
 										: `${row.original.points} 分`}
 								</p>
 								<p className="text-xs text-muted-foreground">
@@ -115,7 +122,7 @@ export function ActivityList({
 										.map(
 											(source) => statusLabels[source.status] || source.status,
 										)
-										.join("、") || "暂无认定来源"}
+										.join("、") || "暂无审核记录"}
 								</p>
 							</div>
 						),
@@ -127,7 +134,7 @@ export function ActivityList({
 						header: "发布状态",
 						cell: ({ row }: { row: { original: Activity } }) => (
 							<Badge variant="outline">
-								{row.original.publishedAt ? "已发布" : "草稿 / 已撤回"}
+								{row.original.publishedAt ? "已发布" : "未发布"}
 							</Badge>
 						),
 					},
@@ -140,7 +147,7 @@ export function ActivityList({
 					href={detailHref(row.original.id)}
 					className={buttonVariants({ variant: "ghost", size: "sm" })}
 				>
-					查看详情
+					查看活动
 				</Link>
 			),
 		},
@@ -148,11 +155,11 @@ export function ActivityList({
 	return (
 		<>
 			<TemplateDirectory
-				title={role === "STUDENT" ? "我参加的活动" : "活动目录"}
+				title={role === "STUDENT" ? "我参加的活动" : "活动管理"}
 				description={
 					role === "STUDENT"
-						? `共 ${data.total} 个后台已登记活动。审核通过后才计分；历史参与保留登记时身份。`
-						: `共 ${data.total} 个匹配活动。草稿、分值确认与发布分别处理。`
+						? `共 ${data.total} 个已登记活动。审核通过后才计分；参与记录保留登记时班级。`
+						: `共 ${data.total} 个活动。草稿、分值确认和发布是三个步骤。`
 				}
 				data={data.items}
 				columns={columns}
@@ -163,7 +170,7 @@ export function ActivityList({
 					hidden: { termId: term.id, ...(tab ? { tab } : {}) },
 				}}
 				actions={
-					role !== "STUDENT" &&
+					(role === "ADMIN" || role === "COLLEGE") &&
 					term.phase === "ACTIVE" &&
 					(!term.disposition || term.disposition === "NORMAL") ? (
 						<Button size="sm" onClick={() => setOpen(true)}>
@@ -187,7 +194,7 @@ export function ActivityList({
 								{row.name}
 							</Link>
 							<Badge variant="outline">
-								{row.confirmed ? "已确认" : "待确认"}
+								{row.confirmed ? "已确认" : "未确认"}
 							</Badge>
 						</div>
 						<p className="text-xs text-muted-foreground">
@@ -201,17 +208,17 @@ export function ActivityList({
 									: "—"}{" "}
 								·{" "}
 								{row.scoreMode === "INDIVIDUAL"
-									? (row.ownParticipation?.score ?? "尚未录分")
+									? (row.ownParticipation?.score ?? "未录分")
 									: `${row.points} 分`}{" "}
 								·{" "}
 								{row.ownParticipation?.sources
 									.map((source) => statusLabels[source.status] || source.status)
-									.join("、") || "暂无认定来源"}
+									.join("、") || "暂无审核记录"}
 							</p>
 						) : (
 							<p className="text-sm">
-								{row.publishedAt ? "已发布" : "草稿 / 已撤回"} ·{" "}
-								{row.scoreMode === "INDIVIDUAL" ? "逐人录分" : "固定分值"}
+								{row.publishedAt ? "已发布" : "未发布"} ·{" "}
+								{row.scoreMode === "INDIVIDUAL" ? "每人单独录分" : "统一分值"}
 							</p>
 						)}
 						<div className="flex items-center justify-between">
@@ -220,7 +227,7 @@ export function ActivityList({
 								href={detailHref(row.id)}
 								className={buttonVariants({ variant: "outline", size: "sm" })}
 							>
-								查看详情
+								查看活动
 							</Link>
 						</div>
 					</div>
@@ -242,11 +249,13 @@ export function ActivityList({
 					<DialogHeader>
 						<DialogTitle>创建活动</DialogTitle>
 						<DialogDescription>
-							保存草稿后确认分值，核对发布范围并独立发布。参与登记与审核计分分别处理。
+							保存后确认分值，核对范围再发布。参与登记和审核计分分开处理。
 						</DialogDescription>
 					</DialogHeader>
 					<ActivityForm
 						term={term}
+						role={role}
+						colleges={colleges}
 						onSaved={(id) => {
 							setOpen(false);
 							router.push(detailHref(id));

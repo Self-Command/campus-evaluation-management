@@ -34,7 +34,7 @@ function outcomeHref(data: StudentData) {
 	return `/results?termId=${data.term!.id}`;
 }
 function outcomeLabel(data: StudentData) {
-	if (data.outcome.state === "CONFIGURATION") return "查看评分制度";
+	if (data.outcome.state === "CONFIGURATION") return "查看评分方案";
 	if (["NO_PROFILE", "NOT_INCLUDED"].includes(data.outcome.state))
 		return "核对本人档案";
 	return "查看我的测评";
@@ -52,7 +52,7 @@ export function StudentWorkbench({
 			<div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
 				<PageHeading
 					title="我的测评概览"
-					description={`${data.user.name}，核对本人成绩与计分依据，及时补充材料并确认发布结果。`}
+					description={`${data.user.name}，核对本人成绩和计分依据，补充材料，确认发布结果。`}
 				/>
 				{data.term && (
 					<div className="flex flex-wrap items-center gap-2 lg:w-fit">
@@ -68,7 +68,7 @@ export function StudentWorkbench({
 							className={buttonVariants({ variant: "outline", size: "sm" })}
 						>
 							<ClipboardList data-icon="inline-start" />
-							个人申报
+							成果申报
 						</Link>
 					</div>
 				)}
@@ -106,38 +106,38 @@ function KpiCards({ data }: { data: StudentData }) {
 	const score = outcome.total ?? outcome.provisionalTotal;
 	const items = [
 		{
-			title: outcome.state === "PUBLISHED" ? "已发布综合总分" : "当前综合成绩",
+			title: outcome.state === "PUBLISHED" ? "已发布综合成绩" : "当前综合成绩",
 			value: score ?? "暂无成绩",
 			description:
 				outcome.total === null && outcome.provisionalTotal !== null
-					? "必需输入缺失，当前分值仅暂计"
+					? "部分成绩未录入，当前为暂计分"
 					: outcome.state === "PUBLISHED"
-						? `固定发布版本 ${outcome.publication?.sequence}`
+						? `已发布第 ${outcome.publication?.sequence} 版`
 						: outcome.state === "CONFIGURATION"
-							? "评分制度尚未生效"
+							? "评分方案尚未生效"
 							: outcome.state === "NO_PROFILE"
 								? "请先核对本人学生档案"
 								: outcome.state === "NOT_INCLUDED"
 									? "请联系管理员核对发布名单"
-									: "实时成绩随有效输入更新",
+									: "成绩会随录入和审核更新",
 		},
 		{
-			title: "本人待审核",
+			title: "待审核",
 			value: String(data.stats.pendingRecognitions + data.stats.pendingClaims),
-			description: `活动认定 ${data.stats.pendingRecognitions} · 个人申报 ${data.stats.pendingClaims}`,
+			description: `活动参与 ${data.stats.pendingRecognitions} · 成果申报 ${data.stats.pendingClaims}`,
 		},
 		{
-			title: "本人待补材料",
+			title: "待补材料",
 			value: String(data.stats.needsChanges),
 			description: "查看审核意见后补充材料并重新提交",
 		},
 		{
-			title: "本人发布名次",
+			title: "发布名次",
 			value: outcome.rank === null ? "尚无名次" : `第 ${outcome.rank} 名`,
 			description:
 				outcome.population === null
-					? "以正式发布名单为准"
-					: `冻结参评名单共 ${outcome.population} 人`,
+					? "以发布名单为准"
+					: `发布名单共 ${outcome.population} 人`,
 		},
 	];
 	return (
@@ -168,19 +168,19 @@ function ClassSchedule({ data }: { data: StudentData }) {
 	const states = {
 		NO_TERM: "暂无测评周期",
 		NO_PROFILE: "尚无本人学生档案",
-		CONFIGURATION: "评分制度配置中",
-		ACTIVE: outcome.complete ? "当前成绩完整" : "仍有必需输入待补齐",
+		CONFIGURATION: "评分方案配置中",
+		ACTIVE: outcome.complete ? "当前成绩完整" : "还有成绩未录入",
 		PUBLISHED: outcome.confirmedAt
-			? "本发布版本已确认"
+			? "已确认本版结果"
 			: data.term!.phase === "LOCKED"
 				? "本周期结果已锁定"
-				: "本发布版本尚未确认",
-		NOT_INCLUDED: "本人不在当前发布名单中",
+				: "尚未确认本版结果",
+		NOT_INCLUDED: "你不在本次发布名单中",
 	};
 	return (
 		<Card className="h-full min-w-0">
 			<CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-				<CardTitle className="text-sm">我的周期与核对任务</CardTitle>
+				<CardTitle className="text-sm">本周期与确认</CardTitle>
 				<CardAction className="col-start-1 row-start-auto flex flex-wrap justify-self-start gap-2 md:col-start-2 md:row-start-1 md:justify-self-end">
 					<Badge variant="outline">{phaseLabels[data.term!.phase]}</Badge>
 				</CardAction>
@@ -193,17 +193,17 @@ function ClassSchedule({ data }: { data: StudentData }) {
 						{outcome.state === "NO_PROFILE"
 							? "请联系管理员补齐学生档案后参加测评。"
 							: outcome.state === "NOT_INCLUDED"
-								? "发布名单按发布时冻结，若与实际情况不符，请联系管理员核对。"
+								? "发布名单按发布时保存，若与实际情况不符，请联系管理员核对。"
 								: outcome.state === "CONFIGURATION"
-									? "制度生效后可提交本人事实，并查看实时成绩。"
+									? "评分方案生效后，可以提交成果并查看实时成绩。"
 									: outcome.state === "PUBLISHED"
-										? "请核对本版本的总分、各模块输入和有效认定依据。"
+										? "请核对本版总分、各模块成绩和认定依据。"
 										: "当前成绩随审核与录入更新，正式成绩以发布版本为准。"}
 					</AlertDescription>
 				</Alert>
 				<dl className="flex flex-col divide-y text-sm">
 					<div className="flex flex-wrap justify-between gap-2 py-3">
-						<dt className="text-muted-foreground">制度 / 输入修订</dt>
+						<dt className="text-muted-foreground">评分方案 / 成绩版本</dt>
 						<dd>
 							{data.term!.revision} / {data.term!.inputRevision}
 						</dd>
@@ -223,7 +223,7 @@ function ClassSchedule({ data }: { data: StudentData }) {
 						</dd>
 					</div>
 					<div className="flex flex-wrap justify-between gap-2 py-3">
-						<dt className="text-muted-foreground">本人确认状态</dt>
+						<dt className="text-muted-foreground">确认状态</dt>
 						<dd>
 							{outcome.confirmedAt
 								? dateText(outcome.confirmedAt)
@@ -237,7 +237,7 @@ function ClassSchedule({ data }: { data: StudentData }) {
 						</dd>
 					</div>
 					<div className="flex justify-between gap-2 py-3">
-						<dt className="text-muted-foreground">本人未决异议</dt>
+						<dt className="text-muted-foreground">待处理异议</dt>
 						<dd>{data.stats.openAppeals}</dd>
 					</div>
 				</dl>
@@ -248,14 +248,14 @@ function ClassSchedule({ data }: { data: StudentData }) {
 					>
 						{data.outcome.state === "ACTIVE" ||
 						data.outcome.state === "PUBLISHED"
-							? "计分依据与版本核对"
+							? "查看计分依据"
 							: outcomeLabel(data)}
 					</Link>
 					<Link
 						href={`/appeals?termId=${data.term!.id}`}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						本人异议记录
+						我的异议
 					</Link>
 				</div>
 			</CardContent>
@@ -266,30 +266,30 @@ function AssignmentStatus({ data }: { data: StudentData }) {
 	return (
 		<Card className="h-full min-w-0">
 			<CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-				<CardTitle className="text-sm">最近待补材料与申报跟进</CardTitle>
+				<CardTitle className="text-sm">待补材料与申报进度</CardTitle>
 				<CardDescription>
-					仅展示本人提交的认定与申报，点击记录查看审核意见和补充要求。
+					显示本人提交的活动参与和成果申报；点击可查看审核意见。
 				</CardDescription>
 				<CardAction className="col-start-1 row-start-auto justify-self-start md:col-start-2 md:row-start-1 md:justify-self-end flex flex-wrap gap-2">
 					<Link
 						href={`/recognitions?termId=${data.term!.id}`}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						活动认定
+						活动参与
 					</Link>
 					<Link
 						href={`/claims?termId=${data.term!.id}`}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						个人申报
+						成果申报
 					</Link>
 				</CardAction>
 			</CardHeader>
 			<CardContent>
 				<WorkbenchItems
 					items={data.followUps}
-					emptyTitle="暂无需要补充或跟进的本人材料"
-					emptyDescription="参与活动或取得成果后，提交真实说明及证明材料。"
+					emptyTitle="暂无待补材料"
+					emptyDescription="参加活动或取得成果后，可提交说明和证明。"
 				/>
 			</CardContent>
 		</Card>
@@ -299,9 +299,9 @@ function PerformanceHighlights({ data }: { data: StudentData }) {
 	return (
 		<Card className="h-full min-w-0">
 			<CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-				<CardTitle className="text-sm">本人评分模块概览</CardTitle>
+				<CardTitle className="text-sm">评分模块</CardTitle>
 				<CardDescription>
-					模块计入分及向上贡献分；缺失与已录入零分分别标记。
+					显示各模块计入分和向上贡献分；缺失与零分分别标记。
 				</CardDescription>
 				<CardAction className="col-start-1 row-start-auto flex flex-wrap justify-self-start gap-2 md:col-start-2 md:row-start-1 md:justify-self-end">
 					<Link
@@ -310,7 +310,7 @@ function PerformanceHighlights({ data }: { data: StudentData }) {
 					>
 						{data.outcome.state === "ACTIVE" ||
 						data.outcome.state === "PUBLISHED"
-							? "完整计算明细"
+							? "查看计算明细"
 							: outcomeLabel(data)}
 					</Link>
 				</CardAction>
@@ -325,7 +325,7 @@ function PerformanceHighlights({ data }: { data: StudentData }) {
 										<TableHead>评分模块</TableHead>
 										<TableHead>计入分</TableHead>
 										<TableHead>向上贡献</TableHead>
-										<TableHead>输入状态</TableHead>
+										<TableHead>成绩状态</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
@@ -366,17 +366,17 @@ function PerformanceHighlights({ data }: { data: StudentData }) {
 					</>
 				) : (
 					<NoData
-						title="尚无本人模块成绩"
+						title="暂无模块成绩"
 						description={
 							data.outcome.state === "CONFIGURATION"
-								? "评分制度配置完成后，可以在这里核对本人模块。"
+								? "评分方案配置完成后，可以在这里核对本人模块。"
 								: "请先确认本人档案与本周期参评范围。"
 						}
 					/>
 				)}{" "}
 				{!!data.outcome.missing.length && (
 					<Alert className="mt-4">
-						<AlertTitle>必需输入待补齐</AlertTitle>
+						<AlertTitle>部分成绩未录入</AlertTitle>
 						<AlertDescription>
 							{data.outcome.missing.map((item) => item.name).join("、")}
 							。请联系管理员核对录入；暂计分不作为正式总分。
@@ -391,8 +391,8 @@ function UpcomingEvents({ data }: { data: StudentData }) {
 	return (
 		<Card className="min-w-0">
 			<CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-				<CardTitle className="text-sm">最近可参与活动</CardTitle>
-				<CardDescription>当前周期已发布且符合本人范围的活动</CardDescription>
+				<CardTitle className="text-sm">近期活动</CardTitle>
+				<CardDescription>本周期已发布、面向你所在范围的活动</CardDescription>
 				<CardAction className="col-start-1 row-start-auto flex flex-wrap justify-self-start gap-2 md:col-start-2 md:row-start-1 md:justify-self-end">
 					<Link
 						href={`/activity-feed?termId=${data.term!.id}`}
@@ -437,8 +437,8 @@ function UpcomingEvents({ data }: { data: StudentData }) {
 					))
 				) : (
 					<NoData
-						title="当前暂无可参与活动"
-						description="可查看已发布活动，或按认定项目提交本人已经取得的成果。"
+						title="暂无可参加活动"
+						description="可查看已发布活动，或直接提交本人已经取得的成果与证明材料。"
 					/>
 				)}
 			</CardContent>
@@ -449,25 +449,25 @@ function RecentRecords({ data }: { data: StudentData }) {
 	return (
 		<Card className="min-w-0">
 			<CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-				<CardTitle>最近本人认定与申报记录</CardTitle>
+				<CardTitle>最近的参与和申报</CardTitle>
 				<CardDescription>
-					已通过活动认定 {data.stats.approvedRecognitions} 条 · 已通过个人申报{" "}
-					{data.stats.approvedClaims} 条，均为当前周期全量。
+					本周期已通过活动参与 {data.stats.approvedRecognitions} 条、成果申报{" "}
+					{data.stats.approvedClaims} 条。
 				</CardDescription>
 				<CardAction className="col-start-1 row-start-auto flex flex-wrap justify-self-start gap-2 md:col-start-2 md:row-start-1 md:justify-self-end">
 					<Link
 						href={`/claims?termId=${data.term!.id}`}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						全部个人申报
+						全部成果申报
 					</Link>
 				</CardAction>
 			</CardHeader>
 			<CardContent>
 				<WorkbenchItems
 					items={data.recent}
-					emptyTitle="本周期尚无本人提交记录"
-					emptyDescription="提交活动参与认定或个人成果申报后，可在这里查看最近处理状态。"
+					emptyTitle="本周期尚无提交记录"
+					emptyDescription="提交活动参与或成果申报后，可在这里查看处理进度。"
 				/>
 			</CardContent>
 		</Card>

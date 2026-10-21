@@ -9,7 +9,7 @@ export default async function Page() {
 		<>
 			<PageHeading
 				title="学生档案"
-				description="查看完整学生名录，按学院、专业和班级筛选并更正组织档案。"
+				description="查看学生名单，按学院、专业和班级筛选；管理员和学院可更正学生班级。"
 			/>
 			<Students role={user.role} />
 		</>

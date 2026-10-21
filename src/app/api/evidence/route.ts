@@ -6,7 +6,7 @@ import { evidenceLimit, uploadEvidence } from "@/server/evidence";
 import { consumeLimit } from "@/server/rate-limit";
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "请求来源无效" }, { status: 403 });
-  const auth = await authorize(["ADMIN", "PUBLISHER", "STUDENT"]);
+  const auth = await authorize(["ADMIN", "PUBLISHER", "COLLEGE", "STUDENT"]);
   if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
   try {
     if (!await consumeLimit("evidence-upload", auth.user.id, 30)) return NextResponse.json({ error: "上传频繁，请稍后重试" }, { status: 429 });

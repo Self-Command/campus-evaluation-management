@@ -22,15 +22,24 @@ import { Prisma } from "@/generated/prisma/client";
 const database = new URL(process.env.DATABASE_URL!);
 if (database.hostname !== "127.0.0.1" || !/^\/campus_test_[a-f0-9]+$/.test(database.pathname)) throw new Error("必须由隔离运行器创建临时数据库");
 const identities: Record<string, { id: string; session: string; login: string }> = {};
-let termId: string | undefined, projectId: string, claimId: string, evidenceId: string, publicationId: string, appealId: string, attachmentRoot: string | undefined;
+let termId: string | undefined, claimId: string, evidenceId: string, publicationId: string, appealId: string, attachmentRoot: string | undefined;
+let orgCollegeId = "", orgMajorId = "", orgClassId = "";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64");
 beforeAll(async () => {
   attachmentRoot = await mkdtemp(join(tmpdir(), "campus-lifecycle-")); process.env.EVIDENCE_DIR = attachmentRoot;
-  for (const [key, role] of [["admin", "ADMIN"], ["publisher", "PUBLISHER"], ["student", "STUDENT"], ["other", "STUDENT"]] as const) {
+  for (const [key, role] of [["admin", "ADMIN"], ["publisher", "PUBLISHER"], ["student", "STUDENT"], ["other", "STUDENT"], ["counselor", "COUNSELOR"], ["college", "COLLEGE"]] as const) {
     const login = `lifecycle-${key}`;
     const user = await db.user.create({ data: { login, name: key === "student" ? "=恶意公式" : key, role, passwordHash: "unused", mustChangePassword: false, ...(role === "STUDENT" ? { studentProfile: { create: { studentNumber: login, college: "学院", major: "专业", className: "班级" } } } : {}) } });
     identities[key] = { id: user.id, login, session: (await db.authSession.create({ data: { userId: user.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } })).id };
   }
+  // 个人申报按班级责任辅导员初审、归属学院终审，先建立完整组织链。
+  orgCollegeId = (await db.college.create({ data: { code: `lifecycle-${randomUUID().slice(0, 8)}`, name: "闭环学院" } })).id;
+  await db.user.update({ where: { id: identities.counselor.id }, data: { collegeId: orgCollegeId } });
+  await db.user.update({ where: { id: identities.college.id }, data: { collegeId: orgCollegeId } });
+  orgMajorId = (await db.major.create({ data: { code: `lifecycle-${randomUUID().slice(0, 8)}`, name: "闭环专业", collegeId: orgCollegeId } })).id;
+  orgClassId = (await db.schoolClass.create({ data: { code: `lifecycle-${randomUUID().slice(0, 8)}`, name: "闭环班级", majorId: orgMajorId, counselorId: identities.counselor.id } })).id;
+  await db.studentProfile.update({ where: { userId: identities.student.id }, data: { classId: orgClassId } });
+  await db.studentProfile.update({ where: { userId: identities.other.id }, data: { classId: orgClassId } });
   termId = (await createTerm(identities.admin.session, { name: "闭环验证", template: false })).id;
   await saveScheme(identities.admin.session, termId, { revision: 0, scheme: { nodes: [nodeSchema.parse({ id: "total", parentId: null, name: "综合成绩", kind: "SUM", order: 0 }), nodeSchema.parse({ id: "grade", parentId: "total", name: "学业成绩", kind: "GRADE", required: true, order: 0 }), nodeSchema.parse({ id: "activity", parentId: "total", name: "个人成果", kind: "ACTIVITY", order: 1 })], deductions: [] } });
   await activateTerm(identities.admin.session, termId, { revision: 1 });
@@ -45,43 +54,68 @@ afterAll(async () => {
     await db.settlementSnapshot.deleteMany({ where: { termId } });
     await db.termReopen.deleteMany({ where: { termId } });
     await db.resultPublication.deleteMany({ where: { termId } });
-    await db.claimEvidence.deleteMany({ where: { claim: { project: { termId } } } });
-    await db.personalClaim.deleteMany({ where: { project: { termId } } });
+    await db.claimEvidence.deleteMany({ where: { claim: { termId } } });
+    await db.personalClaim.deleteMany({ where: { termId } });
     await db.recognitionProject.deleteMany({ where: { termId } });
     await db.gradeImport.deleteMany({ where: { termId } }); await db.gradeInput.deleteMany({ where: { termId } });
     await db.term.delete({ where: { id: termId } });
   }
   const ids = Object.values(identities).map(i => i.id);
+  if (orgClassId) await db.schoolClass.updateMany({ where: { id: orgClassId }, data: { counselorId: null } });
   await db.evidence.deleteMany({ where: { ownerId: { in: ids } } });
   await db.auditEvent.deleteMany({ where: { actorId: { in: ids } } });
   await db.user.deleteMany({ where: { id: { in: ids } } });
+  if (orgClassId) await db.schoolClass.deleteMany({ where: { id: orgClassId } });
+  if (orgMajorId) await db.major.deleteMany({ where: { id: orgMajorId } });
+  if (orgCollegeId) await db.college.deleteMany({ where: { id: orgCollegeId } });
   await db.siteSettings.deleteMany(); await db.brandAsset.deleteMany();
   if (attachmentRoot && attachmentRoot.startsWith(join(tmpdir(), "campus-lifecycle-"))) await rm(attachmentRoot, { recursive: true, force: true });
   delete process.env.EVIDENCE_DIR; await db.$disconnect();
 });
 
-test("个人申报固定分值、证明归属、重复事实、补充历史及本人隔离", async () => {
-  const admin = identities.admin.session, student = identities.student.session;
-  const project = await saveProject(admin, termId!, { name: "成果项目", description: "经审核认定成果", nodeId: "activity", points: "3", enabled: true }); projectId = project.id;
-  await expect(saveProject(student, termId!, { name: "越权", description: "越权操作", nodeId: "activity", points: "99", enabled: true })).rejects.toThrow("权限");
+test("个人申报两级审核、伪造分值拒收、证明归属及本人隔离", async () => {
+  const admin = identities.admin.session, student = identities.student.session, counselor = identities.counselor.session, college = identities.college.session;
+  await expect(saveProject(admin, termId!, { name: "成果项目", description: "经审核认定成果", nodeId: "activity", points: "3", enabled: true })).rejects.toThrow("认定项目目录已取消");
   const file = await uploadEvidence(student, "证明.png", png); evidenceId = file.id;
-  await expect(submitClaim(identities.other.session, termId!, { projectId, factKey: "FACT-1", occurredOn: "2026-10-01", note: "本人取得成果", evidenceIds: [file.id] })).rejects.toThrow("提交者");
-  const claim = await submitClaim(student, termId!, { projectId, factKey: "FACT-1", occurredOn: "2026-10-01", note: "本人取得成果", evidenceIds: [file.id], points: "999" }); claimId = claim.id;
-  await expect(submitClaim(student, termId!, { projectId, factKey: "fact-1", occurredOn: "2026-10-01", note: "重复成果", evidenceIds: [file.id] })).rejects.toThrow("相同事实");
+  // REV-01：学生申报不携带分数，伪造评分、项目或事实键的请求被拒且零写入。
+  await expect(submitClaim(student, termId!, { title: "伪造申报", occurredOn: "2026-10-01", note: "携带伪造字段", evidenceIds: [file.id], points: "999", score: "999", projectId: "forged", factKey: "FACT-1", activityId: "forged" })).rejects.toThrow();
+  expect(await db.personalClaim.count({ where: { termId } })).toBe(0);
+  await expect(submitClaim(identities.other.session, termId!, { title: "他人证明", occurredOn: "2026-10-01", note: "使用他人证明材料", evidenceIds: [file.id] })).rejects.toThrow("提交者");
+  const claim = await submitClaim(student, termId!, { title: "省级竞赛获奖", occurredOn: "2026-10-01", note: "本人取得成果", evidenceIds: [file.id] }); claimId = claim.id;
+  expect(claim.status).toBe("PENDING_COUNSELOR");
   expect((await pageClaims(identities.other.session, termId!)).items).toHaveLength(0);
-  await expect(changeClaim(identities.other.session, termId!, claimId, { action: "withdraw", revision: 0 })).rejects.toThrow("无权");
-  await changeClaim(admin, termId!, claimId, { action: "review", revision: 0, status: "NEEDS_CHANGES", reason: "补充说明" });
-  await changeClaim(student, termId!, claimId, { action: "resubmit", revision: 1, note: "已补充完整说明", evidenceIds: [file.id] });
-  await changeClaim(admin, termId!, claimId, { action: "review", revision: 2, status: "APPROVED", reason: "材料完整属实" });
-  await expect(changeClaim(admin, termId!, claimId, { action: "review", revision: 3, status: "REJECTED", reason: "不能覆盖通过" })).rejects.toThrow("待审核");
+  await expect(changeClaim(identities.other.session, termId!, claimId, { action: "abandon", revision: 0 })).rejects.toThrow("申报不存在");
+  // REV-02：辅导员评分校验——缺分、非计分模块、越范围；学生与学院不能自评。
+  await expect(changeClaim(counselor, termId!, claimId, { action: "submitScore", revision: 0 })).rejects.toThrow("请选择计分模块");
+  await expect(changeClaim(counselor, termId!, claimId, { action: "submitScore", revision: 0, nodeId: "grade", score: "3" })).rejects.toThrow("最底层");
+  await expect(changeClaim(counselor, termId!, claimId, { action: "submitScore", revision: 0, nodeId: "activity", score: "101" })).rejects.toThrow("范围");
+  await expect(changeClaim(student, termId!, claimId, { action: "submitScore", revision: 0, nodeId: "activity", score: "3" })).rejects.toThrow("初审评分权限");
+  await expect(changeClaim(college, termId!, claimId, { action: "submitScore", revision: 0, nodeId: "activity", score: "3" })).rejects.toThrow("初审评分权限");
+  // 合法零分可以先提交学院，再由学院退回重评纠正为实际分值。
+  await changeClaim(counselor, termId!, claimId, { action: "submitScore", revision: 0, nodeId: "activity", score: "0" });
+  await expect(changeClaim(counselor, termId!, claimId, { action: "approve", revision: 1 })).rejects.toThrow("终审权限");
+  await expect(changeClaim(student, termId!, claimId, { action: "approve", revision: 1 })).rejects.toThrow("终审权限");
+  await changeClaim(college, termId!, claimId, { action: "rescore", revision: 1, reason: "评分档次适用错误" });
+  await changeClaim(counselor, termId!, claimId, { action: "submitScore", revision: 2, nodeId: "activity", score: "3" });
+  // REV-04：学院普通退回必须填写理由并退给原学生。
+  await expect(changeClaim(college, termId!, claimId, { action: "return", revision: 3 })).rejects.toThrow("请填写退回修改理由");
+  await changeClaim(college, termId!, claimId, { action: "return", revision: 3, reason: "获奖证书需补原件扫描" });
+  // REV-06：重新提交产生新修订，旧评分清除并重走辅导员初审。
+  await expect(changeClaim(student, termId!, claimId, { action: "resubmit", revision: 4, title: "省级竞赛获奖", occurredOn: "2026-10-01" })).rejects.toThrow("请完整填写");
+  await changeClaim(student, termId!, claimId, { action: "resubmit", revision: 4, title: "省级竞赛获奖", occurredOn: "2026-10-01", note: "已补充证书原件扫描", evidenceIds: [file.id] });
+  const cleared = (await pageClaims(student, termId!)).items.find(row => row.id === claimId)!;
+  expect(cleared.status).toBe("PENDING_COUNSELOR"); expect(cleared.score).toBeNull(); expect(cleared.scorer).toBeNull();
+  await expect(changeClaim(college, termId!, claimId, { action: "approve", revision: 5 })).rejects.toThrow("仅待学院");
+  await changeClaim(counselor, termId!, claimId, { action: "submitScore", revision: 5, nodeId: "activity", score: "3" });
+  await changeClaim(college, termId!, claimId, { action: "approve", revision: 6, reason: "材料完整属实" });
+  await expect(changeClaim(college, termId!, claimId, { action: "approve", revision: 7, reason: "不能覆盖通过" })).rejects.toThrow("仅待学院");
   const result = await getStudentResult(student, termId!);
   expect(result.claims[0].points).toBe("3"); expect(result.result.provisionalTotal).toBe("3.00");
   const roster = await pageResultStudents(admin, termId!, { q: identities.student.login });
   expect(roster.items).toHaveLength(1); expect(roster.items[0].complete).toBe(false); expect(roster.items[0].total).toBeNull();
   await expect(pageResultStudents(student, termId!, {})).rejects.toThrow("权限");
-  expect((await pageClaims(student, termId!)).items[0].history).toHaveLength(4);
+  expect((await pageClaims(student, termId!)).items.find(row => row.id === claimId)!.history).toHaveLength(8);
   await expect(downloadEvidence(identities.other.session, file.id)).rejects.toThrow("权限");
-  await expect(saveProject(admin, termId!, { id: projectId, revision: 0, name: "成果项目", description: "更正说明", nodeId: "activity", points: "4", enabled: true })).rejects.toThrow("已有申报");
 });
 
 test("发布缺失阻断、并发重放、不可变结果与确认绑定", async () => {

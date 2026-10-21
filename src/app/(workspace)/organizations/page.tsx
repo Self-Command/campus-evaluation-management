@@ -9,8 +9,8 @@ export default async function Page() {
 	return (
 		<>
 			<PageHeading
-				title="组织目录"
-				description="维护学院、专业、班级及责任辅导员，归属变更保留理由和修订。"
+				title="组织架构"
+				description="按学院查看专业和班级，维护名称、编码和责任辅导员。"
 			/>
 			<Organizations />
 		</>

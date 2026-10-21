@@ -53,7 +53,7 @@ export function ScoringCorrection({
 						{kind === "activity" ? "活动计分更正" : "认定项目计分更正"}
 					</DialogTitle>
 					<DialogDescription>
-						先预览全部学生影响，再填写理由提交。已发布结果和历史快照保留。
+						先预览全部学生影响，再填写理由提交。已发布结果和历史存档保留。
 					</DialogDescription>
 				</DialogHeader>
 				<CorrectionReview

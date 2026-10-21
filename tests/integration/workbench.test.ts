@@ -31,15 +31,14 @@ beforeAll(async () => {
   await db.recognitionSource.createMany({ data: [
     { participationId: fact.id, submitterId: users.publisher.id, status: "APPROVED", note: "组织认定" },
     { participationId: fact.id, submitterId: users.student.id, status: "APPROVED", note: "本人材料" },
-    { participationId: fact.id, submitterId: users.student.id, status: "PENDING", note: "另项待审材料" },
-    { participationId: fact.id, submitterId: users.publisher.id, status: "NEEDS_CHANGES", note: "组织需补材料", reviewReason: "组织证明须补充" },
-    { participationId: fact.id, submitterId: users.student.id, status: "NEEDS_CHANGES", note: "本人需补材料", reviewReason: "本人证明须补充" },
+    { participationId: fact.id, submitterId: users.student.id, status: "PENDING_COUNSELOR", note: "另项待审材料" },
+    { participationId: fact.id, submitterId: users.publisher.id, status: "RETURNED", note: "组织需补材料", reviewReason: "组织证明须补充" },
+    { participationId: fact.id, submitterId: users.student.id, status: "RETURNED", note: "本人需补材料", reviewReason: "本人证明须补充" },
   ] });
   const otherFact = await db.participation.create({ data: { activityId: other.id, studentId: users.otherStudent.id } });
   await db.recognitionSource.create({ data: { participationId: otherFact.id, submitterId: users.otherPublisher.id, status: "REJECTED", note: "不应向另一个发布者或学生展示", reviewReason: `${marker}-他人私有理由` } });
-  const project = await db.recognitionProject.create({ data: { termId: term.id, name: `${marker}-个人成果`, description: "成果说明", nodeId: "total", points: "3" } });
-  claim = (await db.personalClaim.create({ data: { projectId: project.id, studentId: users.student.id, factKey: "own-fact", occurredOn: "2026-10-01", note: "本人成果", status: "NEEDS_CHANGES", reviewReason: "成果须补证明" } })).id;
-  await db.personalClaim.create({ data: { projectId: project.id, studentId: users.otherStudent.id, factKey: "other-fact", occurredOn: "2026-10-01", note: `${marker}-他人成果`, status: "PENDING" } });
+  claim = (await db.personalClaim.create({ data: { termId: term.id, studentId: users.student.id, title: `${marker}-个人成果`, occurredOn: "2026-10-01", note: "本人成果", status: "RETURNED", reviewReason: "成果须补证明" } })).id;
+  await db.personalClaim.create({ data: { termId: term.id, studentId: users.otherStudent.id, title: `${marker}-他人成果`, occurredOn: "2026-10-01", note: `${marker}-他人申报`, status: "PENDING_COUNSELOR" } });
 });
 afterAll(async () => {
   // All cleanup is restricted to fixture IDs created by this suite, including partial setup.
@@ -51,8 +50,8 @@ afterAll(async () => {
     await db.settlementSnapshot.deleteMany({ where: { termId } });
     await db.termReopen.deleteMany({ where: { termId } });
     await db.resultPublication.deleteMany({ where: { termId } });
-    await db.claimEvidence.deleteMany({ where: { claim: { project: { termId } } } });
-    await db.personalClaim.deleteMany({ where: { project: { termId } } });
+    await db.claimEvidence.deleteMany({ where: { claim: { termId } } });
+    await db.personalClaim.deleteMany({ where: { termId } });
     await db.recognitionProject.deleteMany({ where: { termId } });
     await db.evidenceReference.deleteMany({ where: { source: { participation: { activity: { termId } } } } });
     await db.recognitionSource.deleteMany({ where: { participation: { activity: { termId } } } });
@@ -75,10 +74,10 @@ test("管理工作台显示当前周期全局待审、发布者只显示本人�
   const publisher = await getWorkbench(users.publisher.session, selectedTerm);
   expect(publisher.role).toBe("PUBLISHER"); if (publisher.role !== "PUBLISHER") throw new Error("应为发布者工作台");
   expect(publisher.stats.activities).toBe(2); expect(publisher.stats.pendingRecognitions).toBe(1);
-  expect(publisher.stats.approvedRecognitions).toBe(1); expect(publisher.stats.needsChanges).toBe(1);
+  expect(publisher.stats.approvedRecognitions).toBe(1); expect(publisher.stats.needsChanges).toBe(2);
   expect(publisher.activities.find(row => row.id === privateActivity)?.approvedCount).toBe(1);
   expect(publisher.activities.some(row => row.id === otherActivity)).toBe(false);
-  expect(publisher.followUps).toHaveLength(1); expect(publisher.followUps[0].description).toBe("组织证明须补充");
+  expect(publisher.followUps.map(row => row.description).sort()).toEqual(["本人证明须补充", "组织证明须补充"].sort());
   expect(JSON.stringify(publisher)).not.toContain("他人私有理由");
   expect(publisher).not.toHaveProperty("reviewQueue"); expect(publisher).not.toHaveProperty("outcome");
   expect(JSON.stringify(publisher)).not.toContain("passwordHash");
@@ -89,8 +88,8 @@ test("学生工作台只含本人事项，重复通过来源只计一个有效�
   expect(data.role).toBe("STUDENT"); if (data.role !== "STUDENT") throw new Error("应为学生工作台");
   expect(data.outcome.state).toBe("ACTIVE"); expect(data.outcome.total).toBe("5.00");
   expect(data.stats.approvedRecognitions).toBe(1); expect(data.stats.pendingRecognitions).toBe(1);
-  expect(data.stats.needsChanges).toBe(2); expect(data.stats.pendingClaims).toBe(0);
-  expect(data.followUps.map(row => row.description).sort()).toEqual(["本人证明须补充", "成果须补证明"].sort());
+  expect(data.stats.needsChanges).toBe(3); expect(data.stats.pendingClaims).toBe(0);
+  expect(data.followUps.map(row => row.description).sort()).toEqual(["本人证明须补充", "组织证明须补充", "成果须补证明"].sort());
   expect(data.opportunities.every(row => !row.name.includes("未确认") && !row.name.includes("其他周期"))).toBe(true);
   expect(JSON.stringify(data)).not.toContain("他人私有理由"); expect(JSON.stringify(data)).not.toContain("他人成果");
   expect(data).not.toHaveProperty("periods"); expect(data).not.toHaveProperty("activities");
@@ -109,9 +108,9 @@ test("工作台处理未配置、未入发布范围和会话撤销，不假造�
 });
 
 test("学生工作台采用冻结发布成绩、本人名次及绑定版本确认", async () => {
-  await db.recognitionSource.updateMany({ where: { participation: { activity: { termId: selectedTerm } }, status: { in: ["PENDING", "NEEDS_CHANGES"] } }, data: { status: "REJECTED" } });
-  await db.personalClaim.updateMany({ where: { project: { termId: selectedTerm }, status: { in: ["PENDING", "NEEDS_CHANGES"] } }, data: { status: "REJECTED" } });
-  await db.personalClaim.update({ where: { id: claim }, data: { status: "APPROVED" } });
+  await db.recognitionSource.updateMany({ where: { participation: { activity: { termId: selectedTerm } }, status: { in: ["PENDING_COUNSELOR", "RETURNED"] } }, data: { status: "REJECTED" } });
+  await db.personalClaim.updateMany({ where: { termId: selectedTerm, status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE", "RESCORING", "RETURNED"] } }, data: { status: "ABANDONED" } });
+  await db.personalClaim.update({ where: { id: claim }, data: { status: "APPROVED", score: "3", scoreNodeId: "total", scoredAt: new Date() } });
   const preview = await previewPublication(users.admin.session, selectedTerm);
   const publication = await publishResults(users.admin.session, selectedTerm, { revision: preview.termRevision, inputRevision: preview.inputRevision, token: preview.token, checkingEndsAt: new Date(Date.now() + 600_000).toISOString(), requireConfirmation: true, requestId: randomUUID() });
   await db.activity.update({ where: { id: privateActivity }, data: { points: "99" } });

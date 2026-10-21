@@ -67,7 +67,7 @@ export function StudentDirectory({
       </Button>
     ) : row.complete === null ? (
       <Link href={`/terms/${termId}?tab=scheme`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-        配置评分制度
+        配置评分方案
       </Link>
     ) : (
       <Link href={resultHref(row.login)} className={buttonVariants({ variant: "outline", size: "sm" })}>
@@ -90,25 +90,25 @@ export function StudentDirectory({
     { accessorKey: "className", header: "班级" },
     {
       accessorKey: "total",
-      header: "综合总分",
+      header: "综合成绩",
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.total ?? (row.original.complete === null ? "方案配置中" : "待补齐")}
+          {row.original.total ?? (row.original.complete === null ? "未计算" : "未完成")}
         </span>
       ),
     },
     {
       id: "status",
-      header: "核对状态",
+      header: "确认状态",
       cell: ({ row }) => (
         <Badge variant="outline">
           {row.original.confirmedAt
             ? "已确认"
             : row.original.complete === null
-              ? "待生效"
+              ? "未生效"
               : row.original.complete
                 ? "成绩完整"
-                : "成绩待补齐"}
+                : "成绩未录完"}
         </Badge>
       ),
     },
@@ -119,8 +119,8 @@ export function StudentDirectory({
       <RemoteState {...remote} />
       {remote.data && (
         <TemplateDirectory
-          title={title || (onSelect ? "学生成绩名录" : "学生测评结果")}
-          description={`共 ${remote.data.total} 位匹配学生。${remote.data.publication ? `发布版本 ${remote.data.publication.sequence}，显示冻结结果。` : remote.data.phase === "CONFIGURATION" ? "评分制度配置中，成绩尚未计算。" : "显示本周期当前成绩，未录入与零分分别记录。"}`}
+          title={title || (onSelect ? "学生名单" : "成绩名单")}
+          description={`共 ${remote.data.total} 位学生。${remote.data.publication ? `已发布第 ${remote.data.publication.sequence} 版，显示发布时的成绩。` : remote.data.phase === "CONFIGURATION" ? "评分方案配置中，暂时没有成绩。" : "显示本周期当前成绩，未录入和零分分开记录。"}`}
           data={remote.data.items}
           columns={columns}
           actions={actions}
@@ -181,7 +181,7 @@ export function StudentDirectory({
                   </NativeSelect>
                 </Field>
               ))}
-              <Button variant="outline" disabled={busy}>
+              <Button type="submit" variant="outline" disabled={busy}>
                 搜索学生
               </Button>
               <Button

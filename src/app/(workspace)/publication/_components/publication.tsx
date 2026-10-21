@@ -7,6 +7,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { DataTableFeatures } from "@/lib/data-table-features";
 import { TemplateEditor } from "@/components/dashboard/template-editor";
 import { TemplateDirectory } from "@/components/dashboard/template-directory";
+import { RecordList } from "@/components/dashboard/record-list";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
@@ -85,9 +86,18 @@ type Preview = {
 		studentId: string;
 		login: string;
 		name: string;
-		nodes: unknown[];
+		nodes: { id: string; name: string }[];
 	}[];
 	canPublish: boolean;
+};
+type CohortStudent = Preview["cohortChanges"]["added"][number] & {
+	direction: "added" | "removed";
+};
+type SnapshotStudent = {
+	name: string;
+	login: string;
+	total?: string;
+	rank?: number;
 };
 type LockPreview = {
 	reviewBreakdown: Preview["reviewBreakdown"];
@@ -109,18 +119,18 @@ function ReviewQueues({
 }) {
 	return (
 		<section className="flex flex-col gap-3">
-			<h3 className="text-sm font-medium">认定与申报阻断</h3>
+			<h3 className="text-sm font-medium">尚未完成的审核</h3>
 			{(
 				[
-					["recognitionsPending", "活动认定待审核", "recognitions", "PENDING"],
+					["recognitionsPending", "活动参与待审核", "recognitions", "PENDING"],
 					[
 						"recognitionsNeedsChanges",
-						"活动认定待补充",
+						"活动参与已退回",
 						"recognitions",
-						"NEEDS_CHANGES",
+						"RETURNED",
 					],
-					["claimsPending", "个人申报待审核", "claims", "PENDING"],
-					["claimsNeedsChanges", "个人申报待补充", "claims", "NEEDS_CHANGES"],
+					["claimsPending", "成果申报处理中", "claims", "PENDING"],
+					["claimsNeedsChanges", "成果申报已退回", "claims", "RETURNED"],
 				] as const
 			).map(([key, label, route, status]) => (
 				<Link
@@ -156,17 +166,14 @@ export function Publication({ termId }: { termId: string }) {
 	const [snapId, setSnapId] = useState("");
 	const [extend, setExtend] = useState(false);
 	const [cohort, setCohort] = useState(false);
+	const [missingOpen, setMissingOpen] = useState(false);
+	const [cohortDetail, setCohortDetail] = useState(false);
 	const snapshot = useRemote<{
 		id: string;
 		createdAt: string;
 		payload?: {
 			term: { name: string };
-			results?: {
-				name: string;
-				login: string;
-				total?: string;
-				rank?: number;
-			}[];
+			results?: SnapshotStudent[];
 		};
 		sha256?: string;
 	}>(snapId ? `/api/snapshots/${snapId}` : null);
@@ -186,10 +193,10 @@ export function Publication({ termId }: { termId: string }) {
 			cell: ({ row }) => dateText(row.original.publishedAt),
 		},
 		{ accessorKey: "studentCount", header: "学生人数" },
-		{ accessorKey: "inputRevision", header: "输入修订" },
+		{ accessorKey: "inputRevision", header: "成绩版本" },
 		{
 			accessorKey: "checkingEndsAt",
-			header: "当前核对截止",
+			header: "核对截止",
 			cell: ({ row }) =>
 				dateText(
 					row.original.effectiveCheckingEndsAt || row.original.checkingEndsAt,
@@ -197,7 +204,7 @@ export function Publication({ termId }: { termId: string }) {
 		},
 		{
 			id: "rank",
-			header: "名单",
+			header: "排名",
 			cell: ({ row }) => (
 				<Link
 					href={`/rankings?termId=${termId}&publicationId=${row.original.id}`}
@@ -221,7 +228,7 @@ export function Publication({ termId }: { termId: string }) {
 		},
 		{
 			id: "id",
-			header: "快照标识",
+			header: "存档编号",
 			cell: ({ row }) => (
 				<span className="break-all text-xs">{row.original.id}</span>
 			),
@@ -235,11 +242,103 @@ export function Publication({ termId }: { termId: string }) {
 					size="sm"
 					onClick={() => setSnapId(row.original.id)}
 				>
-					查看快照
+					查看存档
 				</Button>
 			),
 		},
 	];
+	const missingColumns: ColumnDef<
+		DataTableFeatures,
+		Preview["missing"][number]
+	>[] = [
+		{
+			accessorKey: "name",
+			header: "学生",
+			cell: ({ row }) => (
+				<Link
+					href={`/results?termId=${termId}&login=${encodeURIComponent(row.original.login)}`}
+					className="font-medium underline underline-offset-4"
+				>
+					{row.original.name}
+				</Link>
+			),
+		},
+		{ accessorKey: "login", header: "学号" },
+		{
+			id: "nodes",
+			header: "未录入项",
+			cell: ({ row }) => (
+				<span className="block max-w-80 whitespace-normal break-words text-xs text-muted-foreground">
+					{row.original.nodes.map((node) => node.name).join("、")}
+				</span>
+			),
+		},
+		{
+			id: "action",
+			header: "操作",
+			cell: ({ row }) => (
+				<Link
+					href={`/grades?termId=${termId}&login=${encodeURIComponent(row.original.login)}`}
+					className={buttonVariants({ variant: "ghost", size: "sm" })}
+				>
+					录入成绩
+				</Link>
+			),
+		},
+	];
+	const cohortColumns: ColumnDef<DataTableFeatures, CohortStudent>[] = [
+		{ accessorKey: "name", header: "姓名" },
+		{ accessorKey: "login", header: "学号" },
+		{
+			id: "direction",
+			header: "变更",
+			cell: ({ row }) => (
+				<Badge variant="outline">
+					{row.original.direction === "added" ? "新增" : "移除"}
+				</Badge>
+			),
+		},
+	];
+	const snapshotResultColumns: ColumnDef<
+		DataTableFeatures,
+		SnapshotStudent
+	>[] = [
+		{
+			accessorKey: "name",
+			header: "学生",
+			cell: ({ row }) => (
+				<span>
+					{row.original.name} · {row.original.login}
+				</span>
+			),
+		},
+		{
+			accessorKey: "total",
+			header: "总分",
+			cell: ({ row }) => (
+				<span className="tabular-nums">{row.original.total ?? "—"}</span>
+			),
+		},
+		{
+			accessorKey: "rank",
+			header: "名次",
+			cell: ({ row }) => (
+				<span className="tabular-nums">{row.original.rank ?? "—"}</span>
+			),
+		},
+	];
+	const cohortRows: CohortStudent[] = preview
+		? [
+				...(preview.cohortChanges?.added ?? []).map((student) => ({
+					...student,
+					direction: "added" as const,
+				})),
+				...(preview.cohortChanges?.removed ?? []).map((student) => ({
+					...student,
+					direction: "removed" as const,
+				})),
+			]
+		: [];
 	return (
 		<>
 			<RemoteState {...remote} />
@@ -250,7 +349,7 @@ export function Publication({ termId }: { termId: string }) {
 						<div className="flex flex-wrap items-center gap-3">
 							<Badge variant="outline">{phaseLabels[data.term.phase]}</Badge>
 							<span className="text-xs text-muted-foreground">
-								方案修订 {data.term.revision} · 输入修订{" "}
+								评分方案版本 {data.term.revision} · 成绩版本{" "}
 								{data.term.inputRevision}
 							</span>
 						</div>
@@ -263,7 +362,7 @@ export function Publication({ termId }: { termId: string }) {
 										setReopen(true);
 									}}
 								>
-									填写理由并重开更正
+									填写原因并重开更正
 								</Button>
 							)}
 					</div>
@@ -273,9 +372,9 @@ export function Publication({ termId }: { termId: string }) {
 								<CardHeader>
 									<CardTitle>
 										{preview
-											? "发布检查结果"
+											? "发布前检查"
 											: lock
-												? "锁定检查结果"
+												? "锁定前检查"
 												: "当前发布"}
 									</CardTitle>
 									<CardDescription>{data.term.name}</CardDescription>
@@ -305,56 +404,62 @@ export function Publication({ termId }: { termId: string }) {
 												className="self-start"
 												variant={preview.canPublish ? "default" : "secondary"}
 											>
-												{preview.canPublish ? "可以发布" : "存在阻断"}
+												{preview.canPublish ? "可以发布" : "暂时不能发布"}
 											</Badge>
-											{preview.missing.map((item) => (
-												<div
-													key={item.studentId}
-													className="flex flex-col gap-1 border-b pb-3"
-												>
-													<Link
-														href={`/results?termId=${termId}&login=${encodeURIComponent(item.login)}`}
-														className="text-sm underline"
-													>
-														{item.name} · {item.login}
-													</Link>
-													<p className="text-sm text-muted-foreground">
-														缺失 {item.nodes.length} 项必需成绩
+											{preview.missing.length ? (
+												<div className="flex flex-col gap-2 border-b pb-3">
+													<p className="text-sm font-medium text-destructive">
+														必需成绩未录入 {preview.missing.length} 人
 													</p>
-													<Link
-														href={`/grades?termId=${termId}&login=${encodeURIComponent(item.login)}`}
-														className="text-sm underline"
+													<p className="text-sm text-muted-foreground">
+														有成绩未录入时不能发布，请先补齐。
+													</p>
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														className="self-start"
+														onClick={() => setMissingOpen(true)}
 													>
-														录入该学生成绩
-													</Link>
+														查看未录入名单
+													</Button>
 												</div>
-											))}
+											) : (
+												<p className="text-sm text-muted-foreground">
+													必需成绩已齐全。
+												</p>
+											)}
 											<ReviewQueues
 												termId={termId}
 												breakdown={preview.reviewBreakdown}
 											/>
 											<Separator />
 											<section className="flex flex-col gap-3">
-												<h3 className="text-sm font-medium">参评名录政策</h3>
+												<h3 className="text-sm font-medium">参评名单范围</h3>
 												<p className="text-sm">
 													{preview.cohortPolicy === "PREVIOUS"
-														? "沿用原发布名录及历史归属"
-														: "使用当前有效学生名录"}
+														? "沿用上次发布名单和当时班级"
+														: "使用当前在籍学生名单"}
 												</p>
 												<p className="text-sm">
 													新增 {preview.cohortChanges?.added.length || 0} 人 ·
 													移除 {preview.cohortChanges?.removed.length || 0} 人
 												</p>
-												{preview.cohortChanges?.added.map((student) => (
-													<p key={student.studentId} className="text-sm">
-														新增：{student.name} · {student.login}
+												{cohortRows.length ? (
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														className="self-start"
+														onClick={() => setCohortDetail(true)}
+													>
+														查看名单变化
+													</Button>
+												) : (
+													<p className="text-sm text-muted-foreground">
+														本周期名单无变化。
 													</p>
-												))}
-												{preview.cohortChanges?.removed.map((student) => (
-													<p key={student.studentId} className="text-sm">
-														移除：{student.name} · {student.login}
-													</p>
-												))}
+												)}
 											</section>
 										</>
 									) : lock ? (
@@ -378,7 +483,7 @@ export function Publication({ termId }: { termId: string }) {
 																href={`/appeals?termId=${termId}`}
 																className="text-sm underline"
 															>
-																处理本周期结果异议
+																处理本周期成绩异议
 															</Link>
 														)}
 														{item.type === "CONFIRMATIONS" && (
@@ -386,13 +491,13 @@ export function Publication({ termId }: { termId: string }) {
 																href={`/results?termId=${termId}`}
 																className="text-sm underline"
 															>
-																查看本周期学生确认名录
+																查看本周期学生确认名单
 															</Link>
 														)}
 													</div>
 												))
 											) : (
-												<p className="text-sm">全部锁定检查已通过。</p>
+												<p className="text-sm">锁定前检查已全部通过。</p>
 											)}
 											<p className="text-xs text-muted-foreground">
 												检查有效至 {dateText(lock.expiresAt)}
@@ -414,7 +519,7 @@ export function Publication({ termId }: { termId: string }) {
 												发布于 {dateText(data.current.publishedAt)}
 											</p>
 											<p className="text-sm text-muted-foreground">
-												当前核对截止{" "}
+												核对截止{" "}
 												{dateText(
 													data.current.effectiveCheckingEndsAt ||
 														data.current.checkingEndsAt,
@@ -446,15 +551,15 @@ export function Publication({ termId }: { termId: string }) {
 					>
 						<Tabs value="publication">
 							<TabsList className="w-full">
-								<TabsTrigger value="publication">发布与结算</TabsTrigger>
+								<TabsTrigger value="publication">发布与存档</TabsTrigger>
 							</TabsList>
 						</Tabs>
 						<Separator />
 						{data.term.disposition && data.term.disposition !== "NORMAL" ? (
 							<p className="text-sm text-muted-foreground">
 								{data.term.disposition === "ARCHIVED"
-									? "本周期已归档，发布与结算记录只读；需要重开或锁定时，请先在周期管理中取消归档。"
-									: "本周期已作废，发布与结算记录只读。"}
+									? "本周期已归档，发布记录只能查看；需要重开或锁定时，请先在周期管理中取消归档。"
+									: "本周期已作废，发布记录只能查看。"}
 							</p>
 						) : data.term.phase === "ACTIVE" ? (
 							<form
@@ -464,7 +569,7 @@ export function Publication({ termId }: { termId: string }) {
 									if (busy || !preview?.canPublish || !preview.token) return;
 									if (
 										!window.confirm(
-											`发布“${data.term.name}”的 ${preview.studentCount} 位学生结果并进入核对阶段？`,
+											`发布“${data.term.name}”的 ${preview.studentCount} 位学生成绩，并进入学生确认阶段？`,
 										)
 									)
 										return;
@@ -484,7 +589,7 @@ export function Publication({ termId }: { termId: string }) {
 												f.get("requireConfirmation") === "true",
 											requestId: crypto.randomUUID(),
 										});
-										setSuccess("结果已发布，进入学生核对阶段。");
+										setSuccess("结果已发布，学生可以开始确认。");
 										refresh();
 									} catch (err) {
 										setPreview(null);
@@ -497,27 +602,27 @@ export function Publication({ termId }: { termId: string }) {
 								<FieldGroup>
 									{data.history.length > 0 && (
 										<Field>
-											<FieldLabel>重开后参评名录</FieldLabel>
+											<FieldLabel>重开后的参评名单</FieldLabel>
 											<p className="text-sm">
 												{data.term.cohortPolicy === "CURRENT"
-													? "使用当前有效学生名录"
-													: "默认沿用原发布名录及历史归属"}
+													? "使用当前在籍学生名单"
+													: "默认沿用上次发布名单和当时班级"}
 											</p>
 											<FieldDescription>
-												沿用政策保留原发布学生，不因转班或停用删除；需要增减名录时先有理由变更政策，再重新预检。
+												沿用上次名单会保留原发布学生，不因转班或停用删除；需要增减名单时先更改范围，再重新检查。
 											</FieldDescription>
 											<Button
 												type="button"
 												variant="outline"
 												onClick={() => setCohort(true)}
 											>
-												变更参评名录政策
+												更改名单范围
 											</Button>
 										</Field>
 									)}
 									<Field>
 										<FieldLabel htmlFor="publish-deadline">
-											学生核对截止时间
+											学生确认截止时间
 										</FieldLabel>
 										<Input
 											id="publish-deadline"
@@ -526,7 +631,7 @@ export function Publication({ termId }: { termId: string }) {
 											required
 										/>
 										<FieldDescription>
-											核对期限内，学生可以确认本版本或提出异议。
+											截止前，学生可以确认本版成绩或提出异议。
 										</FieldDescription>
 									</Field>
 									<Field>
@@ -575,19 +680,19 @@ export function Publication({ termId }: { termId: string }) {
 									type="submit"
 									disabled={busy || !preview?.canPublish || !preview.token}
 								>
-									发布成绩并进入核对
+									发布成绩
 								</Button>
 							</form>
 						) : data.term.phase === "CHECKING" ? (
 							<div className="flex flex-col gap-5">
-								<h2 className="font-medium">学生核对与锁定</h2>
+								<h2 className="font-medium">学生确认与锁定</h2>
 								{data.current && (
 									<Button variant="outline" onClick={() => setExtend(true)}>
-										填写理由并延长核对期限
+										填写原因并延长确认期限
 									</Button>
 								)}
 								<p className="text-sm text-muted-foreground">
-									核对期限、待审材料、未决异议、必需确认及结果版本均通过检查后，才可锁定。
+									确认期限、待审记录、未处理异议、确认人数和结果版本都通过检查后，才能锁定。
 								</p>
 								<Button
 									variant="outline"
@@ -617,7 +722,7 @@ export function Publication({ termId }: { termId: string }) {
 										if (busy || !lock) return;
 										if (
 											!window.confirm(
-												`锁定“${data.term.name}”，保存 ${lock.studentCount} 位学生的不可变结算快照？`,
+												`锁定“${data.term.name}”，保存 ${lock.studentCount} 位学生的结算存档？`,
 											)
 										)
 											return;
@@ -630,7 +735,7 @@ export function Publication({ termId }: { termId: string }) {
 												token: lock.token,
 												requestId: crypto.randomUUID(),
 											});
-											setSuccess("本周期已锁定，结算快照已保存。");
+											setSuccess("本周期已锁定，结算存档已保存。");
 											refresh();
 										} catch (err) {
 											setError((err as Error).message);
@@ -639,7 +744,7 @@ export function Publication({ termId }: { termId: string }) {
 										}
 									}}
 								>
-									锁定并保存结算快照
+									锁定并保存存档
 								</Button>
 								<Link
 									href={`/appeals?termId=${termId}`}
@@ -657,7 +762,7 @@ export function Publication({ termId }: { termId: string }) {
 								</h2>
 								<p className="text-sm text-muted-foreground">
 									{data.term.phase === "LOCKED"
-										? "结算快照保存完整计分依据，普通录入与导入已关闭。需要更正时请填写理由重开。"
+										? "存档保存完整计分依据，普通录入和导入已关闭。需要更正时请填写原因重开。"
 										: "保存评分方案并开启申报后，录入并审核完整成绩再发布。"}
 								</p>
 								<Link
@@ -694,8 +799,8 @@ export function Publication({ termId }: { termId: string }) {
 					<RemoteState {...snapshots} />
 					{snapshots.data && (
 						<TemplateDirectory
-							title="结算快照"
-							description="锁定时冻结的成绩、归属与计分依据不会被后续更正覆盖。"
+							title="结算存档"
+							description="锁定时保存的成绩、班级和计分依据，不会被后续更正覆盖。"
 							data={snapshots.data}
 							columns={snapshotColumns}
 							mobile={(row) => (
@@ -709,7 +814,7 @@ export function Publication({ termId }: { termId: string }) {
 										variant="outline"
 										onClick={() => setSnapId(row.id)}
 									>
-										查看快照
+										查看存档
 									</Button>
 								</div>
 							)}
@@ -728,9 +833,9 @@ export function Publication({ termId }: { termId: string }) {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>延长学生核对期限</DialogTitle>
+						<DialogTitle>延长学生确认期限</DialogTitle>
 						<DialogDescription>
-							只延长期限，保留已完成的学生确认、原发布成绩及原截止时间。
+							只延长截止时间，已有确认、原发布成绩和原截止时间不变。
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -757,7 +862,7 @@ export function Publication({ termId }: { termId: string }) {
 									reason: form.get("reason"),
 								});
 								setExtend(false);
-								setSuccess("核对期限已延长，已有确认保留。");
+								setSuccess("确认期限已延长，已有确认保留。");
 								refresh();
 							} catch (err) {
 								setError((err as Error).message);
@@ -779,7 +884,7 @@ export function Publication({ termId }: { termId: string }) {
 						<FieldGroup>
 							<Field>
 								<FieldLabel htmlFor="extend-deadline">
-									新的核对截止时间
+									新的确认截止时间
 								</FieldLabel>
 								<Input
 									id="extend-deadline"
@@ -792,7 +897,7 @@ export function Publication({ termId }: { termId: string }) {
 								</FieldDescription>
 							</Field>
 							<Field>
-								<FieldLabel htmlFor="extend-reason">延期理由</FieldLabel>
+								<FieldLabel htmlFor="extend-reason">延期原因</FieldLabel>
 								<Textarea
 									id="extend-reason"
 									name="reason"
@@ -803,7 +908,7 @@ export function Publication({ termId }: { termId: string }) {
 								/>
 							</Field>
 						</FieldGroup>
-						<Button disabled={busy}>确认延长核对期限</Button>
+						<Button type="submit" disabled={busy}>确认延长</Button>
 					</form>
 				</DialogContent>
 			</Dialog>
@@ -818,9 +923,9 @@ export function Publication({ termId }: { termId: string }) {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>变更重开后的参评名录政策</DialogTitle>
+						<DialogTitle>更改重开后的参评名单范围</DialogTitle>
 						<DialogDescription>
-							默认沿用原发布名录和身份。变更政策后必须重新预检并核对新增与移除学生，旧发布不变。
+							默认沿用上次发布名单和当时班级。更改后需要重新检查名单变化，旧发布不变。
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -845,7 +950,7 @@ export function Publication({ termId }: { termId: string }) {
 								});
 								setCohort(false);
 								setSuccess(
-									"参评名录政策已保存，请重新检查发布条件和名录差异。",
+									"参评名单范围已保存，请重新检查发布条件和名单变化。",
 								);
 								refresh();
 							} catch (err) {
@@ -858,23 +963,23 @@ export function Publication({ termId }: { termId: string }) {
 						<Feedback error={error} />
 						<FieldGroup>
 							<Field>
-								<FieldLabel htmlFor="cohort-policy">参评名录政策</FieldLabel>
+								<FieldLabel htmlFor="cohort-policy">参评名单范围</FieldLabel>
 								<NativeSelect
 									id="cohort-policy"
 									name="policy"
 									defaultValue={data?.term.cohortPolicy || "PREVIOUS"}
 								>
 									<NativeSelectOption value="PREVIOUS">
-										沿用原发布名录与历史归属
+										沿用上次发布名单和当时班级
 									</NativeSelectOption>
 									<NativeSelectOption value="CURRENT">
-										重新取当前有效学生名录
+										使用当前在籍学生名单
 									</NativeSelectOption>
 								</NativeSelect>
 							</Field>
 							<Field>
 								<FieldLabel htmlFor="cohort-reason">
-									名录政策变更理由
+									更改原因
 								</FieldLabel>
 								<Textarea
 									id="cohort-reason"
@@ -886,7 +991,7 @@ export function Publication({ termId }: { termId: string }) {
 								/>
 							</Field>
 						</FieldGroup>
-						<Button disabled={busy}>保存政策并重新预检</Button>
+						<Button type="submit" disabled={busy}>保存并重新检查</Button>
 					</form>
 				</DialogContent>
 			</Dialog>
@@ -901,9 +1006,9 @@ export function Publication({ termId }: { termId: string }) {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>填写理由并重开更正</DialogTitle>
+						<DialogTitle>填写原因并重开更正</DialogTitle>
 						<DialogDescription>
-							旧发布与结算快照保留。更正后需要重新发布并核对新版本。
+							旧发布和结算存档保留。更正后需要重新发布并核对新版本。
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -938,7 +1043,7 @@ export function Publication({ termId }: { termId: string }) {
 						<Feedback error={error} />
 						<FieldGroup>
 							<Field>
-								<FieldLabel htmlFor="reopen-reason">重开更正理由</FieldLabel>
+								<FieldLabel htmlFor="reopen-reason">重开原因</FieldLabel>
 								<Textarea
 									id="reopen-reason"
 									name="reason"
@@ -956,6 +1061,107 @@ export function Publication({ termId }: { termId: string }) {
 				</DialogContent>
 			</Dialog>
 			<Dialog
+				open={missingOpen}
+				onOpenChange={(open) => {
+					if (!busy) setMissingOpen(open);
+				}}
+			>
+				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+					<DialogHeader>
+						<DialogTitle>成绩未录完名单</DialogTitle>
+						<DialogDescription>
+							{preview?.missing.length ?? 0} 位学生还有必需成绩未录入，补齐后才能发布。可按姓名或学号查找并进入成绩录入。
+						</DialogDescription>
+					</DialogHeader>
+					{preview && (
+						<RecordList
+							data={preview.missing}
+							columns={missingColumns}
+							searchText={(item) => `${item.name} ${item.login}`}
+							searchPlaceholder="按姓名或学号搜索缺失学生"
+							emptyTitle="没有匹配的记录"
+							emptyDescription="请调整搜索条件。"
+							tableClassName="max-h-[55dvh]"
+							mobile={(item) => (
+								<div className="flex flex-col gap-2">
+									<div className="flex items-start justify-between gap-3">
+										<Link
+											href={`/results?termId=${termId}&login=${encodeURIComponent(item.login)}`}
+											className="font-medium underline underline-offset-4"
+										>
+											{item.name} · {item.login}
+										</Link>
+										<Badge variant="outline">
+											{item.nodes.length} 项
+										</Badge>
+									</div>
+									<p className="text-xs text-muted-foreground">
+										{item.nodes.map((node) => node.name).join("、")}
+									</p>
+									<Link
+										href={`/grades?termId=${termId}&login=${encodeURIComponent(item.login)}`}
+										className="text-sm underline"
+									>
+										录入该学生成绩
+									</Link>
+								</div>
+							)}
+						/>
+					)}
+				</DialogContent>
+			</Dialog>
+			<Dialog
+				open={cohortDetail}
+				onOpenChange={(open) => {
+					if (!busy) setCohortDetail(open);
+				}}
+			>
+				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+					<DialogHeader>
+						<DialogTitle>参评名单变化</DialogTitle>
+						<DialogDescription>
+							这里只改变本周期参评范围，不修改旧发布成绩。可按姓名或学号查找。
+						</DialogDescription>
+					</DialogHeader>
+					{preview && (
+						<RecordList
+							data={cohortRows}
+							columns={cohortColumns}
+							searchText={(student) => `${student.name} ${student.login}`}
+							searchPlaceholder="按姓名或学号搜索名单变更"
+							tabs={[
+								{
+									value: "added",
+									label: `新增 ${preview.cohortChanges?.added.length ?? 0}`,
+									match: (student) => student.direction === "added",
+								},
+								{
+									value: "removed",
+									label: `移除 ${preview.cohortChanges?.removed.length ?? 0}`,
+									match: (student) => student.direction === "removed",
+								},
+							]}
+							emptyTitle="没有匹配的名单变更"
+							emptyDescription="请调整搜索条件或切换新增与移除。"
+							tableClassName="max-h-[55dvh]"
+							mobile={(student) => (
+								<div className="flex items-center justify-between gap-3">
+									<div>
+										<p className="font-medium">{student.name}</p>
+										<p className="text-xs text-muted-foreground">
+											{student.login}
+										</p>
+									</div>
+									<Badge variant="outline">
+										{student.direction === "added" ? "新增" : "移除"}
+									</Badge>
+								</div>
+							)}
+						/>
+					)}
+				</DialogContent>
+			</Dialog>
+			<Dialog
 				open={!!snapId}
 				onOpenChange={(open) => {
 					if (!open) setSnapId("");
@@ -963,14 +1169,14 @@ export function Publication({ termId }: { termId: string }) {
 			>
 				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
 					<DialogHeader>
-						<DialogTitle>结算快照</DialogTitle>
-						<DialogDescription>查看锁定时保存的不可变记录。</DialogDescription>
+						<DialogTitle>结算存档</DialogTitle>
+						<DialogDescription>查看锁定时保存的记录。</DialogDescription>
 					</DialogHeader>
 					<RemoteState {...snapshot} />
 					{snapshot.data && (
 						<div className="flex flex-col gap-4">
 							<p className="break-all text-xs text-muted-foreground">
-								快照标识 {snapshot.data.id}
+								存档编号 {snapshot.data.id}
 							</p>
 							<p className="break-all text-xs text-muted-foreground">
 								校验摘要 {snapshot.data.sha256}
@@ -978,26 +1184,22 @@ export function Publication({ termId }: { termId: string }) {
 							<p className="text-sm">
 								结算时间：{dateText(snapshot.data.createdAt)}
 							</p>
-							{snapshot.data.payload?.results?.map((student, index) => (
-								<div
-									key={`${student.login}-${index}`}
-									className="flex flex-wrap justify-between gap-3 border-b pb-3 text-sm"
-								>
-									<span>
-										{student.name} · {student.login}
-									</span>
-									<span>
-										{student.total ?? "—"} 分 · 名次 {student.rank ?? "—"}
-									</span>
-								</div>
-							))}
+							<RecordList
+								data={snapshot.data.payload?.results ?? []}
+								columns={snapshotResultColumns}
+								searchText={(student) => `${student.name} ${student.login}`}
+								searchPlaceholder="按姓名或学号搜索"
+								emptyTitle="存档中没有学生结果"
+								emptyDescription="该存档没有可显示的学生结果。"
+								tableClassName="max-h-[55dvh]"
+							/>
 							<a
 								href={`/api/snapshots/${snapId}`}
 								target="_blank"
 								rel="noreferrer"
 								className={buttonVariants({ variant: "outline" })}
 							>
-								打开完整冻结记录
+								打开完整存档
 							</a>
 						</div>
 					)}

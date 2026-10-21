@@ -18,8 +18,8 @@ export default async function Page({
   return (
     <>
       <PageHeading
-        title={user.role === "STUDENT" ? "我的测评" : "测评结果"}
-        description="查看完整成绩、模块计算过程、认定与扣分依据及版本确认。"
+        title={user.role === "STUDENT" ? "我的成绩" : "成绩查询"}
+        description="查看成绩明细、计分依据，以及参与和扣分记录，确认发布结果。"
       />
       <TermContext terms={terms} selected={term?.id} />
       {!term ? (
@@ -27,7 +27,7 @@ export default async function Page({
       ) : user.role === "ADMIN" && !p.login ? (
         <StudentDirectory key={term.id} termId={term.id} />
       ) : term.phase === "CONFIGURATION" ? (
-        <NoData title="本周期评分方案配置中" description="评分方案生效后可以查看当前成绩与计分依据。" />
+        <NoData title="评分方案配置中" description="评分方案生效后，可以查看成绩和计分依据。" />
       ) : (
         <ResultView key={`${term.id}-${p.login || ""}`} termId={term.id} role={user.role} login={p.login || ""} />
       )}

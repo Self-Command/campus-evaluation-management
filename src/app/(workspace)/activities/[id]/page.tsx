@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { pageSession } from "@/server/page-session";
 import { getActivity } from "@/server/activities";
 import { listTerms } from "@/server/terms";
+import { listOrganizations } from "@/server/organizations";
 import { ActivityDetail } from "../_components/activity-detail";
 export default async function ActivityPage({
 	params,
@@ -23,6 +24,14 @@ export default async function ActivityPage({
 	);
 	if (!term) notFound();
 	const { returnTo } = await searchParams;
+	const colleges =
+		user.role === "ADMIN"
+			? (await listOrganizations(user.sessionId)).colleges.map((college) => ({
+					id: college.id,
+					name: college.name,
+					code: college.code,
+				}))
+			: [];
 	let returnHref: string | undefined;
 	if (returnTo) {
 		try {
@@ -48,6 +57,7 @@ export default async function ActivityPage({
 			activity={JSON.parse(JSON.stringify(activity))}
 			term={JSON.parse(JSON.stringify(term))}
 			user={{ id: user.id, role: user.role }}
+			colleges={colleges}
 			returnHref={returnHref}
 		/>
 	);

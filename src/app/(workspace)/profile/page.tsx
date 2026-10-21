@@ -51,13 +51,13 @@ export default async function Page() {
 						</div>
 						<div className="flex flex-wrap gap-2">
 							<Badge variant="outline">
-								{data.studentProfile?.college || "学院未填写"}
+								{data.studentProfile?.college || "学院未设置"}
 							</Badge>
 							<Badge variant="outline">
-								{data.studentProfile?.className || "班级未填写"}
+								{data.studentProfile?.className || "班级未设置"}
 							</Badge>
 							{!data.studentProfile?.classId && (
-								<Badge variant="secondary">归属待完善</Badge>
+								<Badge variant="secondary">未分班</Badge>
 							)}
 						</div>
 					</div>
@@ -89,7 +89,7 @@ export default async function Page() {
 					<TabsContent className="py-4" value="personal">
 						<div className="flex flex-col gap-2">
 							<div className="flex items-center gap-2">
-								<h2 className="font-medium text-base">个人与组织信息</h2>
+								<h2 className="font-medium text-base">个人信息</h2>
 								<Badge variant="outline">
 									<LockKeyhole data-icon="inline-start" />
 									本人可见
@@ -110,7 +110,7 @@ export default async function Page() {
 										[
 											"责任辅导员",
 											data.studentProfile?.schoolClass?.counselor?.name ||
-												"待完善",
+												"未设置",
 										],
 									],
 								].map((group, i) => (
@@ -121,7 +121,7 @@ export default async function Page() {
 													{label}
 												</dt>
 												<dd className="break-words text-sm">
-													{value || "尚未填写"}
+													{value || "未填写"}
 												</dd>
 											</div>
 										))}
@@ -133,7 +133,7 @@ export default async function Page() {
 						<div className="flex flex-col gap-2">
 							<h2 className="font-medium text-base">档案更正</h2>
 							<p className="text-muted-foreground text-sm">
-								如学号或组织归属有误，请联系学院管理人员或学校管理员核对并更正。责任辅导员由所在班级确定。
+								如学号或班级有误，请联系学院或学校管理员更正。责任辅导员由所在班级确定。
 							</p>
 						</div>
 					</TabsContent>
@@ -142,7 +142,7 @@ export default async function Page() {
 							<h2 className="font-medium text-base">登录账号</h2>
 							<p className="text-sm">{data.login}</p>
 							<p className="text-muted-foreground text-sm">
-								测评申报与成绩始终关联本账号。请妥善保管密码。
+								成果申报和成绩都会关联本账号。请妥善保管密码。
 							</p>
 						</div>
 					</TabsContent>

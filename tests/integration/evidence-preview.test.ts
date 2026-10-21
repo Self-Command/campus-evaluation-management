@@ -7,7 +7,7 @@ import { db } from "@/server/db";
 import { organizationFixture } from "./organization-fixture";
 import { uploadEvidence, downloadEvidence } from "@/server/evidence";
 import { createTerm, activateTerm } from "@/server/terms";
-import { saveProject, submitClaim } from "@/server/claims";
+import { submitClaim } from "@/server/claims";
 import type { Role } from "@/generated/prisma/client";
 
 const address = new URL(process.env.DATABASE_URL!);
@@ -38,15 +38,14 @@ beforeAll(async () => {
   const admin = users.admin.session;
   const term = await createTerm(admin, { name: `${prefix}-材料`, template: false }); termId = term.id;
   await activateTerm(admin, termId, { revision: 0 });
-  const project = await saveProject(admin, termId, { name: "本人材料", description: "隔离证明预览授权", nodeId: "total", points: "1", enabled: true });
   fileId = (await uploadEvidence(users["student-a"].session, "中文材料.png", png)).id;
-  await submitClaim(users["student-a"].session, termId, { projectId: project.id, factKey: "PREVIEW-1", occurredOn: "2026-10-20", note: "材料预览真实引用", evidenceIds: [fileId] });
+  await submitClaim(users["student-a"].session, termId, { title: "本人材料", occurredOn: "2026-10-20", note: "材料预览真实引用", evidenceIds: [fileId] });
 });
 
 afterAll(async () => {
   if (termId) {
-    await db.claimEvidence.deleteMany({ where: { claim: { project: { termId } } } });
-    await db.personalClaim.deleteMany({ where: { project: { termId } } });
+    await db.claimEvidence.deleteMany({ where: { claim: { termId } } });
+    await db.personalClaim.deleteMany({ where: { termId } });
     await db.recognitionProject.deleteMany({ where: { termId } });
     await db.term.deleteMany({ where: { id: termId } });
   }

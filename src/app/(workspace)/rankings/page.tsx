@@ -23,7 +23,7 @@ export default async function Page({
   const { terms, term } = await measurementContext(user.sessionId, p.termId);
   return (
     <>
-      <PageHeading title="排名与导出" description="按冻结的发布结果排名，同分使用竞赛名次，页面与导出采用相同名单。" />
+      <PageHeading title="排名与导出" description="按已发布结果查看排名，并导出同一份名单。" />
       <TermContext terms={terms} selected={term?.id} />
       {term ? (
         <Rankings

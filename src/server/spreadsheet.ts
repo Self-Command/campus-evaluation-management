@@ -28,8 +28,19 @@ async function inspectZip(buffer: Buffer) {
     });
   });
 }
-export async function parseAccountFile(name: string, bytes: Buffer) {
-  if (bytes.length > 1024 * 1024 || !bytes.length) throw new AccountError("文件需为1MB以内的 CSV 或 XLSX");
+export async function parseAccountFile(
+	name: string,
+	bytes: Buffer,
+	options: { maxRows?: number; maxBytes?: number } = {},
+) {
+	const maxRows = options.maxRows ?? 100;
+	const maxBytes = options.maxBytes ?? 1024 * 1024;
+	if (bytes.length > maxBytes || !bytes.length)
+		throw new AccountError(
+			maxRows > 100
+				? "文件需为5MB以内的 CSV 或 XLSX"
+				: "文件需为1MB以内的 CSV 或 XLSX",
+		);
   let raw: unknown[][];
   if (name.toLowerCase().endsWith(".csv")) {
     let text: string;
@@ -43,7 +54,7 @@ export async function parseAccountFile(name: string, bytes: Buffer) {
       raw = sheets[0].data;
     } catch { throw new AccountError("XLSX 无法读取，请使用普通文本单元格和单一名单工作表"); }
   } else throw new AccountError("仅支持 CSV 和 XLSX");
-  if (raw.length < 2 || raw.length > 101) throw new AccountError("名单需包含表头及1–100行学生，每批最多100人");
+  if (raw.length < 2 || raw.length > maxRows + 1) throw new AccountError(`名单需包含表头及1–${maxRows}行学生，每批最多${maxRows}人`);
   if (raw[0].length > 30 || raw.some(row => row.length > 30)) throw new AccountError("每份名单最多30列");
   const headers = raw[0].map((v, i) => String(v ?? "").trim() || `第${i + 1}列`);
   const rows = raw.slice(1).map(row => row.map(value => {

@@ -81,13 +81,13 @@ const actions: Record<Action, string> = {
 const usageLabels: Record<string, string> = {
 	activities: "活动",
 	projects: "历史申报项目",
-	claims: "个人申报",
+	claims: "成果申报",
 	grades: "成绩记录",
 	deductions: "扣分记录",
 	imports: "导入批次",
 	publications: "结果发布",
-	snapshots: "结算快照",
-	appeals: "结果异议",
+	snapshots: "结算存档",
+	appeals: "成绩异议",
 	reopenings: "重开记录",
 	corrections: "计分更正",
 };
@@ -206,7 +206,7 @@ export function Terms({
 			header: "评分模块",
 			cell: ({ row }) => `${row.original.scheme.nodes.length} 个`,
 		},
-		{ accessorKey: "revision", header: "周期修订" },
+		{ accessorKey: "revision", header: "方案版本" },
 		{
 			accessorKey: "createdAt",
 			header: "创建时间",
@@ -245,7 +245,7 @@ export function Terms({
 			{remote.data && (
 				<TemplateDirectory
 					title="测评周期"
-					description={`当前${viewLabels[view]}共 ${filtered.length} 个。复制仅保留评分制度，业务记录与证明不复制。`}
+					description={`当前${viewLabels[view]}共 ${filtered.length} 个。复制只保留评分方案，不带业务记录和证明。`}
 					data={filtered.slice((currentPage - 1) * 20, currentPage * 20)}
 					columns={columns}
 					search={{
@@ -298,7 +298,7 @@ export function Terms({
 								</Badge>
 							</div>
 							<p className="text-xs text-muted-foreground">
-								{t.scheme.nodes.length} 个模块 · 修订 {t.revision} ·{" "}
+								{t.scheme.nodes.length} 个模块 · 版本 {t.revision} ·{" "}
 								{dateText(t.createdAt)}
 							</p>
 							<div className="flex flex-wrap gap-2">
@@ -336,7 +336,7 @@ export function Terms({
 					<DialogHeader>
 						<DialogTitle>新建测评周期</DialogTitle>
 						<DialogDescription>
-							创建后先配置评分制度，再开启申报。复制不会带入任何学生、成绩、活动或证明。
+							创建后先配置评分方案，再开启申报。复制不会带入学生、成绩、活动或证明。
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -370,13 +370,13 @@ export function Terms({
 								<Input id="term-name" name="name" required maxLength={80} />
 							</Field>
 							<Field>
-								<FieldLabel htmlFor="term-source">评分制度来源</FieldLabel>
+								<FieldLabel htmlFor="term-source">评分方案来源</FieldLabel>
 								<NativeSelect
 									id="term-source"
 									value={source}
 									onChange={(e) => setSource(e.target.value)}
 								>
-									<NativeSelectOption value="">使用初始制度</NativeSelectOption>
+									<NativeSelectOption value="">使用空白方案</NativeSelectOption>
 									{sources
 										.filter((t) => t.disposition !== "DELETED")
 										.map((t) => (
@@ -391,19 +391,19 @@ export function Terms({
 							</Field>
 							{!source && (
 								<Field>
-									<FieldLabel htmlFor="term-template">初始评分制度</FieldLabel>
+									<FieldLabel htmlFor="term-template">初始评分方案</FieldLabel>
 									<NativeSelect id="term-template" name="template">
 										<NativeSelectOption value="blank">
-											空白制度
+											空白方案
 										</NativeSelectOption>
 										<NativeSelectOption value="school">
-											学校制度样例（请按实际调整）
+											学校样例（请按实际调整）
 										</NativeSelectOption>
 									</NativeSelect>
 								</Field>
 							)}
 						</FieldGroup>
-						<Button disabled={busy}>{busy ? "正在创建…" : "创建并配置"}</Button>
+						<Button type="submit" disabled={busy}>{busy ? "正在创建…" : "创建并配置"}</Button>
 					</form>
 				</DialogContent>
 			</Dialog>
@@ -424,7 +424,7 @@ export function Terms({
 					<DialogHeader>
 						<DialogTitle>{target?.name} · 周期管理</DialogTitle>
 						<DialogDescription>
-							根据当前业务引用决定可执行操作，所有变更保留理由和修订。
+							根据当前业务引用决定可执行操作，所有变更保留理由和修改记录。
 						</DialogDescription>
 					</DialogHeader>
 					<RemoteState {...details} />
@@ -475,7 +475,7 @@ export function Terms({
 								))}
 							</dl>
 							<p className="text-xs text-muted-foreground">
-								修订 {details.data.revision} ·{" "}
+								版本 {details.data.revision} ·{" "}
 								{dispositionLabels[details.data.disposition || "NORMAL"]}
 								{details.data.dispositionAt
 									? ` · ${dateText(details.data.dispositionAt)}`
@@ -501,7 +501,7 @@ export function Terms({
 											))}
 									</NativeSelect>
 									<FieldDescription>
-										仅无业务引用的配置周期可移入回收站；未发布结算的周期可作废；锁定后方可归档。作废及归档记录保留查询。
+										只有没有业务记录的配置周期才能移入回收站；未发布的周期可以作废；锁定后才能归档。作废和归档记录都可以继续查看。
 									</FieldDescription>
 								</Field>
 								{action === "rename" && (
@@ -528,7 +528,7 @@ export function Terms({
 									/>
 								</Field>
 							</FieldGroup>
-							<Button disabled={busy || !allowed(details.data, action)}>
+							<Button type="submit" disabled={busy || !allowed(details.data, action)}>
 								{busy ? "正在提交…" : actions[action]}
 							</Button>
 						</form>

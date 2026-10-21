@@ -115,7 +115,7 @@ export function CorrectionReview({
 						<CardHeader>
 							<CardTitle>更正影响预览</CardTitle>
 							<CardDescription>
-								旧发布和结算快照保持原记录；新输入须重新发布并核对。
+								旧发布和结算存档保持原记录；新输入须重新发布并核对。
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="flex flex-col gap-4">

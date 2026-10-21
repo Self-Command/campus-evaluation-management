@@ -55,13 +55,13 @@ export default async function Page({
 			<>
 				<PageHeading
 					title={term.name}
-					description="查阅本周期完整评分模块、计分规则与扣分制度。"
+					description="查看本周期评分模块、计分规则和扣分制度。"
 					action={
 						<Link
 							href={returnHref}
 							className={buttonVariants({ variant: "outline" })}
 						>
-							返回周期名录
+							返回周期列表
 						</Link>
 					}
 				/>
@@ -78,11 +78,14 @@ export default async function Page({
 	const query = (p.q || "").slice(0, 80);
 	const status = [
 		"PENDING",
+		"PENDING_COUNSELOR",
+		"PENDING_COLLEGE",
+		"RETURNED",
 		"APPROVED",
-		"REJECTED",
-		"NEEDS_CHANGES",
+		"SUPERSEDED",
 		"WITHDRAWN",
 		"REVOKED",
+		"REJECTED",
 	].includes(p.status || "")
 		? p.status
 		: undefined;
@@ -105,7 +108,7 @@ export default async function Page({
 		<>
 			<PageHeading
 				title={term.name}
-				description="查看周期阶段、制度修订与活动目录，配置完整评分制度。"
+				description="查看周期阶段、评分方案、活动名单和审核记录。"
 				action={
 					<Link
 						href={returnHref}
@@ -138,11 +141,11 @@ export default async function Page({
 									<Card>
 										<CardHeader>
 											<CardTitle>评分方案</CardTitle>
-											<CardDescription>当前生效或配置中的制度</CardDescription>
+											<CardDescription>当前使用的评分方案</CardDescription>
 										</CardHeader>
 										<CardContent>
 											<p className="text-sm">
-												{term.scheme.nodes.length} 个模块 · 修订 {term.revision}
+												{term.scheme.nodes.length} 个模块 · 第 {term.revision} 版
 											</p>
 										</CardContent>
 									</Card>
@@ -151,38 +154,38 @@ export default async function Page({
 											<CardTitle>下一步工作</CardTitle>
 											<CardDescription>
 												{term.phase === "CONFIGURATION"
-													? "完成制度并开启申报"
+													? "完成评分方案并开启申报"
 													: term.phase === "ACTIVE"
-														? "录入并审核完整成绩"
+														? "录入并审核成绩"
 														: term.phase === "CHECKING"
-															? "学生核对、处理异议与结算"
-															: "查看历史快照或理由更正"}
+															? "学生确认、处理异议并锁定"
+															: "查看存档或更正记录"}
 											</CardDescription>
 										</CardHeader>
 										<CardContent>
 											<p className="mb-3 text-sm">
-												{recognitions.total} 条认定记录 · 周期输入修订{" "}
-												{term.inputRevision}
+												{recognitions.total} 条参与记录 · 成绩第{" "}
+												{term.inputRevision} 版
 											</p>
 											<div className="flex flex-wrap gap-2">
 												{[
-													{ url: "activities", label: "活动目录" },
+													{ url: "activities", label: "活动管理" },
 													{
 														url: "recognitions",
-														label: admin ? "活动认定审核" : "认定记录",
+														label: admin ? "活动参与审核" : "参与记录",
 													},
 													...(user.role !== "PUBLISHER"
 														? [
-																{ url: "claims", label: "个人申报" },
-																{ url: "results", label: "测评结果" },
-																{ url: "appeals", label: "结果异议" },
+																{ url: "claims", label: "成果申报" },
+																{ url: "results", label: "成绩" },
+																{ url: "appeals", label: "成绩异议" },
 															]
 														: []),
 													...(admin
 														? [
 																{ url: "grades", label: "成绩录入" },
 																{ url: "deductions", label: "扣分管理" },
-																{ url: "publication", label: "发布结算" },
+																{ url: "publication", label: "结果发布" },
 																{ url: "rankings", label: "排名导出" },
 															]
 														: []),
@@ -213,7 +216,7 @@ export default async function Page({
 					},
 					{
 						id: "scheme",
-						label: "评分制度",
+						label: "评分方案",
 						content: (
 							<SchemeEditor
 								key={`${id}-${term.revision}`}

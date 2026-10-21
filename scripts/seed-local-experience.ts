@@ -18,7 +18,7 @@ const activities = [
   { key: "public-service", name: "社区敬老志愿服务", organizer: "青年志愿者协会", nodeId: "public_service", points: "12", day: 12, status: "APPROVED", content: "为社区长者提供便民服务，协助开展文娱与数字设备使用指导。", requirements: "完成四小时服务，提交服务记录。" },
   { key: "social-practice", name: "城市文化调研与社会实践", organizer: "信息工程学院", nodeId: "social_practice", points: "8", day: 14, status: "APPROVED", content: "分组走访城市文化场馆，完成访谈与调研报告。", requirements: "参与实地调研并提交小组报告。" },
   { key: "professional", name: "程序设计与工程实践竞赛", organizer: "计算机协会", nodeId: "professional", points: "18", day: 16, status: "APPROVED", content: "围绕工程问题完成程序设计、功能验证及成果答辩。", requirements: "完成竞赛任务并提供成绩或获奖依据。" },
-  { key: "cultural-sports", name: "校园秋季运动会", organizer: "体育教学部", nodeId: "cultural_sports", points: "6", day: 18, status: "PENDING", content: "组织田径与集体项目竞赛，鼓励学生参与体育锻炼。", requirements: "完成参赛项目，提供参赛或成绩记录。" },
+  { key: "cultural-sports", name: "校园秋季运动会", organizer: "体育教学部", nodeId: "cultural_sports", points: "6", day: 18, status: "PENDING_COUNSELOR", content: "组织田径与集体项目竞赛，鼓励学生参与体育锻炼。", requirements: "完成参赛项目，提供参赛或成绩记录。" },
   { key: "innovation", name: "大学生创新项目交流", organizer: "创新创业中心", nodeId: "innovation", points: "10", day: 19, status: "REJECTED", content: "展示创新项目阶段成果，开展项目路演与交流。", requirements: "提交项目成果及本人参与说明。" },
   { key: "labor", name: "校园绿地劳动实践", organizer: "后勤服务中心", nodeId: "labor_practice", points: "4", day: 24, status: null, content: "开展校园绿地养护、环境清洁与劳动技能指导。", requirements: "按时参加，完成两小时劳动任务。" },
   { key: "management", name: "学生组织项目策划工作坊", organizer: "校学生会", nodeId: "management", points: "5", day: 26, status: null, content: "学习校园项目策划与组织方法，形成活动策划方案。", requirements: "完成小组策划方案并参加交流。", unconfirmed: true },
@@ -74,7 +74,7 @@ async function main() {
         for (const item of activities) {
           const activity = await tx.activity.create({ data: { id: `${termId}-${item.key}`, termId, ownerId: publisher.id, name: item.name, organizer: item.organizer, content: item.content, requirements: item.requirements, startsAt: new Date(`2026-10-${String(item.day).padStart(2, "0")}T01:00:00Z`), endsAt: new Date(`2026-10-${String(item.day).padStart(2, "0")}T04:00:00Z`), nodeId: item.nodeId, points: item.points, confirmed: !("unconfirmed" in item), revision: "unconfirmed" in item ? 0 : 1 } });
           if (!item.status) continue;
-          const reviewed = item.status !== "PENDING";
+          const reviewed = item.status !== "PENDING_COUNSELOR";
           const participation = await tx.participation.create({ data: { activityId: activity.id, studentId: student.id, revision: reviewed ? 1 : 0 } });
           await tx.recognitionSource.create({ data: { participationId: participation.id, submitterId: publisher.id, status: item.status, note: `已完成${item.name}，由组织方提交参与记录。`, ...(reviewed ? { reviewerId: admin.id, reviewedAt: new Date(), reviewReason: item.status === "APPROVED" ? "参与记录与证明一致，予以认定。" : "证明未能体现本人项目分工，请补充本人参与依据。", revision: 1 } : {}), evidence: { create: { evidenceId: evidence.id } } } });
           if (item.key === "ideology") await tx.recognitionSource.create({ data: { participationId: participation.id, submitterId: student.id, status: "APPROVED", note: "补充个人学习记录，与组织方记录属于同一次参与。", reviewerId: admin.id, reviewedAt: new Date(), reviewReason: "与组织方提交为同一参与事实，保留补充依据，不重复计分。", revision: 1 } });
@@ -101,7 +101,7 @@ async function main() {
   const result = calculate(term.scheme, { values, deductions: Object.fromEntries(deductions.map(item => [item.projectId, item.amount.toString()])) });
   const publisherActivities = await db.activity.count({ where: { termId, ownerId: publisher.id } });
   const records = await db.recognitionSource.count({ where: { participation: { studentId: student.id, activity: { termId } } } });
-  const pending = await db.recognitionSource.count({ where: { status: "PENDING", participation: { activity: { termId } } } });
+  const pending = await db.recognitionSource.count({ where: { status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] }, participation: { activity: { termId } } } });
   evidenceId ??= (await db.evidenceReference.findFirst({ where: { source: { participation: { activity: { termId } } } }, select: { evidenceId: true } }))?.evidenceId;
   if (evidenceId) {
     const file = await db.evidence.findUniqueOrThrow({ where: { id: evidenceId } });

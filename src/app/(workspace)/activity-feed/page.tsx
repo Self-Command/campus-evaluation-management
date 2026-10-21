@@ -56,7 +56,7 @@ export default async function ActivityFeedPage({
 		<>
 			<PageHeading
 				title="已发布活动"
-				description="按当前本人身份和活动发布范围查看活动。浏览资格与后台参与登记分别记录。"
+				description="查看面向你所在学院、专业或班级发布的活动。浏览不代表已参加，参与情况以后台登记和审核结果为准。"
 			/>
 			<TermContext terms={terms} selected={term?.id} />
 			{term && data ? (
@@ -66,7 +66,7 @@ export default async function ActivityFeedPage({
 							<section className="flex min-w-0 flex-col gap-2">
 								<div className="flex flex-wrap items-end justify-between gap-4">
 									<h2 className="text-xl tracking-tight">
-										符合本人范围的活动 · {data.total} 项
+										可参加的活动 · {data.total} 项
 									</h2>
 									<form
 										action="/activity-feed"
@@ -79,11 +79,11 @@ export default async function ActivityFeedPage({
 												id="feed-search"
 												name="q"
 												defaultValue={p.q || ""}
-												placeholder="搜索已发布活动"
+												placeholder="输入活动名称"
 											/>
 										</Field>
 										<Button type="submit" variant="outline">
-											筛选
+											搜索
 										</Button>
 									</form>
 								</div>
@@ -114,11 +114,11 @@ export default async function ActivityFeedPage({
 													</p>
 													<p className="text-sm">
 														{activity.scoreMode === "INDIVIDUAL"
-															? `逐人录分 · 上限 ${activity.points} 分`
-															: `固定认定 ${activity.points} 分`}
+															? `每人单独录分 · 最高 ${activity.points} 分`
+															: `统一 ${activity.points} 分`}
 													</p>
 													<p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
-														参加要求：{activity.requirements || "无额外要求"}
+														参加要求：{activity.requirements || "无"}
 													</p>
 													<p className="text-xs text-muted-foreground">
 														{dateText(activity.startsAt)} 至{" "}
@@ -140,7 +140,7 @@ export default async function ActivityFeedPage({
 														size: "sm",
 													})}
 												>
-													查看详情
+													查看活动
 												</Link>
 											</CardFooter>
 										</Card>
@@ -149,9 +149,9 @@ export default async function ActivityFeedPage({
 								{!data.items.length && (
 									<Empty>
 										<EmptyHeader>
-											<EmptyTitle>暂无匹配活动</EmptyTitle>
+											<EmptyTitle>暂无活动</EmptyTitle>
 											<EmptyDescription>
-												当前发布范围内没有匹配活动。可调整活动名称筛选，或查看已登记的本人参与记录。
+												当前范围内没有已发布活动。可以换个名称再搜，或到“我参加的活动”查看参与记录。
 											</EmptyDescription>
 										</EmptyHeader>
 									</Empty>

@@ -78,7 +78,7 @@ export function Appeals({
 				</div>
 			),
 		},
-		{ accessorKey: "target", header: "异议对象" },
+		{ accessorKey: "target", header: "异议内容" },
 		{
 			accessorKey: "status",
 			header: "处理状态",
@@ -90,7 +90,7 @@ export function Appeals({
 		},
 		{
 			id: "publication",
-			header: "发布版本",
+			header: "对应版本",
 			cell: ({ row }) => row.original.publication.sequence,
 		},
 		{
@@ -111,7 +111,7 @@ export function Appeals({
 						setDirty(false);
 					}}
 				>
-					查看详情
+					查看
 				</Button>
 			),
 		},
@@ -148,8 +148,8 @@ export function Appeals({
 			<Feedback success={success} />
 			{remote.data && (
 				<TemplateDirectory
-					title={role === "ADMIN" ? "异议处理名录" : "我的异议"}
-					description={`共 ${remote.data.total} 条异议，保留原发布版本与处理结论。`}
+					title={role === "ADMIN" ? "成绩异议处理" : "我的成绩异议"}
+					description={`共 ${remote.data.total} 条异议，保留提交时的发布版本和处理结果。`}
 					data={remote.data.items}
 					columns={columns}
 					actions={
@@ -157,7 +157,7 @@ export function Appeals({
 							href={`/results?termId=${termId}`}
 							className={buttonVariants({ variant: "outline", size: "sm" })}
 						>
-							查看测评结果
+							查看成绩
 						</Link>
 					}
 					filters={
@@ -185,7 +185,7 @@ export function Appeals({
 									))}
 								</NativeSelect>
 							</Field>
-							<Button variant="outline">筛选</Button>
+							<Button type="submit" variant="outline">筛选</Button>
 						</form>
 					}
 					pagination={{
@@ -200,8 +200,8 @@ export function Appeals({
 								<Badge variant="outline">{statusLabels[row.status]}</Badge>
 							</div>
 							<p className="text-xs text-muted-foreground">
-								{row.student.name} · {row.student.login} · 发布版本{" "}
-								{row.publication.sequence}
+								{row.student.name} · {row.student.login} · 第{" "}
+								{row.publication.sequence} 版
 							</p>
 							<Button
 								variant="outline"
@@ -212,7 +212,7 @@ export function Appeals({
 									setDirty(false);
 								}}
 							>
-								查看详情
+								查看
 							</Button>
 						</div>
 					)}
@@ -224,7 +224,7 @@ export function Appeals({
 					if (
 						!open &&
 						!busy &&
-						(!dirty || window.confirm("放弃尚未保存的处理意见？"))
+						(!dirty || window.confirm("放弃尚未提交的处理内容？"))
 					)
 						setSelected(null);
 				}}
@@ -242,14 +242,14 @@ export function Appeals({
 							<div className="flex flex-wrap gap-2">
 								<Badge variant="outline">{statusLabels[selected.status]}</Badge>
 								<Badge variant="outline">
-									发布版本 {selected.publication.sequence}
+									第 {selected.publication.sequence} 版
 								</Badge>
 							</div>
 							<p className="text-xs text-muted-foreground">
 								提交于 {dateText(selected.createdAt)}
 							</p>
 							<section className="flex flex-col gap-2">
-								<h3 className="font-medium text-sm">异议说明</h3>
+								<h3 className="font-medium text-sm">问题说明</h3>
 								<p className="whitespace-pre-wrap text-sm leading-7">
 									{selected.reason}
 								</p>
@@ -269,7 +269,7 @@ export function Appeals({
 							<Separator />
 							{selected.resolution && (
 								<section className="flex flex-col gap-2">
-									<h3 className="font-medium text-sm">处理结论</h3>
+									<h3 className="font-medium text-sm">处理结果</h3>
 									<p className="whitespace-pre-wrap text-sm leading-7">
 										{selected.resolution}
 									</p>
@@ -309,7 +309,7 @@ export function Appeals({
 										<FieldGroup>
 											<Field>
 												<FieldLabel htmlFor="appeal-resolution">
-													处理结论
+													处理结果
 												</FieldLabel>
 												<Textarea
 													id="appeal-resolution"
@@ -322,7 +322,7 @@ export function Appeals({
 											</Field>
 											<Field>
 												<FieldLabel htmlFor="appeal-resolved-publication">
-													已更正并重新发布的版本
+													更正后的发布版本
 												</FieldLabel>
 												<NativeSelect
 													id="appeal-resolved-publication"
@@ -330,7 +330,7 @@ export function Appeals({
 													defaultValue=""
 												>
 													<NativeSelectOption value="">
-														选择新的发布版本（解决异议时必选）
+														选择更正后的版本（标记已解决时必选）
 													</NativeSelectOption>
 													{publications.data?.history
 														.filter(
@@ -338,7 +338,7 @@ export function Appeals({
 														)
 														.map((p) => (
 															<NativeSelectOption key={p.id} value={p.id}>
-																发布版本 {p.sequence}
+																第 {p.sequence} 版
 															</NativeSelectOption>
 														))}
 												</NativeSelect>
@@ -346,7 +346,7 @@ export function Appeals({
 										</FieldGroup>
 										<div className="flex flex-wrap gap-2">
 											<Button type="submit" value="resolve" disabled={busy}>
-												关联更正并解决
+												标记已解决
 											</Button>
 											<Button
 												type="submit"
@@ -354,7 +354,7 @@ export function Appeals({
 												value="reject"
 												disabled={busy}
 											>
-												驳回并说明
+												驳回异议
 											</Button>
 										</div>
 									</form>

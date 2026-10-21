@@ -1,6 +1,6 @@
 "use client";
 import { EvidenceViewer } from "@/components/dashboard/evidence-viewer";
-// Complete users directory plus invoice form, retaining template header, filtering, table and editor panels.
+// Complete users directory plus invoice form and profile sheet, retaining template header, filtering, table and editor panels.
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -34,7 +34,6 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
 	Dialog,
 	DialogContent,
@@ -51,50 +50,65 @@ import {
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { dateText, statusLabels } from "@/lib/business-labels";
-import Link from "next/link";
-import { ActivityAssociation } from "./activity-association";
-import { ScoringCorrection } from "@/components/dashboard/scoring-correction";
-export type Project = {
-	id: string;
-	revision: number;
-	name: string;
-	description: string;
-	nodeId: string;
-	points: string;
-	enabled: boolean;
-};
+
 export type Claim = {
-	activityId?: string | null;
-	activity?: { id: string; name: string } | null;
 	id: string;
 	revision: number;
 	status: string;
-	factKey: string;
+	title: string;
 	occurredOn: string;
 	note: string;
 	reviewReason?: string | null;
 	createdAt: string;
-	project: Project;
-	student: { id: string; name: string; login: string };
-	evidence: {
-		id?: string;
-		name?: string;
-		evidence?: { id: string; name: string };
-	}[];
+	scoreNodeId: string | null;
+	score: string | null;
+	scorer: { id: string; name: string } | null;
+	reviewer: { id: string; name: string } | null;
+	projectName: string | null;
+	student: {
+		id: string;
+		name: string;
+		login: string;
+		studentNumber: string;
+		className: string;
+		organization: string;
+	};
+	evidence: { id: string; name: string }[];
 	history?: {
-		id?: string;
 		action?: string;
+		before?: string;
 		after?: string;
 		reason?: string;
+		score?: string;
 		at: string;
 	}[];
+};
+const claimStatuses = [
+	"PENDING",
+	"PENDING_COUNSELOR",
+	"PENDING_COLLEGE",
+	"RESCORING",
+	"RETURNED",
+	"APPROVED",
+	"ABANDONED",
+	"REVOKED",
+	"REJECTED",
+];
+const actionLabels: Record<string, string> = {
+	SUBMITTED: "学生提交",
+	RESUBMIT: "学生重新提交",
+	ABANDON: "学生放弃",
+	SUBMITSCORE: "辅导员评分",
+	RETURN: "退回学生修改",
+	APPROVE: "学院审核通过",
+	RESCORE: "退回辅导员重评",
+	REVOKE: "管理员撤销",
 };
 export function Claims({
 	term,
 	role,
 	page,
 	status,
-	initialProjects,
 	initialClaims,
 }: {
 	term: {
@@ -104,22 +118,15 @@ export function Claims({
 		revision: number;
 		scheme: Scheme;
 	};
-	role: "ADMIN" | "STUDENT";
+	role: "ADMIN" | "COLLEGE" | "COUNSELOR" | "STUDENT";
 	page: number;
 	status: string;
-	initialProjects: Project[];
 	initialClaims: { items: Claim[]; total: number; page: number };
 }) {
-	const projects = useRemote<Project[]>(
-		`/api/projects?termId=${term.id}`,
-		initialProjects,
-	);
 	const claims = useRemote<{ items: Claim[]; total: number; page: number }>(
 		`/api/claims?termId=${term.id}&page=${page}&status=${encodeURIComponent(status)}`,
 		initialClaims,
 	);
-	const [edit, setEdit] = useState<Project | "new" | null>(null);
-	const [submit, setSubmit] = useState<Project | null>(null);
 	const [submissionOpen, setSubmissionOpen] = useState(false);
 	const [submissionSession, setSubmissionSession] = useState(0);
 	const [selected, setSelected] = useState<Claim | null>(null);
@@ -130,48 +137,40 @@ export function Claims({
 	const [uploading, setUploading] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [resubmit, setResubmit] = useState(false);
-	const [correction, setCorrection] = useState<Project | null>(null);
 	const active =
 		term.phase === "ACTIVE" &&
 		(!term.disposition || term.disposition === "NORMAL");
-	const enabledProjects = (projects.data ?? []).filter(
-		(project) => project.enabled,
-	);
+	const activityNodes = term.scheme.nodes.filter((n) => n.kind === "ACTIVITY");
+	const nodeName = (nodeId: string | null) =>
+		(nodeId && term.scheme.nodes.find((n) => n.id === nodeId)?.name) || "—";
 	const stageNotice =
 		term.disposition && term.disposition !== "NORMAL"
 			? {
 					title:
 						term.disposition === "VOID"
-							? "本周期已作废，个人申报只读"
-							: "本周期已归档，个人申报只读",
-					description: "可以查询原有申报与处理记录。",
+							? "本周期已作废，成果申报只读"
+							: "本周期已归档，成果申报只读",
+					description: "可以查看原有申报和处理记录。",
 				}
 			: term.phase === "CONFIGURATION"
 				? {
-						title: "本周期配置中，尚未开放个人申报",
+						title: "本周期配置中，尚未开放成果申报",
 						description:
-							"请等待管理员完成评分制度配置并启用周期后，再提交个人申报。",
+							"管理员完成评分方案配置并启用周期后，即可提交或处理成果申报。",
 					}
 				: term.phase === "CHECKING"
 					? {
-							title: "本周期核对中，个人申报已关闭",
+							title: "本周期核对中，成果申报已关闭",
 							description:
-								"请核对已发布的测评结果。如对结果有疑问，请通过结果异议提交问题和证明材料。",
+								"请核对已发布的结果。如有疑问，请通过成绩异议提交问题和证明。",
 						}
 					: {
-							title: "本周期已锁定，个人申报已关闭",
+							title: "本周期已锁定，成果申报已关闭",
 							description:
-								"当前记录可查询，不能新增或补交申报。如需更正，请联系管理员按更正流程处理。",
+								"当前记录可查看，不能新增、评分或审核。如需更正，请联系管理员。",
 						};
-	function beginSubmission(project: Project | null = null) {
-		if (
-			role !== "STUDENT" ||
-			!active ||
-			!enabledProjects.length ||
-			(project && !project.enabled)
-		)
-			return;
-		setSubmit(project);
+	function beginSubmission() {
+		if (role !== "STUDENT" || !active) return;
 		setIds([]);
 		setUploading(false);
 		setDirty(false);
@@ -179,25 +178,6 @@ export function Claims({
 		setSubmissionSession((value) => value + 1);
 		setSubmissionOpen(true);
 	}
-	function beginProject() {
-		if (role !== "ADMIN" || !active) return;
-		setEdit("new");
-		setDirty(false);
-		setError("");
-	}
-	const createAction = active ? (
-		role === "ADMIN" ? (
-			<Button onClick={beginProject}>
-				<Plus data-icon="inline-start" />
-				新建认定项目
-			</Button>
-		) : enabledProjects.length ? (
-			<Button onClick={() => beginSubmission()}>
-				<Plus data-icon="inline-start" />
-				新建个人申报
-			</Button>
-		) : undefined
-	) : undefined;
 	function closeModal(close: () => void) {
 		if (busy || uploading) return;
 		if (dirty && !window.confirm("放弃尚未保存的内容？")) return;
@@ -205,37 +185,81 @@ export function Claims({
 		close();
 	}
 	function refresh() {
-		projects.reload();
 		claims.reload();
 		setSelected(null);
 		setDirty(false);
 		setIds([]);
 		setResubmit(false);
 	}
+	async function change(payload: Record<string, unknown>, message: string) {
+		if (!selected || busy) return;
+		setBusy(true);
+		setError("");
+		try {
+			await requestJson(
+				`/api/claims/${selected.id}`,
+				{ termId: term.id, revision: selected.revision, ...payload },
+				"PATCH",
+			);
+			setSuccess(message);
+			refresh();
+		} catch (err) {
+			setError((err as Error).message);
+		} finally {
+			setBusy(false);
+		}
+	}
+	const createAction =
+		role === "STUDENT" && active ? (
+			<Button onClick={beginSubmission}>
+				<Plus data-icon="inline-start" />
+				新建成果申报
+			</Button>
+		) : undefined;
 	const columns: ColumnDef<DataTableFeatures, Claim>[] = [
 		{
-			id: "student",
-			header: "学生",
+			id: "title",
+			header: "成果",
 			cell: ({ row }) => (
 				<div>
-					<p className="font-medium">{row.original.student.name}</p>
+					<p className="font-medium">{row.original.title}</p>
 					<p className="text-xs text-muted-foreground">
-						{row.original.student.login}
+						发生于 {row.original.occurredOn.slice(0, 10)}
 					</p>
 				</div>
 			),
 		},
+		...(role === "STUDENT"
+			? []
+			: [
+					{
+						id: "student",
+						header: "学生",
+						cell: ({ row }: { row: { original: Claim } }) => (
+							<div>
+								<p>{row.original.student.name}</p>
+								<p className="text-xs text-muted-foreground">
+									{row.original.student.studentNumber} ·{" "}
+									{row.original.student.className}
+								</p>
+							</div>
+						),
+					} satisfies ColumnDef<DataTableFeatures, Claim>,
+				]),
 		{
-			id: "project",
-			header: "项目 / 事实",
-			cell: ({ row }) => (
-				<div>
-					<p>{row.original.project.name}</p>
-					<p className="text-xs text-muted-foreground">
-						{row.original.factKey}
-					</p>
-				</div>
-			),
+			id: "score",
+			header: "评分",
+			cell: ({ row }) =>
+				row.original.score === null ? (
+					<span className="text-muted-foreground">待评分</span>
+				) : (
+					<div>
+						<p>{row.original.score} 分</p>
+						<p className="text-xs text-muted-foreground">
+							{nodeName(row.original.scoreNodeId)}
+						</p>
+					</div>
+				),
 		},
 		{
 			accessorKey: "status",
@@ -264,405 +288,125 @@ export function Claims({
 						setResubmit(false);
 					}}
 				>
-					查看材料
+					{role === "STUDENT" ? "查看" : "处理"}
 				</Button>
 			),
 		},
 	];
-	const projectColumns: ColumnDef<DataTableFeatures, Project>[] = [
-		{
-			accessorKey: "name",
-			header: "认定项目",
-			cell: ({ row }) => (
-				<div>
-					<p className="font-medium">{row.original.name}</p>
-					<p className="max-w-sm truncate text-xs text-muted-foreground">
-						{row.original.description}
-					</p>
-				</div>
-			),
-		},
-		{
-			accessorKey: "points",
-			header: "固定分值",
-			cell: ({ row }) => `${row.original.points} 分`,
-		},
-		{
-			id: "node",
-			header: "计分模块",
-			cell: ({ row }) =>
-				term.scheme.nodes.find((n) => n.id === row.original.nodeId)?.name ||
-				"—",
-		},
-		{
-			accessorKey: "enabled",
-			header: "状态",
-			cell: ({ row }) => (
-				<Badge variant="outline">
-					{row.original.enabled ? "启用" : "停用"}
-				</Badge>
-			),
-		},
-		{
-			id: "actions",
-			header: "操作",
-			cell: ({ row }) =>
-				active ? (
-					<div className="flex flex-wrap gap-2">
-						<Button
-							size="sm"
-							variant="outline"
-							disabled={role === "STUDENT" && !row.original.enabled}
-							onClick={() => {
-								setError("");
-								setDirty(false);
-								setIds([]);
-								if (role === "ADMIN") setEdit(row.original);
-								else beginSubmission(row.original);
-							}}
-						>
-							{role === "ADMIN" ? "编辑项目" : "提交申报"}
-						</Button>
-						{role === "ADMIN" && (
-							<Button
-								size="sm"
-								variant="ghost"
-								onClick={() => setCorrection(row.original)}
-							>
-								计分更正
-							</Button>
-						)}
-					</div>
-				) : null,
-		},
-	];
+	const directoryDescription = {
+		STUDENT:
+			"提交后由辅导员评分、学院审核；退回后可补充材料重新提交，或放弃本次申报。",
+		COUNSELOR:
+			"只显示你负责班级学生的申报；选择计分项、填写分数后提交学院。",
+		COLLEGE:
+			"只显示本学院学生的申报；可通过、退回学生修改或退回辅导员重评。",
+		ADMIN:
+			"查看全校申报、评分和审核记录；已通过的申报可撤销。",
+	}[role];
 	return (
 		<>
 			<Feedback error={error} success={success} />
 			{!active && (
 				<Alert className="mb-4">
 					<AlertTitle>{stageNotice.title}</AlertTitle>
-					<AlertDescription>
-						{role === "ADMIN"
-							? `${stageNotice.description}认定项目维护与申报审核仅在申报开放阶段进行。`
-							: stageNotice.description}
-					</AlertDescription>
+					<AlertDescription>{stageNotice.description}</AlertDescription>
 				</Alert>
 			)}
-			{role === "STUDENT" &&
-				!projects.loading &&
-				!projects.error &&
-				!enabledProjects.length && (
-					<Alert className="mb-4">
-						<AlertTitle>暂无可申报项目</AlertTitle>
-						<AlertDescription>
-							当前周期尚无启用的认定项目，请联系管理员确认项目开放安排。项目启用且周期开放后，可在此新建个人申报。
-						</AlertDescription>
-					</Alert>
-				)}
-			<Tabs defaultValue="claims">
-				<TabsList>
-					<TabsTrigger value="claims">申报记录</TabsTrigger>
-					<TabsTrigger value="projects">
-						{role === "STUDENT" ? "可申报项目" : "认定项目"}
-					</TabsTrigger>
-				</TabsList>
-				<TabsContent className="mt-4" value="claims">
-					<RemoteState {...projects} />
-					<RemoteState {...claims} />
-					{claims.data && (
-						<TemplateDirectory
-							title={role === "ADMIN" ? "个人申报审核" : "我的个人申报"}
-							description={`共 ${claims.data.total} 条记录，同一项目的同一事实只认定一次。`}
-							data={claims.data.items}
-							columns={columns}
-							actions={createAction}
-							filters={
-								<form
-									action="/claims"
-									className="flex flex-wrap items-end gap-3"
+			<RemoteState {...claims} />
+			{claims.data && (
+				<TemplateDirectory
+					title={
+						{
+							ADMIN: "成果申报监督",
+							COLLEGE: "学院审核",
+							COUNSELOR: "辅导员评分",
+							STUDENT: "我的成果申报",
+						}[role]
+					}
+					description={`共 ${claims.data.total} 条记录。${directoryDescription}`}
+					data={claims.data.items}
+					columns={columns}
+					actions={createAction}
+					filters={
+						<form
+							action="/claims"
+							className="flex flex-wrap items-end gap-3"
+						>
+							<input type="hidden" name="termId" value={term.id} />
+							<Field className="w-full sm:w-48">
+								<FieldLabel htmlFor="claim-filter">申报状态</FieldLabel>
+								<NativeSelect
+									id="claim-filter"
+									name="status"
+									defaultValue={status}
 								>
-									<input type="hidden" name="termId" value={term.id} />
-
-									<Field className="w-full sm:w-48">
-										<FieldLabel htmlFor="claim-filter">申报状态</FieldLabel>
-										<NativeSelect
-											id="claim-filter"
-											name="status"
-											defaultValue={status}
-										>
-											<NativeSelectOption value="">全部状态</NativeSelectOption>
-											{[
-												"PENDING",
-												"APPROVED",
-												"REJECTED",
-												"NEEDS_CHANGES",
-												"WITHDRAWN",
-												"REVOKED",
-											].map((s) => (
-												<NativeSelectOption key={s} value={s}>
-													{statusLabels[s]}
-												</NativeSelectOption>
-											))}
-										</NativeSelect>
-									</Field>
-									<Button variant="outline">筛选</Button>
-								</form>
-							}
-							pagination={{
-								page: claims.data.page,
-								total: claims.data.total,
-								href: (p) =>
-									`/claims?termId=${term.id}&status=${status}&page=${p}`,
-							}}
-							mobile={(row) => (
-								<div className="flex flex-col gap-3">
-									<div className="flex justify-between gap-2">
-										<p className="font-medium">{row.project.name}</p>
-										<Badge variant="outline">{statusLabels[row.status]}</Badge>
-									</div>
-									<p className="text-sm">{row.factKey}</p>
-									<p className="text-xs text-muted-foreground">
-										{row.student.name} · {row.student.login}
-									</p>
-									<Button
-										className="self-start"
-										variant="outline"
-										onClick={() => {
-											setSelected(row);
-											setResubmit(false);
-											setError("");
-										}}
-									>
-										查看材料
-									</Button>
-								</div>
-							)}
-						/>
-					)}
-				</TabsContent>
-				<TabsContent className="mt-4" value="projects">
-					<RemoteState {...projects} />
-					{projects.data && (
-						<TemplateDirectory
-							title={role === "STUDENT" ? "可申报项目" : "认定项目"}
-							description="项目分值由管理员统一配置，申报时填写事实与材料。"
-							data={projects.data}
-							columns={projectColumns}
-							actions={role === "ADMIN" ? createAction : undefined}
-							mobile={(row) => (
-								<div className="flex flex-col gap-3">
-									<div className="flex justify-between gap-2">
-										<p className="font-medium">{row.name}</p>
-										<Badge variant="outline">{row.points} 分</Badge>
-									</div>
-									<p className="text-sm text-muted-foreground">
-										{row.description}
-									</p>
-									{active && (
-										<div className="flex flex-wrap gap-2">
-											<Button
-												className="self-start"
-												variant="outline"
-												disabled={role === "STUDENT" && !row.enabled}
-												onClick={() => {
-													setDirty(false);
-													setIds([]);
-													if (role === "ADMIN") setEdit(row);
-													else beginSubmission(row);
-												}}
-											>
-												{role === "ADMIN" ? "编辑项目" : "提交申报"}
-											</Button>
-											{role === "ADMIN" && (
-												<Button
-													variant="outline"
-													onClick={() => setCorrection(row)}
-												>
-													计分更正
-												</Button>
-											)}
-										</div>
-									)}
-								</div>
-							)}
-						/>
-					)}
-				</TabsContent>
-			</Tabs>
-			{correction && (
-				<ScoringCorrection
-					key={`${correction.id}-${correction.revision}`}
-					term={term}
-					kind="project"
-					item={correction}
-					open={!!correction}
-					onOpenChange={(open) => {
-						if (!open) setCorrection(null);
+									<NativeSelectOption value="">全部状态</NativeSelectOption>
+									{claimStatuses.map((s) => (
+										<NativeSelectOption key={s} value={s}>
+											{s === "PENDING" ? "处理中" : statusLabels[s]}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
+							</Field>
+							<Button type="submit" variant="outline">筛选</Button>
+						</form>
+					}
+					pagination={{
+						page: claims.data.page,
+						total: claims.data.total,
+						href: (p) =>
+							`/claims?termId=${term.id}&status=${status}&page=${p}`,
 					}}
-					onCommitted={() => {
-						setCorrection(null);
-						setSuccess("认定项目计分已更正，请重新核对并发布结果。");
-						refresh();
-					}}
+					mobile={(row) => (
+						<div className="flex flex-col gap-3">
+							<div className="flex justify-between gap-2">
+								<p className="font-medium">{row.title}</p>
+								<Badge variant="outline">
+									{statusLabels[row.status] || row.status}
+								</Badge>
+							</div>
+							<p className="text-sm text-muted-foreground">
+								发生于 {row.occurredOn.slice(0, 10)} ·{" "}
+								{row.score === null
+									? "待评分"
+									: `拟认定 ${row.score} 分（${nodeName(row.scoreNodeId)}）`}
+							</p>
+							{role !== "STUDENT" && (
+								<p className="text-xs text-muted-foreground">
+									{row.student.name} · {row.student.studentNumber} ·{" "}
+									{row.student.className}
+								</p>
+							)}
+							<Button
+								className="self-start"
+								variant="outline"
+								onClick={() => {
+									setSelected(row);
+									setResubmit(false);
+									setError("");
+								}}
+							>
+								{role === "STUDENT" ? "查看" : "处理"}
+							</Button>
+						</div>
+					)}
 				/>
 			)}
-			<Dialog
-				open={!!edit}
-				onOpenChange={(open) => {
-					if (!open) closeModal(() => setEdit(null));
-				}}
-			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
-					<DialogHeader>
-						<DialogTitle>
-							{edit === "new" ? "新建认定项目" : "编辑认定项目"}
-						</DialogTitle>
-						<DialogDescription>
-							有申报后不能直接变更计分模块与分值；停用不会取消已有有效事实。
-						</DialogDescription>
-					</DialogHeader>
-					{edit && (
-						<form
-							className="flex flex-col gap-5"
-							onChange={() => setDirty(true)}
-							onSubmit={async (e) => {
-								e.preventDefault();
-								if (busy) return;
-								setBusy(true);
-								setError("");
-								const f = new FormData(e.currentTarget);
-								try {
-									await requestJson("/api/projects", {
-										termId: term.id,
-										id: edit === "new" ? undefined : edit.id,
-										revision: edit === "new" ? undefined : edit.revision,
-										name: f.get("name"),
-										description: f.get("description"),
-										nodeId: f.get("nodeId"),
-										points: f.get("points"),
-										enabled: f.get("enabled") === "true",
-									});
-									setEdit(null);
-									setSuccess("认定项目已保存。");
-									refresh();
-								} catch (err) {
-									setError((err as Error).message);
-								} finally {
-									setBusy(false);
-								}
-							}}
-						>
-							<Feedback error={error} />
-							<TemplateEditor
-								preview={
-									<Card>
-										<CardHeader>
-											<CardTitle>认定规则</CardTitle>
-											<CardDescription>固定分值 · 活动累计模块</CardDescription>
-										</CardHeader>
-										<CardContent>
-											<p className="text-sm text-muted-foreground">
-												学生提交事实标识、发生日期与证明材料，经审核通过后按项目分值计入。同一事实在本周期内只认定一次。
-											</p>
-										</CardContent>
-									</Card>
-								}
-							>
-								<FieldGroup>
-									<Field>
-										<FieldLabel htmlFor="project-name">项目名称</FieldLabel>
-										<Input
-											id="project-name"
-											name="name"
-											defaultValue={edit === "new" ? "" : edit.name}
-											required
-											maxLength={120}
-										/>
-									</Field>
-									<Field>
-										<FieldLabel htmlFor="project-description">
-											认定说明
-										</FieldLabel>
-										<Textarea
-											id="project-description"
-											name="description"
-											defaultValue={edit === "new" ? "" : edit.description}
-											required
-											maxLength={2000}
-											rows={4}
-										/>
-									</Field>
-									<Field>
-										<FieldLabel htmlFor="project-node">计分模块</FieldLabel>
-										<NativeSelect
-											id="project-node"
-											name="nodeId"
-											defaultValue={edit === "new" ? "" : edit.nodeId}
-											required
-										>
-											<NativeSelectOption value="">
-												选择活动累计模块
-											</NativeSelectOption>
-											{term.scheme.nodes
-												.filter((n) => n.kind === "ACTIVITY")
-												.map((n) => (
-													<NativeSelectOption key={n.id} value={n.id}>
-														{n.name}
-													</NativeSelectOption>
-												))}
-										</NativeSelect>
-									</Field>
-									<Field>
-										<FieldLabel htmlFor="project-points">固定分值</FieldLabel>
-										<Input
-											id="project-points"
-											name="points"
-											defaultValue={edit === "new" ? "" : edit.points}
-											inputMode="decimal"
-											required
-										/>
-									</Field>
-									<Field>
-										<FieldLabel htmlFor="project-enabled">项目状态</FieldLabel>
-										<NativeSelect
-											id="project-enabled"
-											name="enabled"
-											defaultValue={
-												edit === "new" ? "true" : String(edit.enabled)
-											}
-										>
-											<NativeSelectOption value="true">启用</NativeSelectOption>
-											<NativeSelectOption value="false">
-												停用
-											</NativeSelectOption>
-										</NativeSelect>
-									</Field>
-								</FieldGroup>
-							</TemplateEditor>
-							<Button type="submit" disabled={busy}>
-								保存项目
-							</Button>
-						</form>
-					)}
-				</DialogContent>
-			</Dialog>
 			<Dialog
 				open={submissionOpen}
 				onOpenChange={(open) => {
 					if (!open)
 						closeModal(() => {
 							setSubmissionOpen(false);
-							setSubmit(null);
 							setIds([]);
 						});
 				}}
 			>
 				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
 					<DialogHeader>
-						<DialogTitle>提交个人申报</DialogTitle>
+						<DialogTitle>新建成果申报</DialogTitle>
 						<DialogDescription>
-							先选择认定项目，再填写事实、发生日期、申报说明及1至5份证明材料。
+							填写成果、发生日期、说明和 1 至 5 份证明；分数由辅导员按评分方案评定，学生不用填分。
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -671,36 +415,20 @@ export function Claims({
 						onChange={() => setDirty(true)}
 						onSubmit={async (e) => {
 							e.preventDefault();
-							if (
-								busy ||
-								uploading ||
-								!submit ||
-								!active ||
-								role !== "STUDENT" ||
-								!submit.enabled ||
-								projects.loading ||
-								!!projects.error ||
-								!enabledProjects.some((project) => project.id === submit.id) ||
-								ids.length < 1 ||
-								ids.length > 5
-							)
-								return;
+							if (busy || uploading || role !== "STUDENT" || !active) return;
 							setBusy(true);
 							setError("");
 							const f = new FormData(e.currentTarget);
 							try {
 								await requestJson("/api/claims", {
 									termId: term.id,
-									projectId: submit.id,
-									factKey: f.get("factKey"),
+									title: f.get("title"),
 									occurredOn: f.get("occurredOn"),
 									note: f.get("note"),
 									evidenceIds: ids,
-									activityId: f.get("activityId") || undefined,
 								});
-								setSubmit(null);
 								setSubmissionOpen(false);
-								setSuccess("个人申报已提交，请等待审核。");
+								setSuccess("成果申报已提交，请等待辅导员评分和学院审核。");
 								refresh();
 							} catch (err) {
 								setError((err as Error).message);
@@ -710,140 +438,75 @@ export function Claims({
 						}}
 					>
 						<Feedback error={error} />
-						<RemoteState {...projects} />
-						{submit &&
-							!projects.loading &&
-							!projects.error &&
-							!enabledProjects.some((project) => project.id === submit.id) && (
-								<Alert>
-									<AlertTitle>所选项目已停用或不可用</AlertTitle>
-									<AlertDescription>
-										已填写的内容和证明材料已保留，请重新选择可申报项目。若没有可选项目，请联系管理员。
-									</AlertDescription>
-								</Alert>
-							)}
 						<TemplateEditor
 							preview={
 								<Card>
 									<CardHeader>
-										<CardTitle>{submit?.name || "选择认定项目"}</CardTitle>
+										<CardTitle>申报与审核流程</CardTitle>
 										<CardDescription>
-											{submit
-												? `固定认定分值 ${submit.points} 分`
-												: "选择后查看项目认定规则与固定分值"}
+											两级审核 · 分数由辅导员评定
 										</CardDescription>
 									</CardHeader>
 									<CardContent>
-										{submit ? (
-											<div className="flex flex-col gap-4">
-												<p className="whitespace-pre-wrap text-sm leading-7">
-													{submit.description}
-												</p>
-												<p className="text-sm text-muted-foreground">
-													计分模块：
-													{term.scheme.nodes.find(
-														(node) => node.id === submit.nodeId,
-													)?.name || "—"}
-												</p>
-											</div>
-										) : (
-											<p className="text-sm text-muted-foreground">
-												请从左侧选择可申报项目。同一事实在本周期内只认定一次，分值以管理员配置为准。
-											</p>
-										)}
+										<ol className="list-decimal pl-5 text-sm leading-7 text-muted-foreground">
+											<li>提交成果、发生日期、说明和证明；</li>
+											<li>辅导员核对材料，选择计分项并评分；</li>
+											<li>学院审核通过后计入成绩；</li>
+											<li>退回时可补充材料重新提交，或放弃本次申报。</li>
+										</ol>
 									</CardContent>
 								</Card>
 							}
 						>
 							<FieldGroup>
 								<Field>
-									<FieldLabel htmlFor="claim-project">认定项目</FieldLabel>
-									<NativeSelect
-										id="claim-project"
-										name="projectId"
+									<FieldLabel htmlFor="claim-title">成果名称</FieldLabel>
+									<Input
+										id="claim-title"
+										name="title"
 										required
-										value={submit?.id || ""}
-										disabled={busy || projects.loading || !!projects.error}
-										onChange={(event) =>
-											setSubmit(
-												enabledProjects.find(
-													(project) => project.id === event.target.value,
-												) || null,
-											)
-										}
-									>
-										<NativeSelectOption value="">
-											选择可申报项目
-										</NativeSelectOption>
-										{enabledProjects.map((project) => (
-											<NativeSelectOption key={project.id} value={project.id}>
-												{project.name} · {project.points} 分
-											</NativeSelectOption>
-										))}
-									</NativeSelect>
+										maxLength={120}
+										placeholder="例如：全国大学生数学竞赛省一等奖"
+									/>
 									<FieldDescription>
-										切换项目会保留已填写的事实、说明及证明材料，请确认材料符合所选项目规则。
+										简要概括成果内容，方便老师识别。
 									</FieldDescription>
 								</Field>
-								<fieldset disabled={!submit || busy}>
-									<FieldGroup>
-										<Field>
-											<FieldLabel htmlFor="claim-key">事实标识</FieldLabel>
-											<Input
-												id="claim-key"
-												name="factKey"
-												required
-												maxLength={120}
-											/>
-											<FieldDescription>
-												填写成果名称、证书编号等可区分本次事实的信息。
-											</FieldDescription>
-										</Field>
-										<Field>
-											<FieldLabel htmlFor="claim-date">发生日期</FieldLabel>
-											<Input
-												id="claim-date"
-												name="occurredOn"
-												type="date"
-												required
-											/>
-										</Field>
-										<ActivityAssociation termId={term.id} disabled={busy} />
-										<Field>
-											<FieldLabel htmlFor="claim-note">申报说明</FieldLabel>
-											<Textarea
-												id="claim-note"
-												name="note"
-												required
-												minLength={2}
-												maxLength={2000}
-												rows={4}
-											/>
-										</Field>
-										<EvidenceUpload
-											onChange={(nextIds) => {
-												setIds(nextIds);
-												setDirty(true);
-											}}
-											onBusy={setUploading}
-										/>
-									</FieldGroup>
-								</fieldset>
+								<Field>
+									<FieldLabel htmlFor="claim-date">发生日期</FieldLabel>
+									<Input
+										id="claim-date"
+										name="occurredOn"
+										type="date"
+										required
+									/>
+								</Field>
+								<Field>
+									<FieldLabel htmlFor="claim-note">说明</FieldLabel>
+									<Textarea
+										id="claim-note"
+										name="note"
+										required
+										minLength={2}
+										maxLength={2000}
+										rows={4}
+										placeholder="说明成果内容、取得方式和本人贡献。"
+									/>
+								</Field>
+								<EvidenceUpload
+									onChange={(nextIds) => {
+										setIds(nextIds);
+										setDirty(true);
+									}}
+									onBusy={setUploading}
+								/>
 							</FieldGroup>
 						</TemplateEditor>
 						<Button
 							type="submit"
-							disabled={
-								busy ||
-								uploading ||
-								!submit ||
-								!ids.length ||
-								projects.loading ||
-								!!projects.error ||
-								!enabledProjects.some((project) => project.id === submit.id)
-							}
+							disabled={busy || uploading || !ids.length}
 						>
-							提交申报
+							提交
 						</Button>
 					</form>
 				</DialogContent>
@@ -856,51 +519,59 @@ export function Claims({
 			>
 				<SheetContent className="w-full overflow-y-auto sm:max-w-xl">
 					<SheetHeader>
-						<SheetTitle>{selected?.project.name}</SheetTitle>
+						<SheetTitle>{selected?.title}</SheetTitle>
 						<SheetDescription>
-							{selected?.student.name} · {selected?.student.login}
+							{selected?.student.name} · {selected?.student.studentNumber} ·{" "}
+							{selected?.student.className}
 						</SheetDescription>
 					</SheetHeader>
 					{selected && (
 						<div className="flex flex-col gap-5 px-5 pb-6">
 							<Feedback error={error} />
 							<Badge variant="outline" className="self-start">
-								{statusLabels[selected.status]}
+								{statusLabels[selected.status] || selected.status}
 							</Badge>
+							{selected.student.organization && (
+								<p className="text-sm text-muted-foreground">
+									{selected.student.organization}
+								</p>
+							)}
 							<dl className="grid grid-cols-2 gap-4 text-sm">
-								<div>
-									<dt className="text-xs text-muted-foreground">事实标识</dt>
-									<dd className="mt-1 break-words">{selected.factKey}</dd>
-								</div>
 								<div>
 									<dt className="text-xs text-muted-foreground">发生日期</dt>
 									<dd className="mt-1">{selected.occurredOn.slice(0, 10)}</dd>
 								</div>
+								<div>
+									<dt className="text-xs text-muted-foreground">提交时间</dt>
+									<dd className="mt-1">{dateText(selected.createdAt)}</dd>
+								</div>
+								<div>
+									<dt className="text-xs text-muted-foreground">
+										辅导员评分
+									</dt>
+									<dd className="mt-1">
+										{selected.score === null
+											? "尚未评分"
+											: `${selected.score} 分 · ${nodeName(selected.scoreNodeId)}`}
+									</dd>
+								</div>
+								<div>
+									<dt className="text-xs text-muted-foreground">评分人</dt>
+									<dd className="mt-1">{selected.scorer?.name || "—"}</dd>
+								</div>
 							</dl>
+							{selected.projectName && (
+								<p className="text-sm text-muted-foreground">
+									关联的历史认定项目：{selected.projectName}
+								</p>
+							)}
 							<p className="whitespace-pre-wrap text-sm leading-7">
 								{selected.note}
 							</p>
-							{selected.activityId && (
-								<Link
-									href={`/activities/${selected.activityId}`}
-									className="text-sm underline"
-								>
-									关联活动：{selected.activity?.name || "查看活动详情"}
-								</Link>
-							)}
 							<div className="flex flex-col gap-2">
-								{selected.evidence.map((item) => {
-									const evidence = item.evidence || item;
-									return evidence.id ? (
-										<EvidenceViewer
-											key={evidence.id}
-											evidence={{
-												id: evidence.id,
-												name: evidence.name || "证明材料",
-											}}
-										/>
-									) : null;
-								})}
+								{selected.evidence.map((evidence) => (
+									<EvidenceViewer key={evidence.id} evidence={evidence} />
+								))}
 							</div>
 							{selected.reviewReason && (
 								<p className="whitespace-pre-wrap text-sm">
@@ -908,214 +579,366 @@ export function Claims({
 								</p>
 							)}
 							<Separator />
+							{active && role === "STUDENT" && selected.status === "RETURNED" && !resubmit && (
+								<div className="flex flex-wrap gap-2">
+									<Button
+										onClick={() => {
+											setResubmit(true);
+											setIds([]);
+											setError("");
+										}}
+									>
+										补充材料并重新提交
+									</Button>
+									<Button
+										variant="outline"
+										disabled={busy}
+										onClick={() =>
+											change(
+												{ action: "abandon" },
+												"申报已放弃，不再进入审核。",
+											)
+										}
+									>
+										放弃申报
+									</Button>
+								</div>
+							)}
+							{active && role === "STUDENT" && selected.status === "RETURNED" && resubmit && (
+								<form
+									className="flex flex-col gap-4"
+									onChange={() => setDirty(true)}
+									onSubmit={async (e) => {
+										e.preventDefault();
+										if (busy || uploading || !ids.length) return;
+										const f = new FormData(e.currentTarget);
+										await change(
+											{
+												action: "resubmit",
+												title: f.get("title"),
+												occurredOn: f.get("occurredOn"),
+												note: f.get("note"),
+												evidenceIds: ids,
+											},
+											"已重新提交，等待辅导员评分。",
+										);
+									}}
+								>
+									<FieldGroup>
+										<Field>
+											<FieldLabel htmlFor="resubmit-title">
+												成果名称
+											</FieldLabel>
+											<Input
+												id="resubmit-title"
+												name="title"
+												defaultValue={selected.title}
+												required
+												maxLength={120}
+											/>
+										</Field>
+										<Field>
+											<FieldLabel htmlFor="resubmit-date">
+												发生日期
+											</FieldLabel>
+											<Input
+												id="resubmit-date"
+												name="occurredOn"
+												type="date"
+												defaultValue={selected.occurredOn.slice(0, 10)}
+												required
+											/>
+										</Field>
+										<Field>
+											<FieldLabel htmlFor="resubmit-note">
+												说明
+											</FieldLabel>
+											<Textarea
+												id="resubmit-note"
+												name="note"
+												defaultValue={selected.note}
+												required
+												minLength={2}
+												maxLength={2000}
+												rows={4}
+											/>
+											<FieldDescription>
+												请按退回意见补充说明和证明，重新提交后会重新评分。
+											</FieldDescription>
+										</Field>
+										<EvidenceUpload
+											key={selected.id}
+											onChange={setIds}
+											onBusy={setUploading}
+										/>
+									</FieldGroup>
+									<div className="flex flex-wrap gap-2">
+										<Button
+											type="submit"
+											disabled={busy || uploading || !ids.length}
+										>
+											重新提交
+										</Button>
+										<Button
+											type="button"
+											variant="outline"
+											disabled={busy}
+											onClick={() =>
+												change(
+													{ action: "abandon" },
+													"申报已放弃，不再进入审核。",
+												)
+											}
+										>
+											放弃申报
+										</Button>
+									</div>
+								</form>
+							)}
 							{active &&
-								((role === "ADMIN" &&
-									["PENDING", "NEEDS_CHANGES", "APPROVED"].includes(
-										selected.status,
-									)) ||
-									(role === "STUDENT" &&
-										(selected.status === "PENDING" ||
-											["REJECTED", "NEEDS_CHANGES", "WITHDRAWN"].includes(
-												selected.status,
-											)))) && (
+								role === "STUDENT" &&
+								selected.status === "PENDING_COUNSELOR" && (
+									<Button
+										variant="outline"
+										disabled={busy}
+										onClick={() =>
+											change(
+												{ action: "abandon" },
+												"申报已放弃，不再进入审核。",
+											)
+										}
+									>
+										放弃申报
+									</Button>
+								)}
+							{active &&
+								role === "COUNSELOR" &&
+								["PENDING_COUNSELOR", "RESCORING"].includes(
+									selected.status,
+								) && (
+									<>
+										<form
+											className="flex flex-col gap-4"
+											onChange={() => setDirty(true)}
+											onSubmit={async (e) => {
+												e.preventDefault();
+												if (busy) return;
+												const f = new FormData(e.currentTarget);
+												await change(
+													{
+														action: "submitScore",
+														nodeId: f.get("nodeId"),
+														score: f.get("score"),
+													},
+													"已评分并提交学院审核。",
+												);
+											}}
+										>
+											<FieldGroup>
+												<Field>
+													<FieldLabel htmlFor="score-node">
+														计分项
+													</FieldLabel>
+													<NativeSelect
+														id="score-node"
+														name="nodeId"
+														required
+														defaultValue={selected.scoreNodeId || ""}
+													>
+														<NativeSelectOption value="">
+															选择计分项
+														</NativeSelectOption>
+														{activityNodes.map((n) => (
+															<NativeSelectOption key={n.id} value={n.id}>
+																{n.name}（{n.minimum} 至 {n.maximum} 分）
+															</NativeSelectOption>
+														))}
+													</NativeSelect>
+												</Field>
+												<Field>
+													<FieldLabel htmlFor="score-value">
+														分数
+													</FieldLabel>
+													<Input
+														id="score-value"
+														name="score"
+														inputMode="decimal"
+														required
+														defaultValue={selected.score ?? ""}
+													/>
+													<FieldDescription>
+														分数须在评分项范围内，0 分也有效。提交后进入学院审核。
+													</FieldDescription>
+												</Field>
+											</FieldGroup>
+											<Button type="submit" disabled={busy}>
+												提交评分
+											</Button>
+										</form>
+										<form
+											className="flex flex-col gap-4"
+											onSubmit={async (e) => {
+												e.preventDefault();
+												if (busy) return;
+												const f = new FormData(e.currentTarget);
+												await change(
+													{ action: "return", reason: f.get("reason") },
+													"已退回学生修改。",
+												);
+											}}
+										>
+											<Field>
+												<FieldLabel htmlFor="counselor-return-reason">
+													退回原因
+												</FieldLabel>
+												<Textarea
+													id="counselor-return-reason"
+													name="reason"
+													required
+													minLength={2}
+													maxLength={1000}
+													rows={3}
+												/>
+											</Field>
+											<Button
+												type="submit"
+												variant="outline"
+												disabled={busy}
+											>
+												退回学生修改
+											</Button>
+										</form>
+									</>
+								)}
+							{active && role === "COLLEGE" && selected.status === "PENDING_COLLEGE" && (
+								<>
+									{selected.score === null ? (
+										<Alert>
+											<AlertTitle>尚未评分</AlertTitle>
+											<AlertDescription>
+												该申报还没有分数，不能通过；请退回辅导员重评。
+											</AlertDescription>
+										</Alert>
+									) : (
+										<Button
+											disabled={busy}
+											onClick={() =>
+												change(
+													{ action: "approve" },
+													"已通过，申报计入成绩。",
+												)
+											}
+										>
+											通过（{selected.score} 分）
+										</Button>
+									)}
 									<form
 										className="flex flex-col gap-4"
-										onChange={() => setDirty(true)}
 										onSubmit={async (e) => {
 											e.preventDefault();
-											if (busy || uploading) return;
+											if (busy) return;
 											const f = new FormData(e.currentTarget);
 											const action = (
 												(e.nativeEvent as SubmitEvent)
 													.submitter as HTMLButtonElement
 											).value;
-											setBusy(true);
-											setError("");
-											try {
-												await requestJson(
-													`/api/claims/${selected.id}`,
-													{
-														termId: term.id,
-														revision: selected.revision,
-														action: [
-															"APPROVED",
-															"REJECTED",
-															"NEEDS_CHANGES",
-														].includes(action)
-															? "review"
-															: action,
-														status: [
-															"APPROVED",
-															"REJECTED",
-															"NEEDS_CHANGES",
-														].includes(action)
-															? action
-															: undefined,
-														reason:
-															role === "ADMIN" ? f.get("reason") : undefined,
-														note:
-															action === "resubmit" ? f.get("note") : undefined,
-														evidenceIds:
-															action === "resubmit" ? ids : undefined,
-													},
-													"PATCH",
-												);
-												setSuccess("申报状态已更新。");
-												refresh();
-											} catch (err) {
-												setError((err as Error).message);
-											} finally {
-												setBusy(false);
-											}
+											await change(
+												{ action, reason: f.get("reason") },
+												action === "rescore"
+													? "已退回辅导员重评。"
+													: "已退回学生修改。",
+											);
 										}}
 									>
-										{role === "ADMIN" ? (
-											<>
-												<FieldGroup>
-													<Field>
-														<FieldLabel htmlFor="claim-review-reason">
-															审核、结束或撤销理由
-														</FieldLabel>
-														<Textarea
-															id="claim-review-reason"
-															name="reason"
-															required
-															minLength={2}
-															maxLength={1000}
-															rows={4}
-														/>
-													</Field>
-												</FieldGroup>
-												<div className="flex flex-wrap gap-2">
-													{selected.status === "PENDING" ? (
-														<>
-															<Button
-																type="submit"
-																value="APPROVED"
-																disabled={busy}
-															>
-																通过
-															</Button>
-															<Button
-																type="submit"
-																variant="outline"
-																value="NEEDS_CHANGES"
-																disabled={busy}
-															>
-																要求补充
-															</Button>
-															<Button
-																type="submit"
-																variant="outline"
-																value="REJECTED"
-																disabled={busy}
-															>
-																驳回
-															</Button>
-														</>
-													) : selected.status === "APPROVED" ? (
-														<Button
-															type="submit"
-															variant="outline"
-															value="revoke"
-															disabled={busy}
-														>
-															撤销有效认定
-														</Button>
-													) : null}
-													{["PENDING", "NEEDS_CHANGES"].includes(
-														selected.status,
-													) && (
-														<Button
-															type="submit"
-															variant="outline"
-															value="close"
-															disabled={busy}
-														>
-															填写理由并结束申报
-														</Button>
-													)}
-												</div>
-											</>
-										) : selected.status === "PENDING" ? (
+										<Field>
+											<FieldLabel htmlFor="college-return-reason">
+												退回原因
+											</FieldLabel>
+											<Textarea
+												id="college-return-reason"
+												name="reason"
+												required
+												minLength={2}
+												maxLength={1000}
+												rows={3}
+											/>
+											<FieldDescription>
+												退回学生：由学生补充材料；退回辅导员：重新评分。
+											</FieldDescription>
+										</Field>
+										<div className="flex flex-wrap gap-2">
 											<Button
 												type="submit"
 												variant="outline"
-												value="withdraw"
+												value="return"
 												disabled={busy}
 											>
-												撤回申报
+												退回学生修改
 											</Button>
-										) : resubmit ? (
-											<>
-												<FieldGroup>
-													<Field>
-														<FieldLabel htmlFor="claim-resubmit-note">
-															补充说明
-														</FieldLabel>
-														<Textarea
-															id="claim-resubmit-note"
-															name="note"
-															defaultValue={selected.note}
-															required
-															minLength={2}
-															maxLength={2000}
-															rows={4}
-														/>
-													</Field>
-													<EvidenceUpload
-														key={submit?.id || selected?.id || "new"}
-														onChange={setIds}
-														onBusy={setUploading}
-													/>
-												</FieldGroup>
-												<Button
-													type="submit"
-													value="resubmit"
-													disabled={busy || uploading || !ids.length}
-												>
-													重新提交
-												</Button>
-											</>
-										) : (
 											<Button
-												type="button"
+												type="submit"
 												variant="outline"
-												onClick={() => {
-													setResubmit(true);
-													setIds([]);
-												}}
+												value="rescore"
+												disabled={busy}
 											>
-												补充并重新提交
+												退回辅导员重评
 											</Button>
-										)}
-										{role === "STUDENT" &&
-											selected.status === "NEEDS_CHANGES" && (
-												<Button
-													type="submit"
-													value="withdraw"
-													formNoValidate
-													variant="outline"
-													disabled={busy || uploading}
-												>
-													放弃补充并撤回申报
-												</Button>
-											)}
+										</div>
 									</form>
-								)}
+								</>
+							)}
+							{active && role === "ADMIN" && selected.status === "APPROVED" && (
+								<form
+									className="flex flex-col gap-4"
+									onSubmit={async (e) => {
+										e.preventDefault();
+										if (busy) return;
+										const f = new FormData(e.currentTarget);
+										await change(
+											{ action: "revoke", reason: f.get("reason") },
+											"已撤销该申报，结果将不再计入。",
+										);
+									}}
+								>
+									<Field>
+										<FieldLabel htmlFor="admin-revoke-reason">
+											撤销原因
+										</FieldLabel>
+										<Textarea
+											id="admin-revoke-reason"
+											name="reason"
+											required
+											minLength={2}
+											maxLength={1000}
+											rows={3}
+										/>
+									</Field>
+									<Button type="submit" variant="outline" disabled={busy}>
+										撤销
+									</Button>
+								</form>
+							)}
 							{!!selected.history?.length && (
 								<section className="flex flex-col gap-3">
-									<h3 className="font-medium text-sm">处理历史</h3>
+									<h3 className="font-medium text-sm">处理记录</h3>
 									{selected.history.map((item, index) => (
-										<div key={item.id || index} className="border-l pl-3">
+										<div key={index} className="border-l pl-3">
 											<p className="text-sm">
-												{statusLabels[item.after || ""] ||
+												{actionLabels[item.action || ""] ||
+													statusLabels[item.after || ""] ||
 													item.action ||
 													"状态变更"}
 											</p>
-											<p className="whitespace-pre-wrap text-sm text-muted-foreground">
-												{item.reason}
-											</p>
+											{typeof item.score === "string" && (
+												<p className="text-sm text-muted-foreground">
+													评分：{item.score} 分
+												</p>
+											)}
+											{item.reason && (
+												<p className="whitespace-pre-wrap text-sm text-muted-foreground">
+													{item.reason}
+												</p>
+											)}
 											<p className="text-xs text-muted-foreground">
 												{dateText(item.at)}
 											</p>

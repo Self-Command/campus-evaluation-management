@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AccountError } from "@/server/accounts";
 import { termTransaction } from "@/server/terms";
 import { collectStudentResults, resultStudentSelect, ranked } from "@/server/results";
-import { jsonValue } from "@/server/claims";
+import { jsonValue, claimPendingStatuses } from "@/server/claims";
 import type { Prisma, Term } from "@/generated/prisma/client";
 import { issueFlowToken, verifyFlowToken } from "@/server/flow-token";
 import { effectiveCheckingDeadline } from "@/server/publication-window";
@@ -29,10 +29,10 @@ async function candidate(tx: Prisma.TransactionClient, term: Term) {
   if (students.length > 2000) throw new AccountError("本次参评名单超过2000人的处理上限，本次未发布", 409);
   const records = await collectStudentResults(tx, term, students);
   const [recognitionsPending, recognitionsNeedsChanges, claimsPending, claimsNeedsChanges] = await Promise.all([
-    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: "PENDING" } }),
-    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: "NEEDS_CHANGES" } }),
-    tx.personalClaim.count({ where: { project: { termId: term.id }, status: "PENDING" } }),
-    tx.personalClaim.count({ where: { project: { termId: term.id }, status: "NEEDS_CHANGES" } }),
+    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] } } }),
+    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: "RETURNED" } }),
+    tx.personalClaim.count({ where: { termId: term.id, status: { in: [...claimPendingStatuses] } } }),
+    tx.personalClaim.count({ where: { termId: term.id, status: "RETURNED" } }),
   ]);
   const reviewBreakdown = { recognitionsPending, recognitionsNeedsChanges, claimsPending, claimsNeedsChanges };
   const pendingReviews = Object.values(reviewBreakdown).reduce((sum, count) => sum + count, 0);
@@ -111,10 +111,10 @@ async function settlementState(tx: Prisma.TransactionClient, term: Term) {
   const appeals = await tx.resultAppeal.count({ where: { termId: term.id, status: { in: ["OPEN", "PROCESSING"] } } });
   if (appeals) blockers.push({ type: "APPEALS", message: "仍有未处理完毕的异议", count: appeals });
   const [recognitionsPending, recognitionsNeedsChanges, claimsPending, claimsNeedsChanges] = await Promise.all([
-    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: "PENDING" } }),
-    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: "NEEDS_CHANGES" } }),
-    tx.personalClaim.count({ where: { project: { termId: term.id }, status: "PENDING" } }),
-    tx.personalClaim.count({ where: { project: { termId: term.id }, status: "NEEDS_CHANGES" } }),
+    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: { in: ["PENDING_COUNSELOR", "PENDING_COLLEGE"] } } }),
+    tx.recognitionSource.count({ where: { participation: { activity: { termId: term.id } }, status: "RETURNED" } }),
+    tx.personalClaim.count({ where: { termId: term.id, status: { in: [...claimPendingStatuses] } } }),
+    tx.personalClaim.count({ where: { termId: term.id, status: "RETURNED" } }),
   ]);
   const reviewBreakdown = { recognitionsPending, recognitionsNeedsChanges, claimsPending, claimsNeedsChanges };
   const pending = Object.values(reviewBreakdown).reduce((sum, count) => sum + count, 0);

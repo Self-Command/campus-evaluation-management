@@ -14,7 +14,7 @@ const correctionSchema = z.object({ action: z.enum(["preview", "commit"]), kind:
 async function impactedStudents(tx: Prisma.TransactionClient, term: Term) {
   const [facts, claims, grades, deductions, frozen] = await Promise.all([
     tx.participation.findMany({ where: { activity: { termId: term.id } }, select: { studentId: true }, distinct: ["studentId"] }),
-    tx.personalClaim.findMany({ where: { project: { termId: term.id } }, select: { studentId: true }, distinct: ["studentId"] }),
+    tx.personalClaim.findMany({ where: { termId: term.id }, select: { studentId: true }, distinct: ["studentId"] }),
     tx.gradeInput.findMany({ where: { termId: term.id }, select: { studentId: true }, distinct: ["studentId"] }),
     tx.deductionInput.findMany({ where: { termId: term.id }, select: { studentId: true }, distinct: ["studentId"] }),
     term.cohortPublicationId ? tx.publishedResult.findMany({ where: { publicationId: term.cohortPublicationId }, select: { studentId: true } }) : [],

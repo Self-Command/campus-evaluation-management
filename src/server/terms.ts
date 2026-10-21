@@ -52,7 +52,7 @@ const allPhases: TermPhase[] = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"]
 export async function termUsage(tx: Prisma.TransactionClient, termId: string) {
   const [activities, projects, claims, grades, deductions, gradeImports, participationImports, publications, snapshots, appeals, reopenings, corrections] = await Promise.all([
     tx.activity.count({ where: { termId } }), tx.recognitionProject.count({ where: { termId } }),
-    tx.personalClaim.count({ where: { project: { termId } } }), tx.gradeInput.count({ where: { termId } }),
+    tx.personalClaim.count({ where: { termId } }), tx.gradeInput.count({ where: { termId } }),
     tx.deductionInput.count({ where: { termId } }), tx.gradeImport.count({ where: { termId } }),
     tx.participationImport.count({ where: { termId } }), tx.resultPublication.count({ where: { termId } }),
     tx.settlementSnapshot.count({ where: { termId } }), tx.resultAppeal.count({ where: { termId } }),

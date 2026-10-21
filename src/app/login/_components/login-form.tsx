@@ -250,8 +250,8 @@ export function LoginForm() {
 									>
 										<Image
 											src={challenge.image}
-											width={160}
-											height={48}
+											width={180}
+											height={55}
 											alt="英文验证码，点击可更换"
 											unoptimized
 										/>

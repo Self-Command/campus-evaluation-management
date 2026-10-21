@@ -100,7 +100,7 @@ export function Accounts({
 		},
 		{
 			id: "organization",
-			header: "组织归属",
+			header: "学院 / 班级",
 			cell: ({ row }) =>
 				row.original.role === "STUDENT" && row.original.studentProfile ? (
 					<div>
@@ -111,13 +111,13 @@ export function Accounts({
 						<p className="text-xs text-muted-foreground">
 							{row.original.studentProfile.classId
 								? row.original.studentProfile.schoolClass?.counselor?.name ||
-									"责任待完善"
-								: "归属待完善"}
+									"辅导员未设置"
+								: "未分班"}
 						</p>
 					</div>
 				) : (
 					row.original.college?.name ||
-					(row.original.role === "ADMIN" ? "全校" : "归属待完善")
+					(row.original.role === "ADMIN" ? "全校" : "—")
 				),
 		},
 		{
@@ -164,13 +164,13 @@ export function Accounts({
 		<>
 			<TemplateDirectory
 				title="账号管理"
-				description={`共 ${data.total} 个匹配账号。管理角色、启停状态和密码交付。`}
+				description={`共 ${data.total} 个账号。可以调整角色、启用或停用，并重置密码。`}
 				data={data.items}
 				columns={columns}
 				search={{
 					action: "/accounts",
 					query,
-					placeholder: "搜索姓名或登录账号",
+					placeholder: "输入姓名或登录账号",
 					hidden: filters,
 				}}
 				filters={
@@ -208,7 +208,7 @@ export function Accounts({
 								<NativeSelectOption value="true">停用</NativeSelectOption>
 							</NativeSelect>
 						</Field>
-						<Button variant="outline">筛选账号</Button>
+						<Button type="submit" variant="outline">搜索</Button>
 					</form>
 				}
 				actions={
@@ -242,9 +242,9 @@ export function Accounts({
 						</div>
 						<p className="text-sm">
 							{row.role === "STUDENT" && row.studentProfile
-								? `${row.studentProfile.college} / ${row.studentProfile.className}${!row.studentProfile.classId ? " · 归属待完善" : ""}`
+								? `${row.studentProfile.college} / ${row.studentProfile.className}${!row.studentProfile.classId ? " · 未分班" : ""}`
 								: row.college?.name ||
-									(row.role === "ADMIN" ? "全校" : "归属待完善")}
+									(row.role === "ADMIN" ? "全校" : "—")}
 						</p>
 						<div className="flex flex-wrap items-center justify-between gap-2">
 							<span className="text-sm">
@@ -290,8 +290,8 @@ export function Accounts({
 						<DialogTitle>{current ? "编辑账号" : "新建账号"}</DialogTitle>
 						<DialogDescription>
 							{current
-								? "变更需要填写理由，角色与停用变化会撤销原会话。"
-								: "初始密码仅在创建成功后显示一次，请妥善交付。"}
+								? "修改需要填写原因；角色变化或停用后，原登录会失效。"
+								: "初始密码只在创建成功后显示一次，请妥善转交。"}
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -379,7 +379,7 @@ export function Accounts({
 								>
 									{role === "PUBLISHER" && (
 										<NativeSelectOption value="PUBLISHER" disabled>
-											历史活动发布者（请选择新身份）
+											原“历史活动发布者”身份，请重新选择
 										</NativeSelectOption>
 									)}
 									{Object.entries(roleLabels)
@@ -432,7 +432,7 @@ export function Accounts({
 										</NativeSelect>
 									</Field>
 									<Field>
-										<FieldLabel htmlFor="account-reason">修改理由</FieldLabel>
+										<FieldLabel htmlFor="account-reason">修改原因</FieldLabel>
 										<Input
 											id="account-reason"
 											name="reason"
@@ -488,7 +488,7 @@ export function Accounts({
 					if (
 						!open &&
 						!busy &&
-						(!dirty || window.confirm("放弃尚未保存的重置理由？"))
+						(!dirty || window.confirm("放弃尚未保存的重置内容？"))
 					) {
 						setDirty(false);
 						setReset(null);
@@ -499,7 +499,7 @@ export function Accounts({
 					<DialogHeader>
 						<DialogTitle>重置 {reset?.name} 的密码</DialogTitle>
 						<DialogDescription>
-							该账号现有会话将失效，下次登录需设置新密码。
+							下次登录需设置新密码，当前登录会失效。
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -532,7 +532,7 @@ export function Accounts({
 						<Feedback error={error} />
 						<FieldGroup>
 							<Field>
-								<FieldLabel htmlFor="reset-reason">重置理由</FieldLabel>
+								<FieldLabel htmlFor="reset-reason">重置原因</FieldLabel>
 								<Input
 									id="reset-reason"
 									name="reason"

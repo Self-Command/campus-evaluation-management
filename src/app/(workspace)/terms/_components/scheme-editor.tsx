@@ -2,7 +2,7 @@
 // Selected template users directory with invoice field groups and profile rule details.
 import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, ChevronRight, FlaskConical } from "lucide-react";
 import { nodeSchema, type Scheme, type ScoringNode } from "@/lib/scoring/types";
@@ -23,7 +23,7 @@ import {
 	schemeConfigurationIssues,
 	type MovePlacement,
 } from "@/lib/scoring/scheme-operations";
-import { ChevronDown, GripVertical, Move } from "lucide-react";
+import { ChevronDown, GripVertical } from "lucide-react";
 import {
 	Table,
 	TableHeader,
@@ -66,9 +66,9 @@ import {
 	DialogDescription,
 } from "@/components/ui/dialog";
 const kinds = {
-	SUM: "直接累加",
+	SUM: "汇总",
 	WEIGHTED: "比例汇总",
-	ACTIVITY: "活动累计",
+	ACTIVITY: "活动得分",
 	GRADE: "成绩输入",
 };
 type Preview = {
@@ -111,10 +111,24 @@ export function SchemeEditor({
 		scheme.nodes.find((n) => n.parentId === null)!.id,
 	);
 	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-	const [moving, setMoving] = useState<string | null>(null);
-	const [dragging, setDragging] = useState<string | null>(null);
-	const [moveTarget, setMoveTarget] = useState("");
-	const [placement, setPlacement] = useState<MovePlacement>("inside");
+	// Long-press drag: the whole module row is the handle, so no extra move
+	// buttons are shown in the list.
+	const [drag, setDrag] = useState<{
+		id: string;
+		name: string;
+		x: number;
+		y: number;
+	} | null>(null);
+	const [dropHint, setDropHint] = useState<{
+		targetId: string;
+		placement: MovePlacement;
+	} | null>(null);
+	const listRef = useRef<HTMLDivElement>(null);
+
+	const hint = useRef<{ targetId: string; placement: MovePlacement } | null>(
+		null,
+	);
+	const marked = useRef<HTMLElement | null>(null);
 	const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
 	const [dirty, setDirty] = useState(false);
 	const [busy, setBusy] = useState(false);
@@ -236,9 +250,6 @@ export function SchemeEditor({
 				];
 		}
 	}
-	const movingDescendants = moving
-		? descendantsOf(scheme.nodes, moving)
-		: new Set<string>();
 	function toggle(id: string) {
 		setCollapsed((previous) => {
 			const next = new Set(previous);
@@ -262,7 +273,7 @@ export function SchemeEditor({
 			return true;
 		} catch (err) {
 			const message = (err as Error).message;
-			setError(`评分制度尚未通过校验：${message}`);
+			setError(`评分方案尚未通过检查：${message}`);
 			const first = scheme.nodes.find((n) => message.includes(n.name));
 			if (first) {
 				setSelected(first.id);
@@ -275,18 +286,15 @@ export function SchemeEditor({
 		const parent = scheme.nodes.find((n) => n.id === parentId)!;
 		let nodes = scheme.nodes;
 		if (!["SUM", "WEIGHTED"].includes(parent.kind)) {
-			if (parent.parentId !== null) {
-				setError("请先在模块设置中将计分方式改为汇总，再添加子模块。");
-				return;
-			}
-			if (
-				!window.confirm(
-					"添加大模块会将综合总分改为直接累加。现有规则只进入本次草稿，正式生效须完整校验；已有计分输入须通过更正影响核对。继续？",
-				)
-			)
-				return;
+			const message =
+				parent.parentId === null
+					? "添加大模块会将综合总分改为直接累加。现有规则只进入本次草稿，正式生效须完整校验；已有计分输入须通过更正影响核对。继续？"
+					: `「${parent.name}」当前是最底层输入项。添加下级会把它改为汇总模块，这一级不再直接录入分数。继续？`;
+			if (!window.confirm(message)) return;
 			nodes = nodes.map((n) =>
-				n.id === parentId ? { ...n, kind: "SUM" as const, required: false } : n,
+				n.id === parentId
+					? { ...n, kind: "SUM" as const, required: false }
+					: n,
 			);
 		}
 		const id = crypto.randomUUID();
@@ -318,15 +326,65 @@ export function SchemeEditor({
 	) {
 		try {
 			change(moveSchemeNode(scheme, sourceId, targetId, place));
-			setMoving(null);
-			setDragging(null);
 			setError("");
-			setSuccess("模块位置已调整。请核对受影响父级的比例合计，再保存制度。");
+			setSuccess("模块位置已调整。请核对受影响父级的比例合计，再保存方案。");
 		} catch (err) {
 			setError((err as Error).message);
-			setDragging(null);
+		} finally {
+			clearDrag();
 		}
 	}
+	const MARK_BEFORE = "[&>td]:border-t-2 [&>td]:border-primary border-t-2 border-primary";
+	const MARK_AFTER = "[&>td]:border-b-2 [&>td]:border-primary border-b-2 border-primary";
+	const MARK_INSIDE = "bg-primary/10";
+	function markRow(row: HTMLElement | null, place: MovePlacement | null) {
+		const classes = [...MARK_BEFORE.split(" "), ...MARK_AFTER.split(" "), ...MARK_INSIDE.split(" ")];
+		if (marked.current) {
+			marked.current.classList.remove(...classes);
+			marked.current = null;
+		}
+		if (!row || !place) return;
+		row.classList.add(...(place === "before" ? MARK_BEFORE : place === "after" ? MARK_AFTER : MARK_INSIDE).split(" "));
+		marked.current = row;
+	}
+	function clearDrag() {
+		hint.current = null;
+		markRow(null, null);
+		setDrag(null);
+		setDropHint(null);
+		document.body.style.cursor = "";
+	}
+	function hitTest(x: number, y: number, sourceId: string): { targetId: string; placement: MovePlacement } | null {
+		const under = document.elementFromPoint(x, y) as HTMLElement | null;
+		const holder = under?.closest("[data-node-id]") as HTMLElement | null;
+		const targetId = holder?.getAttribute("data-node-id");
+		if (!holder || !targetId || targetId === sourceId) return null;
+		if (descendantsOf(scheme.nodes, sourceId).has(targetId)) return null;
+		const target = scheme.nodes.find((n) => n.id === targetId);
+		if (!target) return null;
+		const rect = (holder.closest("tr") ?? holder).getBoundingClientRect();
+		if (!rect.height) return null;
+		const ratio = (y - rect.top) / rect.height;
+		// A group module can always receive a drop; a leaf only reorders.
+		const canReceive = ["SUM", "WEIGHTED"].includes(target.kind);
+		let placement: MovePlacement =
+			ratio < 0.3
+				? "before"
+				: ratio > 0.7
+					? "after"
+					: canReceive
+						? "inside"
+						: ratio < 0.5
+							? "before"
+							: "after";
+		if (placement !== "inside" && target.parentId === null)
+			placement = canReceive ? "inside" : "after";
+		if (placement !== "inside" && target.parentId === null) return null;
+		return { targetId, placement };
+	}
+
+
+
 	function summary(n: ScoringNode) {
 		return `${kinds[n.kind]} · ${n.parentId && scheme.nodes.find((p) => p.id === n.parentId)?.kind === "WEIGHTED" ? `占上级 ${percentage(n.weight)}%` : "直接计入"} · 封顶 ${n.cap ?? "不限"}${n.normalize ? ` · ${n.rawMaximum}→${n.targetMaximum} 折算` : ""}${n.floor !== null ? ` · 最低 ${n.floor}` : ""}${n.required ? " · 必填" : ""}`;
 	}
@@ -334,7 +392,7 @@ export function SchemeEditor({
 		try {
 			return Rational.from(value).mul(Rational.from("100")).fixed();
 		} catch {
-			return "格式待完善";
+			return "格式错误";
 		}
 	}
 	function ruleDetails(n: ScoringNode) {
@@ -342,7 +400,7 @@ export function SchemeEditor({
 			["模块名称", n.name],
 			["计分方式", kinds[n.kind]],
 			["占上级比例", `${percentage(n.weight)}%`],
-			["原始分范围", `${n.minimum} 至 ${n.maximum}`],
+			["分数范围", `${n.minimum} 至 ${n.maximum}`],
 			["封顶分", n.cap ?? "不限制"],
 			["最低计入分", n.floor ?? "不限制"],
 			[
@@ -355,6 +413,72 @@ export function SchemeEditor({
 			["同级顺序", String(n.order)],
 		];
 	}
+	// Native HTML5 drag: every non-root row is draggable, dropping on the upper or
+	// lower edge reorders among siblings (including out of a parent), and dropping
+	// in the middle nests the dragged module (and its subtree) inside the target.
+	useEffect(() => {
+		const root = listRef.current;
+		if (!root) return;
+		for (const row of Array.from(root.querySelectorAll<HTMLElement>("tr"))) {
+			const id = row.querySelector("[data-node-id]")?.getAttribute("data-node-id");
+			const item = id ? scheme.nodes.find((n) => n.id === id) : undefined;
+			row.draggable = !!editable && !!item && item.parentId !== null;
+			if (id) row.dataset.nodeId = id;
+			else delete row.dataset.nodeId;
+		}
+		for (const holder of Array.from(root.querySelectorAll<HTMLElement>("[data-node-id]"))) {
+			const id = holder.getAttribute("data-node-id")!;
+			const item = scheme.nodes.find((n) => n.id === id);
+			holder.draggable = !!editable && !!item && item.parentId !== null;
+		}
+		const rowOf = (target: EventTarget | null) =>
+			(target as HTMLElement | null)?.closest<HTMLElement>("[data-node-id]") ?? null;
+		const onDragStart = (event: DragEvent) => {
+			const holder = rowOf(event.target);
+			const id = holder?.getAttribute("data-node-id");
+			const item = id ? scheme.nodes.find((n) => n.id === id) : undefined;
+			if (!id || !item || item.parentId === null) {
+				event.preventDefault();
+				return;
+			}
+			event.dataTransfer?.setData("text/plain", id);
+			if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+			setError("");
+			setSuccess("");
+			setDrag({ id, name: item.name, x: event.clientX, y: event.clientY });
+		};
+		const onDragOver = (event: DragEvent) => {
+			if (!drag) return;
+			event.preventDefault();
+			const next = hitTest(event.clientX, event.clientY, drag.id);
+			hint.current = next;
+			setDropHint(next);
+			if (event.dataTransfer) event.dataTransfer.dropEffect = next ? "move" : "none";
+			const under = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+			markRow(under?.closest("tr") ?? null, next?.placement ?? null);
+		};
+		const onDrop = (event: DragEvent) => {
+			if (!drag) return;
+			event.preventDefault();
+			const next = hitTest(event.clientX, event.clientY, drag.id);
+			if (next) performMove(drag.id, next.targetId, next.placement);
+			else clearDrag();
+		};
+		const onDragEnd = () => clearDrag();
+		root.addEventListener("dragstart", onDragStart);
+		root.addEventListener("dragover", onDragOver);
+		root.addEventListener("drop", onDrop);
+		root.addEventListener("dragend", onDragEnd);
+		return () => {
+			root.removeEventListener("dragstart", onDragStart);
+			root.removeEventListener("dragover", onDragOver);
+			root.removeEventListener("drop", onDrop);
+			root.removeEventListener("dragend", onDragEnd);
+		};
+		// The handlers below are recreated per render on purpose; the effect only needs
+		// to rebind when the dragged module, editability or the scheme changes.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [drag, editable, scheme]);
 	function rowActions(n: ScoringNode) {
 		return (
 			<div className="flex flex-wrap gap-1">
@@ -369,59 +493,9 @@ export function SchemeEditor({
 					{editable ? "设置" : "规则明细"}
 				</Button>
 				{editable && (
-					<>
-						{["SUM", "WEIGHTED"].includes(n.kind) && (
-							<Button variant="ghost" size="sm" onClick={() => addModule(n.id)}>
-								添加下级
-							</Button>
-						)}
-						{n.parentId !== null && (
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={() => {
-									setMoving(n.id);
-									setMoveTarget("");
-									setPlacement("inside");
-								}}
-							>
-								<Move data-icon="inline-start" />
-								移动到
-							</Button>
-						)}
-					</>
-				)}
-				{editable && dragging && dragging !== n.id && (
-					<div
-						className="flex flex-wrap gap-1"
-						aria-label={`${n.name}的放置位置`}
-					>
-						{(["before", "inside", "after"] as MovePlacement[])
-							.filter((p) =>
-								p === "inside"
-									? ["SUM", "WEIGHTED"].includes(n.kind)
-									: n.parentId !== null,
-							)
-							.map((p) => (
-								<Button
-									key={p}
-									variant="outline"
-									size="sm"
-									onDragOver={(e) => e.preventDefault()}
-									onDrop={(e) => {
-										e.preventDefault();
-										performMove(dragging, n.id, p);
-									}}
-									onClick={() => performMove(dragging, n.id, p)}
-								>
-									{p === "before"
-										? "放到前面"
-										: p === "after"
-											? "放到后面"
-											: "移入"}
-								</Button>
-							))}
-					</div>
+					<Button variant="ghost" size="sm" onClick={() => addModule(n.id)}>
+						添加下级
+					</Button>
 				)}
 			</div>
 		);
@@ -437,24 +511,19 @@ export function SchemeEditor({
 				const n = row.original.node;
 				return (
 					<div
-						className="flex min-w-44 items-center gap-2"
+						data-node-id={n.id}
+						className={`flex min-w-44 items-center gap-2 ${
+							editable && n.parentId !== null
+								? "cursor-grab select-none active:cursor-grabbing"
+								: ""
+						}`}
 						style={{ paddingLeft: Math.min(row.original.depth, 8) * 12 }}
 					>
 						{editable && n.parentId !== null && (
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								draggable
-								aria-label={`拖动${n.name}`}
-								onDragStart={(e) => {
-									e.dataTransfer.setData("text/plain", n.id);
-									e.dataTransfer.effectAllowed = "move";
-									setDragging(n.id);
-								}}
-								onDragEnd={() => setDragging(null)}
-							>
-								<GripVertical />
-							</Button>
+							<GripVertical
+								aria-hidden
+								className="size-4 shrink-0 text-muted-foreground"
+							/>
 						)}
 						{(children.get(n.id)?.length || 0) > 0 && (
 							<Button
@@ -528,7 +597,7 @@ export function SchemeEditor({
 				<div className="flex items-center gap-3">
 					<Badge variant="outline">{phaseLabels[term.phase]}</Badge>
 					<span className="text-xs text-muted-foreground">
-						方案修订 {term.revision}
+						评分方案版本 {term.revision}
 						{dirty ? " · 有未保存修改" : ""}
 					</span>
 				</div>
@@ -609,7 +678,7 @@ export function SchemeEditor({
 					<DialogHeader>
 						<DialogTitle>评分方案更正</DialogTitle>
 						<DialogDescription>
-							核对全量学生更正前后结果，再填写理由提交。原发布与结算快照保留。
+							核对全部学生更正前后的结果，再填写原因提交。原发布和存档保留。
 						</DialogDescription>
 					</DialogHeader>
 					<CorrectionReview
@@ -650,11 +719,15 @@ export function SchemeEditor({
 					)}
 				</TabsList>
 				<TabsContent value="structure" className="mt-5">
+					<div
+						ref={listRef}
+						className={drag ? "select-none [touch-action:none]" : undefined}
+					>
 					<TemplateDirectory
 						title="评分模块与规则"
 						description={
 							editable
-								? "展开大模块查看子模块；设置规则后保存整套制度。拖动时明确选择放到前面、后面或移入，比例不会自动调整。"
+								? "按住模块任意位置约 0.2 秒即可拖动：放到模块上沿/下沿调整顺序，放到中间移入该模块；比例不会自动调整，保存前请核对。"
 								: "展开大模块查看子模块，选择规则明细查阅各模块的计分方式、比例、封顶与折算规则。"
 						}
 						data={visible}
@@ -684,7 +757,14 @@ export function SchemeEditor({
 							</>
 						}
 						mobile={({ node: item, depth }) => (
-							<div className="flex flex-col gap-3">
+							<div
+								data-node-id={item.id}
+								className={`flex flex-col gap-3 ${
+									editable && item.parentId !== null
+										? "cursor-grab select-none active:cursor-grabbing"
+										: ""
+								}`}
+							>
 								<div className="flex items-center gap-2">
 									{(children.get(item.id)?.length || 0) > 0 && (
 										<Button
@@ -717,6 +797,25 @@ export function SchemeEditor({
 							</div>
 						)}
 					/>
+					{drag && (
+						<div
+							className="pointer-events-none fixed z-50 flex items-center gap-2 rounded-md border bg-popover px-3 py-1.5 text-sm shadow-lg"
+							style={{ left: drag.x + 14, top: drag.y + 10 }}
+						>
+							<GripVertical aria-hidden className="size-3.5 text-muted-foreground" />
+							{drag.name}
+							<span className="text-muted-foreground">
+								{dropHint
+									? dropHint.placement === "inside"
+										? "· 移入该模块"
+										: dropHint.placement === "before"
+											? "· 放到上面"
+											: "· 放到下面"
+									: "· 拖到目标模块"}
+							</span>
+						</div>
+					)}
+					</div>
 					<Dialog
 						open={mobileEdit}
 						onOpenChange={(open) => {
@@ -747,6 +846,12 @@ export function SchemeEditor({
 										</CardDescription>
 									</CardHeader>
 									<CardContent>
+										<div className="mb-5 flex flex-col gap-1 rounded-lg border bg-muted/40 p-3">
+											<p className="font-medium text-sm">这一项怎么填</p>
+											<p className="text-muted-foreground text-sm">
+												选「成绩输入」表示这一项直接录分；选「活动得分」表示按通过审核的活动和成果累计；选「汇总」或「比例汇总」表示这一项由下面的模块加起来。再填分数上限、折算等细节，填完返回列表，最后统一保存整套方案。
+											</p>
+										</div>
 										<FieldGroup>
 											<Field>
 												<FieldLabel htmlFor="node-name">模块名称</FieldLabel>
@@ -862,8 +967,8 @@ export function SchemeEditor({
 												<>
 													<div className="grid gap-5 sm:grid-cols-2">
 														{[
-															["minimum", "原始分下限"],
-															["maximum", "原始分上限"],
+															["minimum", "最低分"],
+															["maximum", "最高分"],
 														].map(([key, label]) => (
 															<Field key={key}>
 																<FieldLabel htmlFor={`node-${key}`}>
@@ -1037,88 +1142,6 @@ export function SchemeEditor({
 							</Button>
 						</DialogContent>
 					</Dialog>
-					<Dialog
-						open={!!moving}
-						onOpenChange={(open) => {
-							if (!open) setMoving(null);
-						}}
-					>
-						<DialogContent>
-							<DialogHeader>
-								<DialogTitle>移动评分模块</DialogTitle>
-								<DialogDescription>
-									整组下级随父模块移动，模块标识、规则与比例保持不变。
-								</DialogDescription>
-							</DialogHeader>
-							<Feedback error={error} />
-							<form
-								className="flex flex-col gap-5"
-								onSubmit={(e) => {
-									e.preventDefault();
-									if (moving && moveTarget)
-										performMove(moving, moveTarget, placement);
-								}}
-							>
-								<FieldGroup>
-									<Field>
-										<FieldLabel htmlFor="scheme-move-target">
-											目标模块
-										</FieldLabel>
-										<NativeSelect
-											id="scheme-move-target"
-											required
-											value={moveTarget}
-											onChange={(e) => setMoveTarget(e.target.value)}
-										>
-											<NativeSelectOption value="">
-												请选择目标
-											</NativeSelectOption>
-											{scheme.nodes
-												.filter(
-													(n) =>
-														!movingDescendants.has(n.id) &&
-														(placement === "inside"
-															? ["SUM", "WEIGHTED"].includes(n.kind)
-															: n.parentId !== null),
-												)
-												.map((n) => (
-													<NativeSelectOption key={n.id} value={n.id}>
-														{n.name}
-														{n.id === root.id
-															? "（综合总分：移入即提升为大模块）"
-															: ""}
-													</NativeSelectOption>
-												))}
-										</NativeSelect>
-									</Field>
-									<Field>
-										<FieldLabel htmlFor="scheme-move-placement">
-											放置方式
-										</FieldLabel>
-										<NativeSelect
-											id="scheme-move-placement"
-											value={placement}
-											onChange={(e) => {
-												setPlacement(e.target.value as MovePlacement);
-												setMoveTarget("");
-											}}
-										>
-											<NativeSelectOption value="before">
-												放到目标前面
-											</NativeSelectOption>
-											<NativeSelectOption value="after">
-												放到目标后面
-											</NativeSelectOption>
-											<NativeSelectOption value="inside">
-												移入目标末尾
-											</NativeSelectOption>
-										</NativeSelect>
-									</Field>
-								</FieldGroup>
-								<Button disabled={!moveTarget}>移动并保留草稿</Button>
-							</form>
-						</DialogContent>
-					</Dialog>
 				</TabsContent>
 				<TabsContent value="deductions" className="mt-5">
 					<Card>
@@ -1272,7 +1295,7 @@ export function SchemeEditor({
 							<CardHeader>
 								<CardTitle>评分试算</CardTitle>
 								<CardDescription>
-									填入原始分与扣分额核对当前方案，试算不会保存学生成绩。
+									填入分数和扣分分值，核对当前方案；试算不会保存学生成绩。
 								</CardDescription>
 							</CardHeader>
 							<CardContent>

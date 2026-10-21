@@ -7,7 +7,7 @@ export default async function Page() {
   if (user.role !== "ADMIN") notFound();
   return (
     <>
-      <PageHeading title="系统设置" description="维护站名、标题、标识与基础主题；保存后对全站生效。" />
+      <PageHeading title="系统设置" description="修改站点名称、说明、标识和主题，保存后全站生效。" />
       <Settings />
     </>
   );

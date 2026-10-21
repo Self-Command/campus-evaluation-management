@@ -25,7 +25,7 @@ npm run db:seed
 npm run dev
 ```
 
-浏览器打开 **http://localhost:3000**。统一使用 localhost，不要与 127.0.0.1 混用，否则改密来源校验不匹配。开发服务器只监听本机，未开放局域网。保存源文件后 Next.js 自动热更新。
+浏览器打开 **http://localhost:3000** 或 **http://127.0.0.1:3000**。两种本机地址同协议同端口均可写入；会话 cookie 按主机隔离，切换地址后请重新登录。开发服务器只监听本机，未开放局域网。保存源文件后 Next.js 自动热更新。
 
 已有 `.env` 时不再运行 `dev:setup`；脚本拒绝覆盖现有密钥。后续启动只需 `db:local` 和 `dev`。不要同时启动多个数据库进程或开发服务器。
 
@@ -89,7 +89,7 @@ npm run build
 - `npm test` 自动创建随机命名的独立 `campus_test_*` 数据库、部署迁移、执行集成测试并清理该测试库；不会清理开发库。
 - `test:e2e` 需要运行中的应用，默认连接 localhost:3000，使用已安装的 Microsoft Edge。使用独立临时账号，不修改手工测试账号，结束后删除临时账号。浏览器上下文不会复用你日常浏览器登录信息。
 - 浏览器截图输出在 `.local/`；失败 trace 在 `test-results/`，可能包含测试会话，请勿公开。
-- 构建输出 `.next-production/`，与热更新 `.next/` 隔离。
+- 构建输出 `.next-production/`，与热更新 `.next/` 隔离。`npm run build` 完成后会自动执行 `postbuild`，把静态资源同步到 standalone 目录；不要跳过该步骤，否则页面 HTML 可打开但 JS/CSS 会返回 404。
 - `GET /api/health/live` 检查进程；`GET /api/health/ready` 检查数据库及初始迁移结构，不向匿名调用返回数据库诊断信息。
 
 ## 安全与当前限制

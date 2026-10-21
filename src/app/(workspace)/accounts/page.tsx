@@ -38,7 +38,7 @@ export default async function AccountsPage({
 		<>
 			<PageHeading
 				title="账号管理"
-				description="管理学校、学院、辅导员及学生账号的角色、归属、启停状态与密码重置。"
+				description="添加或停用账号，调整角色、所属学院和班级，重置密码。"
 			/>
 			<Accounts
 				data={JSON.parse(JSON.stringify(result))}

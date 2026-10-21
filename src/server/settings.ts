@@ -4,12 +4,12 @@ import { db } from "@/server/db";
 import { adminTransaction, AccountError } from "@/server/accounts";
 import { getCurrentSession } from "@/server/auth";
 import { jsonValue } from "@/server/claims";
-import { settingsSchema, defaultSettings } from "@/lib/settings-schema";
+import { settingsSchema, storedSettingsSchema, defaultSettings } from "@/lib/settings-schema";
 
 export { settingsSchema, defaultSettings } from "@/lib/settings-schema";
 export async function publicSettings() {
   const saved = await db.siteSettings.findUnique({ where: { id: "site" } });
-  return { ...(saved ? settingsSchema.parse(saved.content) : defaultSettings), revision: saved?.revision ?? 0, updatedAt: saved?.updatedAt ?? null };
+  return { ...(saved ? storedSettingsSchema.parse(saved.content) : defaultSettings), revision: saved?.revision ?? 0, updatedAt: saved?.updatedAt ?? null };
 }
 export async function readSettings(sessionId: string) {
   const current = await getCurrentSession(sessionId);
@@ -26,7 +26,7 @@ export async function saveSettings(sessionId: string, input: unknown) {
     const assetIds = [...new Set([content.logoAssetId, content.faviconAssetId].filter((i): i is string => !!i))];
     if (await tx.brandAsset.count({ where: { id: { in: assetIds } } }) !== assetIds.length) throw new AccountError("品牌图片不存在，请重新上传");
     const saved = await tx.siteSettings.upsert({ where: { id: "site" }, create: { content: jsonValue(content), revision: 1 }, update: { content: jsonValue(content), revision: { increment: 1 } } });
-    const oldPolicy = previous ? settingsSchema.parse(previous.content) : defaultSettings;
+    const oldPolicy = previous ? storedSettingsSchema.parse(previous.content) : defaultSettings;
     if (oldPolicy.loginFailureLimitEnabled !== content.loginFailureLimitEnabled || oldPolicy.loginFailureMaxAttempts !== content.loginFailureMaxAttempts || oldPolicy.loginFailureLockMinutes !== content.loginFailureLockMinutes) await tx.loginFailureState.deleteMany();
     await tx.auditEvent.create({ data: { actorId, action: "SETTINGS_CHANGED", targetId: "site", details: { reason, before: previous?.content ?? defaultSettings, after: content, revision: saved.revision } } });
     return { ...content, revision: saved.revision, updatedAt: saved.updatedAt };

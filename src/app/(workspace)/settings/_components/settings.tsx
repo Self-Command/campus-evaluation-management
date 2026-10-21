@@ -26,11 +26,15 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
+import {
+	THEME_PRESET_OPTIONS,
+	type ThemePreset,
+} from "@/lib/preferences/theme";
 type SettingsData = {
 	siteName: string;
 	siteDescription: string;
 	pageTitle: string;
-	themePreset: "default" | "violet" | "blue";
+	themePreset: ThemePreset;
 	loginFailureLimitEnabled: boolean;
 	loginFailureMaxAttempts: number;
 	loginFailureLockMinutes: number;
@@ -183,12 +187,31 @@ function SettingsForm({ value }: { value: SettingsData }) {
 			}}
 		>
 			<Feedback error={error} success={success} />
-			<div className="flex flex-wrap items-center justify-between gap-3">
+			<div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border bg-card p-4">
+				<Field className="min-w-56 flex-1" data-invalid={!!invalid.reason}>
+					<FieldLabel htmlFor="settings-reason">修改理由</FieldLabel>
+					<Input
+						id="settings-reason"
+						disabled={busy}
+						name="reason"
+						value={reason}
+						onChange={(e) => {
+							setReason(e.target.value);
+							setInvalid((current) => ({ ...current, reason: "" }));
+						}}
+						placeholder="2至500个字符，用于记录本次修改"
+						required
+						minLength={2}
+						maxLength={500}
+						aria-invalid={!!invalid.reason}
+					/>
+					{invalid.reason && <FieldError>{invalid.reason}</FieldError>}
+				</Field>
 				<Badge variant="outline">
-					当前修订 {draft.revision}
+					当前版本 {draft.revision}
 					{dirty ? " · 有未保存修改" : ""}
 				</Badge>
-				<Button type="submit" disabled={busy || !!uploading || !dirty}>
+				<Button type="submit" disabled={busy || !!uploading}>
 					{busy ? "正在保存…" : "保存并生效"}
 				</Button>
 			</div>
@@ -198,11 +221,9 @@ function SettingsForm({ value }: { value: SettingsData }) {
 						<div className="flex items-center justify-between px-4 py-4">
 							<h2 className="font-medium text-lg">品牌效果</h2>
 							<Badge variant="outline">
-								{draft.themePreset === "violet"
-									? "紫色"
-									: draft.themePreset === "blue"
-										? "蓝色"
-										: "默认"}
+								{THEME_PRESET_OPTIONS.find(
+									(option) => option.value === draft.themePreset,
+								)?.label ?? "默认主题"}
 							</Badge>
 						</div>
 						<div
@@ -337,21 +358,46 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								</Field>
 							))}
 							<Field>
-								<FieldLabel htmlFor="settings-theme">基础主题</FieldLabel>
-								<NativeSelect
-									id="settings-theme"
-									disabled={busy}
-									value={draft.themePreset}
-									onChange={(e) => change("themePreset", e.target.value)}
-								>
-									<NativeSelectOption value="default">
-										默认主题
-									</NativeSelectOption>
-									<NativeSelectOption value="violet">
-										紫色主题
-									</NativeSelectOption>
-									<NativeSelectOption value="blue">蓝色主题</NativeSelectOption>
-								</NativeSelect>
+								<FieldLabel>界面主题</FieldLabel>
+								<div className="grid gap-2 sm:grid-cols-2">
+									{THEME_PRESET_OPTIONS.map((option) => {
+										const active = draft.themePreset === option.value;
+										return (
+											<button
+												key={option.value}
+												type="button"
+												disabled={busy}
+												aria-pressed={active}
+												onClick={() => change("themePreset", option.value)}
+												className={`flex items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+													active
+														? "border-primary bg-primary/5"
+														: "hover:bg-muted/60"
+												}`}
+											>
+												<span
+													aria-hidden
+													className="mt-0.5 size-8 shrink-0 rounded-md border"
+													style={{
+														background: `linear-gradient(135deg, ${option.primary.light} 0 58%, #e4e4e7 58% 100%)`,
+													}}
+												/>
+												<span className="flex min-w-0 flex-col gap-0.5">
+													<span className="text-sm font-medium">
+														{option.label}
+														{active ? "（当前）" : ""}
+													</span>
+													<span className="text-muted-foreground text-xs">
+														{option.description}
+													</span>
+												</span>
+											</button>
+										);
+									})}
+								</div>
+								<FieldDescription>
+									主题会同时调整圆角、描边、阴影与主色，保存后全站生效；不影响已有成绩和结算记录。
+								</FieldDescription>
 							</Field>
 						</FieldGroup>
 					</TabsContent>
@@ -429,31 +475,6 @@ function SettingsForm({ value }: { value: SettingsData }) {
 						</FieldGroup>
 					</TabsContent>
 				</Tabs>
-				<Separator />
-				<FieldGroup>
-					<Field data-invalid={!!invalid.reason}>
-						<FieldLabel htmlFor="settings-reason">修改理由</FieldLabel>
-						<Textarea
-							id="settings-reason"
-							disabled={busy}
-							name="reason"
-							value={reason}
-							onChange={(e) => {
-								setReason(e.target.value);
-								setInvalid((current) => ({ ...current, reason: "" }));
-							}}
-							required
-							minLength={2}
-							maxLength={500}
-							rows={3}
-							aria-invalid={!!invalid.reason}
-						/>
-						{invalid.reason && <FieldError>{invalid.reason}</FieldError>}
-						<FieldDescription>
-							品牌与主题设置不会改变已有成绩和结算记录。
-						</FieldDescription>
-					</Field>
-				</FieldGroup>
 			</TemplateEditor>
 		</form>
 	);

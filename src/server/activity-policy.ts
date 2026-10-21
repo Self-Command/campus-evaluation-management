@@ -25,9 +25,16 @@ export function studentFeedWhere(student: { id: string; studentProfile: StudentP
   if (!student.studentProfile) return { id: { in: [] } };
   return { publishedAt: { not: null }, confirmed: true, audienceColleges: { has: student.studentProfile.college }, audienceClasses: { has: classKey(student.studentProfile) }, audienceStudents: { has: student.id } };
 }
-export function assertActivityOwner(activity: Pick<Activity, "ownerId">, actor: { id: string; role: string }) {
-  if (!["ADMIN", "PUBLISHER"].includes(actor.role) || activity.ownerId !== actor.id) throw new AccountError("仅活动发布者本人可登记参与信息或录入活动成绩", 403);
+export function canManageActivity(activity: Pick<Activity, "ownerId" | "collegeId">, actor: { id: string; role: string; collegeId?: string | null }) {
+  if (actor.role === "ADMIN") return true;
+  if (actor.role === "COLLEGE") return !!actor.collegeId && activity.collegeId === actor.collegeId;
+  return actor.role === "PUBLISHER" && !!activity.collegeId && activity.ownerId === actor.id;
 }
+export function assertActivityManager(activity: Pick<Activity, "ownerId" | "collegeId">, actor: { id: string; role: string; collegeId?: string | null }) {
+  if (!canManageActivity(activity, actor)) throw new AccountError("仅活动主办学院或受控历史经办人可维护参与信息和活动成绩", 403);
+}
+// Kept as an alias for legacy callers during the college-ownership migration.
+export const assertActivityOwner = assertActivityManager;
 export const audienceStudentSelect = { id: true, login: true, name: true, role: true, disabled: true, revision: true, studentProfile: true } as const;
 export async function inspectAudience(tx: Prisma.TransactionClient, raw: unknown) {
   const audience = normalizeAudience(raw);
@@ -61,16 +68,16 @@ export async function audienceAction(sessionId: string, input: unknown) {
   };
   // Publishers may search the current valid directory solely to set activity targets.
   // A period transaction also revalidates the current role; no ADMIN bypass is needed.
-  if (data.termId) return termTransaction(sessionId, data.termId, ["ADMIN", "PUBLISHER"], ["ACTIVE"], (tx, _term, actorId) => operation(tx, actorId));
+  if (data.termId) return termTransaction(sessionId, data.termId, ["ADMIN", "COLLEGE", "PUBLISHER"], ["ACTIVE"], (tx, _term, actorId) => operation(tx, actorId));
   const { getCurrentSession } = await import("@/server/auth");
   const current = await getCurrentSession(sessionId);
-  if (!current || !["ADMIN", "PUBLISHER"].includes(current.user.role) || current.user.mustChangePassword) throw new AccountError("没有活动范围设置权限", 403);
+  if (!current || !["ADMIN", "COLLEGE", "PUBLISHER"].includes(current.user.role) || current.user.mustChangePassword) throw new AccountError("没有活动范围设置权限", 403);
   if (current.user.role === "ADMIN") return adminTransaction(sessionId, operation);
   const { db } = await import("@/server/db");
   return db.$transaction(async tx => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(72109312)`;
     const session = await tx.authSession.findUnique({ where: { id: sessionId }, include: { user: true } });
-    if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.disabled || session.version !== session.user.authVersion || session.user.mustChangePassword || !["ADMIN", "PUBLISHER"].includes(session.user.role)) throw new AccountError("会话或活动范围设置权限已变化", 403);
+    if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.disabled || session.version !== session.user.authVersion || session.user.mustChangePassword || !["ADMIN", "COLLEGE", "PUBLISHER"].includes(session.user.role)) throw new AccountError("会话或活动范围设置权限已变化", 403);
     return operation(tx, session.userId);
   });
 }

@@ -28,7 +28,7 @@ export default async function TermsPage({
 		<>
 			<PageHeading
 				title="测评周期"
-				description="每个周期使用一套生效评分方案，按阶段组织申报、审核与结果核对。"
+				description="每个学期使用一个测评周期，按阶段完成评分方案、申报、审核和结果确认。"
 			/>
 			<Terms
 				key={selectedView}

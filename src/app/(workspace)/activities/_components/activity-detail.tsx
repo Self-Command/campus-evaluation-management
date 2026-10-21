@@ -18,11 +18,15 @@ import {
 	DialogTitle,
 	DialogDescription,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
 import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
+import { EvidenceViewer } from "@/components/dashboard/evidence-viewer";
 import { ActivityForm, type Activity } from "./activity-form";
 import { dateText, phaseLabels, type AppRole } from "@/lib/business-labels";
 import type { Scheme } from "@/lib/scoring/types";
@@ -36,6 +40,7 @@ export function ActivityDetail({
 	activity,
 	term,
 	user,
+	colleges = [],
 	returnHref,
 }: {
 	activity: Activity;
@@ -48,22 +53,26 @@ export function ActivityDetail({
 		scheme: Scheme;
 	};
 	user: { id: string; role: AppRole };
+	colleges?: { id: string; name: string; code?: string }[];
 	returnHref?: string;
 }) {
 	const [dirty, setDirty] = useState(false);
 	useUnsavedChanges(dirty);
 	const router = useRouter();
 	const [edit, setEdit] = useState(false);
-	const [submit, setSubmit] = useState(false);
 	const [ids, setIds] = useState<string[]>([]);
 	const [uploading, setUploading] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [success, setSuccess] = useState("");
+	const [evidenceOpen, setEvidenceOpen] = useState(false);
+	const [reassignOpen, setReassignOpen] = useState(false);
 	const active =
 		term.phase === "ACTIVE" &&
 		(!term.disposition || term.disposition === "NORMAL");
-	const owner = user.id === activity.ownerId && user.role !== "STUDENT";
+	const owner = !!activity.canManage;
+	const canSeeParticipation =
+		user.role !== "STUDENT" && (user.role !== "PUBLISHER" || owner);
 	const params = useSearchParams();
 	const [publishPreview, setPublishPreview] = useState<AudiencePreview | null>(
 		null,
@@ -90,12 +99,23 @@ export function ActivityDetail({
 							<div className="flex flex-wrap gap-2">
 								<Badge variant="outline">{phaseLabels[term.phase]}</Badge>
 								<Badge variant="outline">
-									{activity.confirmed ? "分值已确认" : "分值待确认"}
+									{activity.college?.name || "主办学院未设置"}
 								</Badge>
 								<Badge variant="outline">
-									{activity.publishedAt ? "已发布" : "草稿 / 已撤回"}
+									{activity.confirmed ? "分值已确认" : "分值未确认"}
+								</Badge>
+								<Badge variant="outline">
+									{activity.publishedAt ? "已发布" : "未发布"}
+								</Badge>
+								<Badge variant="outline">
+									{activity.rosterCommitted ? "名单已保存" : "名单待提交"}
 								</Badge>
 							</div>
+							{user.role === "PUBLISHER" && !activity.college && (
+								<p className="max-w-2xl text-sm text-muted-foreground">
+									该活动尚未设置主办学院。请联系管理员在活动详情中移交，之后才能维护参与记录、活动得分和证明。
+								</p>
+							)}
 						</div>
 					</div>
 					<div className="flex items-center gap-2">
@@ -111,7 +131,10 @@ export function ActivityDetail({
 				<Tabs
 					className="min-h-0 min-w-0 max-w-full flex-1 gap-0"
 					defaultValue={
-						params.has("participantPage") || params.has("participantQ")
+						params.has("participantPage") ||
+						params.has("participantQ") ||
+						params.has("participantStatus") ||
+						params.has("participantRemoved")
 							? "participants"
 							: "overview"
 					}
@@ -123,13 +146,16 @@ export function ActivityDetail({
 						>
 							<TabsTrigger value="overview">活动详情</TabsTrigger>
 							<TabsTrigger value="requirements">参加要求</TabsTrigger>
-							{user.role !== "STUDENT" && (
-								<TabsTrigger value="participants">
-									参与名录与活动成绩
-								</TabsTrigger>
-							)}
+							{canSeeParticipation && (
+									<TabsTrigger value="participants">
+										参与名单
+									</TabsTrigger>
+								)}
+							{canSeeParticipation && (
+									<TabsTrigger value="evidence">活动证明</TabsTrigger>
+								)}
 							{activity.ownParticipation && (
-								<TabsTrigger value="participation">本人参与与历史</TabsTrigger>
+								<TabsTrigger value="participation">我的参与</TabsTrigger>
 							)}
 						</TabsList>
 					</div>
@@ -138,7 +164,7 @@ export function ActivityDetail({
 							<div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_auto_18rem]">
 								<div className="flex min-w-0 flex-col gap-5 py-4 lg:pr-6">
 									<section className="flex flex-col gap-2">
-										<h2 className="font-medium text-base">活动内容</h2>
+										<h2 className="font-medium text-base">活动介绍</h2>
 										<p className="whitespace-pre-wrap text-sm leading-7">
 											{activity.content}
 										</p>
@@ -148,6 +174,7 @@ export function ActivityDetail({
 										<h2 className="font-medium text-base">活动信息</h2>
 										<dl className="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">
 											{[
+												["主办学院", activity.college?.name || "未设置"],
 												["组织单位", activity.organizer],
 												["开始时间", dateText(activity.startsAt)],
 												["结束时间", dateText(activity.endsAt)],
@@ -164,7 +191,7 @@ export function ActivityDetail({
 									{user.role !== "STUDENT" && activity.audience && (
 										<section className="flex flex-col gap-3">
 											<Separator />
-											<h2 className="text-base font-medium">已保存发布范围</h2>
+											<h2 className="text-base font-medium">发布范围</h2>
 											<p className="text-sm">
 												学院：
 												{activity.audience.colleges.join("、") || "尚未选择"}
@@ -176,19 +203,19 @@ export function ActivityDetail({
 											</p>
 											<p className="text-sm">
 												指定学生：{activity.audience.studentIds.length}{" "}
-												人；三组同时满足才符合资格。
+												人。学院、班级和指定学生需同时满足。
 											</p>
 										</section>
 									)}
 								</div>
 								<Separator orientation="vertical" className="hidden lg:block" />
 								<div className="flex min-w-0 max-w-full flex-col gap-4 py-4 lg:pl-6">
-									<h2 className="font-medium text-base">参与认定</h2>
+									<h2 className="font-medium text-base">活动得分</h2>
 									<div>
 										<p className="text-xs text-muted-foreground">
 											{activity.scoreMode === "INDIVIDUAL"
-												? "逐人录分上限"
-												: "固定分值"}
+												? "每人单独录分"
+												: "统一分值"}
 										</p>
 										<p className="mt-1 text-3xl tabular-nums">
 											{activity.points}
@@ -203,19 +230,18 @@ export function ActivityDetail({
 									</p>
 									{active && (
 										<>
-											{(owner ||
-												(user.role === "STUDENT" && activity.canSubmit)) && (
+											{owner && (
 												<Button
-													disabled={!activity.confirmed}
+													variant="outline"
 													onClick={() => {
 														setError("");
 														setIds([]);
-														setSubmit(true);
+														setEvidenceOpen(true);
 													}}
 												>
-													{user.role === "STUDENT"
-														? "提交本人申报"
-														: "单人登记参与"}
+													{activity.evidence?.some((row) => row.active)
+														? "更换证明"
+														: "上传证明"}
 												</Button>
 											)}
 											{owner && activity.confirmed && (
@@ -223,7 +249,9 @@ export function ActivityDetail({
 													href={`/imports?kind=participation&termId=${term.id}&activityId=${activity.id}`}
 													className={buttonVariants({ variant: "outline" })}
 												>
-													批量导入参与名单
+													{activity.rosterCommitted
+														? "补录或更正名单"
+														: "导入参与名单"}
 												</Link>
 											)}
 											{user.role === "ADMIN" && !activity.confirmed && (
@@ -249,12 +277,17 @@ export function ActivityDetail({
 														}
 													}}
 												>
-													确认活动分值
+													确认分值
 												</Button>
 											)}
 											{(owner || user.role === "ADMIN") && (
 												<Button variant="outline" onClick={() => setEdit(true)}>
 													编辑活动
+												</Button>
+											)}
+											{user.role === "ADMIN" && (
+												<Button variant="outline" onClick={() => setReassignOpen(true)}>
+													移交主办学院
 												</Button>
 											)}
 											{owner && (
@@ -286,7 +319,7 @@ export function ActivityDetail({
 														}
 													}}
 												>
-													核对范围并发布
+													确认范围并发布
 												</Button>
 											)}
 											{owner && activity.publishedAt && (
@@ -295,7 +328,7 @@ export function ActivityDetail({
 													disabled={busy}
 													onClick={() => setUnpublish(true)}
 												>
-													撤回活动发布
+													撤回活动
 												</Button>
 											)}
 											{user.role === "ADMIN" && activity.confirmed && (
@@ -303,31 +336,88 @@ export function ActivityDetail({
 													variant="outline"
 													onClick={() => setCorrect(true)}
 												>
-													预览计分更正
+													预览得分更正
 												</Button>
 											)}
 										</>
 									)}
-									<Link
-										href={`/recognitions?termId=${term.id}`}
-										className={buttonVariants({ variant: "ghost" })}
-									>
-										查看认定记录
-									</Link>
+									{!(user.role === "PUBLISHER" && !owner) && (
+										<Link
+											href={`/recognitions?termId=${term.id}`}
+											className={buttonVariants({ variant: "ghost" })}
+										>
+											查看参与记录
+										</Link>
+									)}
 								</div>
 							</div>
 						</TabsContent>
-						{user.role !== "STUDENT" && (
+						{canSeeParticipation && (
 							<TabsContent value="participants" className="py-4">
 								<ActivityParticipants
 									key={`${activity.id}-${activity.revision}-${participantsVersion}`}
 									activityId={activity.id}
 									termId={term.id}
-									owner={owner}
+									canManage={owner}
 									active={active}
 									individual={activity.scoreMode === "INDIVIDUAL"}
 									points={activity.points}
+									hostCollege={activity.college?.name || null}
+									rosterCommitted={!!activity.rosterCommitted}
 								/>
+							</TabsContent>
+						)}
+						{canSeeParticipation && (
+							<TabsContent value="evidence" className="py-4">
+								<section className="flex flex-col gap-4">
+									<div className="flex flex-wrap items-end justify-between gap-3">
+										<div>
+											<h2 className="text-base font-medium">活动证明</h2>
+											<p className="mt-1 text-sm text-muted-foreground">
+												同一活动共用一份有效证明。更换后，按旧证明通过的活动参与会重新进入审核。
+											</p>
+										</div>
+										{owner && (
+											<Button
+												variant="outline"
+												onClick={() => {
+													setError("");
+													setIds([]);
+													setEvidenceOpen(true);
+												}}
+											>
+												上传新证明
+											</Button>
+										)}
+									</div>
+									<div className="flex flex-col gap-3">
+										{activity.evidence?.length ? (
+											activity.evidence.map((row) => (
+												<div
+													key={row.id}
+													className="flex flex-col gap-2 rounded-lg border p-4"
+												>
+													<div className="flex flex-wrap items-center justify-between gap-2">
+														<p className="text-sm font-medium">
+															第 {row.version} 版 · {row.note}
+														</p>
+														<Badge variant={row.active ? "default" : "outline"}>
+															{row.active ? "当前有效" : "历史版本"}
+														</Badge>
+													</div>
+													<p className="text-xs text-muted-foreground">
+														上传于 {dateText(row.createdAt)}
+													</p>
+													<EvidenceViewer evidence={row.evidence} />
+												</div>
+											))
+										) : (
+											<p className="text-sm text-muted-foreground">
+												尚未上传活动证明。导入参与名单前请先上传。
+											</p>
+										)}
+									</div>
+								</section>
 							</TabsContent>
 						)}
 						{activity.ownParticipation && (
@@ -366,12 +456,14 @@ export function ActivityDetail({
 					<DialogHeader>
 						<DialogTitle>编辑活动</DialogTitle>
 						<DialogDescription>
-							已确认的分值与计分模块不能直接更改。
+							已确认的分值和计分项不能直接更改。
 						</DialogDescription>
 					</DialogHeader>
 					<ActivityForm
 						term={term}
 						activity={activity}
+						role={user.role}
+						colleges={colleges}
 						onSaved={() => {
 							setEdit(false);
 							router.refresh();
@@ -390,56 +482,55 @@ export function ActivityDetail({
 						onOpenChange={setCorrect}
 						onCommitted={() => {
 							setCorrect(false);
-							setSuccess("活动计分已更正，请重新核对并发布结果。");
+							setSuccess("活动得分已更正，请重新核对并发布结果。");
 							router.refresh();
 						}}
 					/>
 				)}
 			<Dialog
-				open={submit}
+				open={evidenceOpen}
 				onOpenChange={(value) => {
 					if (
 						!busy &&
 						!uploading &&
-						(value || !dirty || window.confirm("放弃尚未提交的认定材料？"))
+						(value || !dirty || window.confirm("放弃尚未保存的活动证明？"))
 					) {
 						setDirty(false);
-						setSubmit(value);
+						setEvidenceOpen(value);
 					}
 				}}
 			>
 				<DialogContent className="max-h-[90dvh] overflow-y-auto">
 					<DialogHeader>
-						<DialogTitle>
-							{user.role === "STUDENT" ? "提交本人申报" : "单人登记参与"}
-						</DialogTitle>
+						<DialogTitle>上传活动证明</DialogTitle>
 						<DialogDescription>
-							提供参与事实与证明材料，审核通过后纳入测评。
+							活动证明由主办学院统一维护。新证明生效后，按旧证明通过的活动参与会重新进入审核。
 						</DialogDescription>
 					</DialogHeader>
 					<form
-						key={submit ? "open" : "closed"}
+						key={evidenceOpen ? "open" : "closed"}
 						className="flex flex-col gap-5"
 						onChange={() => setDirty(true)}
 						onSubmit={async (e) => {
 							e.preventDefault();
-							if (busy || uploading || !active) return;
+							if (busy || uploading || !active || ids.length !== 1) return;
 							setBusy(true);
 							setError("");
 							const f = new FormData(e.currentTarget);
 							try {
 								await requestJson("/api/activities", {
-									action: "submit",
+									action: "evidence",
 									termId: term.id,
 									activityId: activity.id,
-									studentLogin:
-										user.role === "STUDENT" ? undefined : f.get("studentLogin"),
+									revision: activity.revision,
+									evidenceId: ids[0],
 									note: f.get("note"),
-									evidenceIds: ids,
+									reason: f.get("reason") || undefined,
 								});
 								setDirty(false);
-								setSubmit(false);
-								setSuccess("材料已提交，请等待审核。");
+								setEvidenceOpen(false);
+								setIds([]);
+								setSuccess("活动证明已保存为当前有效版本。");
 								setParticipantsVersion((version) => version + 1);
 								router.refresh();
 							} catch (err) {
@@ -451,34 +542,125 @@ export function ActivityDetail({
 					>
 						<Feedback error={error} />
 						<FieldGroup>
-							{user.role !== "STUDENT" && (
+							<Field>
+								<FieldLabel htmlFor="activity-evidence-note">
+									证明说明
+								</FieldLabel>
+								<Textarea
+									id="activity-evidence-note"
+									name="note"
+									required
+									maxLength={500}
+									rows={3}
+									placeholder="说明证明对应的活动场次、名单或成绩"
+								/>
+							</Field>
+							{activity.evidence?.some((row) => row.active) && (
 								<Field>
-									<FieldLabel htmlFor="recognition-student">
-										学生学号
+									<FieldLabel htmlFor="activity-evidence-reason">
+										更换原因
 									</FieldLabel>
-									<Input
-										id="recognition-student"
-										name="studentLogin"
+									<Textarea
+										id="activity-evidence-reason"
+										name="reason"
 										required
-										maxLength={64}
+										minLength={2}
+										maxLength={1000}
+										rows={3}
 									/>
 								</Field>
 							)}
+							<EvidenceUpload onChange={setIds} onBusy={setUploading} />
+							{ids.length > 1 && (
+								<p className="text-sm text-destructive">
+									每次只能保存一份有效证明，请只保留一个文件。
+								</p>
+							)}
+						</FieldGroup>
+						<Button
+							type="submit"
+							disabled={busy || uploading || ids.length !== 1}
+						>
+							{busy ? "正在保存…" : "保存活动证明"}
+						</Button>
+					</form>
+				</DialogContent>
+			</Dialog>
+			<Dialog
+				open={reassignOpen}
+				onOpenChange={(open) => {
+					if (!busy) setReassignOpen(open);
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>移交活动主办学院</DialogTitle>
+						<DialogDescription>
+							移交后由新主办学院维护参与记录、活动得分和证明；已有参与和审核记录保留。
+						</DialogDescription>
+					</DialogHeader>
+					<form
+						className="flex flex-col gap-4"
+						onSubmit={async (event) => {
+							event.preventDefault();
+							if (busy) return;
+							setBusy(true);
+							setError("");
+							const form = new FormData(event.currentTarget);
+							try {
+								await requestJson("/api/activities", {
+									action: "reassign",
+									termId: term.id,
+									id: activity.id,
+									revision: activity.revision,
+									collegeId: form.get("collegeId"),
+									reason: form.get("reason"),
+								});
+								setReassignOpen(false);
+								setSuccess("活动主办学院已移交。");
+								router.refresh();
+							} catch (err) {
+								setError((err as Error).message);
+							} finally {
+								setBusy(false);
+							}
+						}}
+					>
+						<Feedback error={error} />
+						<FieldGroup>
 							<Field>
-								<FieldLabel htmlFor="recognition-note">参与说明</FieldLabel>
-								<Textarea
-									id="recognition-note"
-									name="note"
+								<FieldLabel htmlFor="activity-reassign-college">
+									新主办学院
+								</FieldLabel>
+								<NativeSelect
+									id="activity-reassign-college"
+									name="collegeId"
+									defaultValue={activity.collegeId || ""}
 									required
-									maxLength={2000}
-									rows={4}
+								>
+									<NativeSelectOption value="">选择学院</NativeSelectOption>
+									{colleges.map((college) => (
+										<NativeSelectOption key={college.id} value={college.id}>
+											{college.name}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
+							</Field>
+							<Field>
+								<FieldLabel htmlFor="activity-reassign-reason">
+									移交原因
+								</FieldLabel>
+								<Textarea
+									id="activity-reassign-reason"
+									name="reason"
+									required
+									minLength={2}
+									maxLength={500}
+									rows={3}
 								/>
 							</Field>
-							<EvidenceUpload onChange={setIds} onBusy={setUploading} />
 						</FieldGroup>
-						<Button type="submit" disabled={busy || uploading || !ids.length}>
-							{busy ? "正在提交…" : "提交认定"}
-						</Button>
+						<Button type="submit" disabled={busy}>确认移交</Button>
 					</form>
 				</DialogContent>
 			</Dialog>
@@ -490,14 +672,14 @@ export function ActivityDetail({
 			>
 				<DialogContent className="max-h-[90dvh] overflow-y-auto">
 					<DialogHeader>
-						<DialogTitle>核对范围并发布活动</DialogTitle>
+						<DialogTitle>确认范围并发布活动</DialogTitle>
 						<DialogDescription>
-							发布后仅当前有效身份命中三组交集的学生可浏览。活动分值确认与发布分别处理。
+							发布后，只有同时符合学院、班级和指定学生范围的学生可以查看。分值确认和发布是两个步骤。
 						</DialogDescription>
 					</DialogHeader>
 					<Feedback error={error || publishPreview?.errors.join(" ")} />
 					<p className="text-2xl tabular-nums">
-						交集 {publishPreview?.count ?? "—"} 人
+						符合条件 {publishPreview?.count ?? "—"} 人
 					</p>
 					{publishPreview?.students.map((student) => (
 						<p key={student.id} className="text-sm">
@@ -508,7 +690,7 @@ export function ActivityDetail({
 						</p>
 					))}
 					<p className="text-xs text-muted-foreground">
-						最多展示前20人。学生归属或活动范围变化后，需要重新核对。
+						仅展示前 20 人。学生班级或活动范围变化后，需要重新核对。
 					</p>
 					<Button
 						disabled={
@@ -541,7 +723,7 @@ export function ActivityDetail({
 							}
 						}}
 					>
-						确认发布活动
+						发布活动
 					</Button>
 				</DialogContent>
 			</Dialog>
@@ -553,9 +735,9 @@ export function ActivityDetail({
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>撤回活动发布</DialogTitle>
+						<DialogTitle>撤回活动</DialogTitle>
 						<DialogDescription>
-							撤回后不再出现在活动信息流，已登记参与和历史仍保留。
+							撤回后学生将看不到该活动，已登记的参与和审核记录保留。
 						</DialogDescription>
 					</DialogHeader>
 					<form
@@ -575,7 +757,7 @@ export function ActivityDetail({
 									reason: form.get("reason"),
 								});
 								setUnpublish(false);
-								setSuccess("活动发布已撤回，历史参与保留。");
+								setSuccess("活动已撤回，历史参与保留。");
 								router.refresh();
 							} catch (err) {
 								setError((err as Error).message);
@@ -587,7 +769,7 @@ export function ActivityDetail({
 						<Feedback error={error} />
 						<FieldGroup>
 							<Field>
-								<FieldLabel htmlFor="unpublish-reason">撤回理由</FieldLabel>
+								<FieldLabel htmlFor="unpublish-reason">撤回原因</FieldLabel>
 								<Textarea
 									id="unpublish-reason"
 									name="reason"
@@ -597,7 +779,7 @@ export function ActivityDetail({
 								/>
 							</Field>
 						</FieldGroup>
-						<Button disabled={busy}>确认撤回发布</Button>
+						<Button type="submit" disabled={busy}>确认撤回</Button>
 					</form>
 				</DialogContent>
 			</Dialog>

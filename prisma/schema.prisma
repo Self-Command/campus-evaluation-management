@@ -30,6 +30,7 @@ model User {
   studentProfile     StudentProfile?
   grades             GradeInput[]
   deductions         DeductionInput[]
+  participations     Participation[]
   revision           Int      @default(0)
   collegeId          String?
   college            College? @relation(fields: [collegeId], references: [id], onDelete: Restrict)
@@ -61,6 +62,7 @@ model College {
   updatedAt DateTime @updatedAt
   majors    Major[]
   staff     User[]
+  activities Activity[]
 }
 
 model Major {
@@ -181,8 +183,11 @@ model Term {
   cohortPolicy String @default("CURRENT")
   publications ResultPublication[]
   projects RecognitionProject[]
+  claims PersonalClaim[]
   snapshots SettlementSnapshot[]
   reopenings TermReopen[]
+  gradeChanges GradeChange[]
+  deductionChanges DeductionChange[]
 }
 
 enum ReviewStatus {
@@ -194,11 +199,35 @@ enum ReviewStatus {
   REVOKED
 }
 
+enum RecognitionStatus {
+  PENDING_COUNSELOR
+  PENDING_COLLEGE
+  RETURNED
+  APPROVED
+  SUPERSEDED
+  WITHDRAWN
+  REVOKED
+  REJECTED
+}
+
+enum ClaimStatus {
+  PENDING_COUNSELOR
+  PENDING_COLLEGE
+  RETURNED
+  RESCORING
+  APPROVED
+  ABANDONED
+  REVOKED
+  REJECTED
+}
+
 model Activity {
   id String @id @default(cuid())
   termId String
   term Term @relation(fields: [termId], references: [id])
   ownerId String
+  collegeId String?
+  college College? @relation(fields: [collegeId], references: [id], onDelete: Restrict)
   name String
   organizer String
   content String
@@ -214,12 +243,34 @@ model Activity {
   audienceColleges String[] @default([])
   audienceClasses String[] @default([])
   audienceStudents String[] @default([])
+  rosterCommittedAt DateTime?
+  rosterRevision Int @default(0)
+  rosterImportId String?
+  sharedEvidenceVersion Int @default(0)
   revision Int @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   participations Participation[]
+  evidence ActivityEvidence[]
   @@index([termId, ownerId])
+  @@index([termId, collegeId])
   @@index([termId, publishedAt])
+}
+
+model ActivityEvidence {
+  id String @id @default(cuid())
+  activityId String
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+  evidenceId String
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+  version Int
+  active Boolean @default(true)
+  uploadedBy String
+  note String
+  createdAt DateTime @default(now())
+  sources RecognitionSource[]
+  @@unique([activityId, version])
+  @@index([activityId, active])
 }
 
 model Participation {
@@ -227,6 +278,7 @@ model Participation {
   activityId String
   activity Activity @relation(fields: [activityId], references: [id])
   studentId String
+  student User @relation(fields: [studentId], references: [id], onDelete: Restrict)
   revision Int @default(0)
   createdAt DateTime @default(now())
   sources RecognitionSource[]
@@ -235,9 +287,13 @@ model Participation {
   registrationSnapshot Json?
   importBatchId String?
   score Decimal? @db.Decimal(22,12)
+  removedAt DateTime?
+  removedBy String?
+  removalReason String?
   history Json @default("[]")
   @@unique([activityId, studentId])
   @@index([studentId, registeredAt])
+  @@index([activityId, removedAt])
 }
 
 model RecognitionSource {
@@ -247,10 +303,17 @@ model RecognitionSource {
   submitterId String
   origin String @default("LEGACY")
   importBatchId String?
-  status ReviewStatus @default(PENDING)
+  status RecognitionStatus @default(PENDING_COUNSELOR)
   reviewReason String?
   reviewerId String?
   reviewedAt DateTime?
+  counselorId String?
+  counseledAt DateTime?
+  collegeReviewerId String?
+  collegeReviewedAt DateTime?
+  returnedByRole String?
+  activityEvidenceId String?
+  activityEvidence ActivityEvidence? @relation(fields: [activityEvidenceId], references: [id], onDelete: Restrict)
   note String
   revision Int @default(0)
   createdAt DateTime @default(now())
@@ -258,6 +321,7 @@ model RecognitionSource {
   evidence EvidenceReference[]
   history Json @default("[]")
   @@index([submitterId, status])
+  @@index([status, createdAt])
 }
 
 model Evidence {
@@ -272,6 +336,7 @@ model Evidence {
   references EvidenceReference[]
   claimReferences ClaimEvidence[]
   appealReferences AppealEvidence[]
+  activityEvidence ActivityEvidence[]
 }
 
 model EvidenceReference {
@@ -290,12 +355,82 @@ model DeductionInput {
   studentId String
   student User @relation(fields: [studentId], references: [id])
   projectId String
+  occurrence Int @default(0)
   amount Decimal @db.Decimal(22,12)
   revoked Boolean @default(false)
   reason String
   revision Int @default(0)
   updatedAt DateTime @updatedAt
-  @@unique([termId, studentId, projectId])
+  @@unique([termId, studentId, projectId, occurrence])
+  @@index([termId, studentId, projectId])
+}
+
+enum InputChangeStatus {
+  PENDING_COLLEGE
+  RETURNED
+  APPROVED
+  ABANDONED
+}
+
+model GradeChange {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id], onDelete: Cascade)
+  studentId String
+  nodeId String
+  value Decimal @db.Decimal(22,12)
+  reason String
+  status InputChangeStatus @default(PENDING_COLLEGE)
+  requestId String
+  baseInputId String?
+  baseRevision Int?
+  baseValue Decimal? @db.Decimal(22,12)
+  submittedBy String
+  submittedAt DateTime @default(now())
+  reviewerId String?
+  reviewedAt DateTime?
+  reviewReason String?
+  revision Int @default(0)
+  history Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([termId, submittedBy, requestId])
+  @@index([termId, status, submittedAt])
+  @@index([termId, studentId, nodeId, status])
+  @@index([submittedBy, status])
+}
+
+enum DeductionChangeAction {
+  CREATE
+  REVOKE
+}
+
+model DeductionChange {
+  id String @id @default(cuid())
+  termId String
+  term Term @relation(fields: [termId], references: [id], onDelete: Cascade)
+  studentId String
+  projectId String
+  action DeductionChangeAction
+  amount Decimal? @db.Decimal(22,12)
+  reason String
+  status InputChangeStatus @default(PENDING_COLLEGE)
+  requestId String
+  targetInputId String?
+  targetRevision Int?
+  submittedBy String
+  submittedAt DateTime @default(now())
+  reviewerId String?
+  reviewedAt DateTime?
+  reviewReason String?
+  revision Int @default(0)
+  history Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([termId, submittedBy, requestId])
+  @@index([termId, status, submittedAt])
+  @@index([termId, studentId, projectId, status])
+  @@index([submittedBy, status])
 }
 
 model GradeInput {
@@ -331,15 +466,20 @@ model ParticipationImport {
   termId String
   activityId String
   actorId String
+  kind String @default("INITIAL")
   rows Json
   evidenceIds Json
   note String
+  reason String?
+  diff Json?
   snapshot String
+  baselineRevision Int?
   status String @default("PREVIEW")
   result Json?
   expiresAt DateTime
   createdAt DateTime @default(now())
   @@index([termId, actorId])
+  @@index([activityId, createdAt])
 }
 
 model LoginAttempt {
@@ -374,14 +514,21 @@ model RecognitionProject {
 
 model PersonalClaim {
   id String @id @default(cuid())
-  projectId String
-  project RecognitionProject @relation(fields: [projectId], references: [id])
+  termId String
+  term Term @relation(fields: [termId], references: [id])
+  projectId String?
+  project RecognitionProject? @relation(fields: [projectId], references: [id])
   studentId String
   activityId String?
-  factKey String
+  factKey String?
+  title String
   occurredOn String
   note String
-  status ReviewStatus @default(PENDING)
+  status ClaimStatus @default(PENDING_COUNSELOR)
+  scoreNodeId String?
+  score Decimal? @db.Decimal(22, 12)
+  scorerId String?
+  scoredAt DateTime?
   reviewReason String?
   reviewerId String?
   reviewedAt DateTime?
@@ -391,6 +538,7 @@ model PersonalClaim {
   updatedAt DateTime @updatedAt
   evidence ClaimEvidence[]
   @@unique([projectId, studentId, factKey])
+  @@index([termId, status])
   @@index([activityId, studentId])
   @@index([studentId, status])
 }

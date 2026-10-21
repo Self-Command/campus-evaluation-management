@@ -167,7 +167,7 @@ test("登录入口由真实角色校验，错误入口和密码不产生会话�
 test("主题和站点信息连续保存后可回读，冲突只一方成功且失败不污染已有设置", async () => {
   const previous = await db.siteSettings.findUnique({ where: { id: "site" } });
   try {
-    for (const themePreset of ["blue", "violet", "default"] as const) {
+    for (const themePreset of ["soft-pop", "tangerine", "default"] as const) {
       const current = await publicSettings();
       const saved = await saveSettings(admin(), { ...settingContent(current), revision: current.revision, siteName: `验收${themePreset}`, pageTitle: `标题${themePreset}`, siteDescription: `信息${themePreset}`, themePreset, reason: "核对信息及主题保存" });
       const read = await publicSettings();

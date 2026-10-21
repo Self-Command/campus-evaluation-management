@@ -163,7 +163,7 @@ function AccountDetails({
 												autoComplete="name"
 											/>
 											<FieldDescription>
-												姓名用于活动、申报与测评记录的当前展示。
+												姓名会显示在活动、申报和成绩记录中。
 											</FieldDescription>
 										</Field>
 									</FieldGroup>
@@ -178,7 +178,7 @@ function AccountDetails({
 								<Separator />
 								<div className="flex flex-col gap-2">
 									<div className="flex items-center gap-2">
-										<h2 className="font-medium text-base">账号与归属信息</h2>
+										<h2 className="font-medium text-base">账号信息</h2>
 										<Badge variant="outline">
 											<LockKeyhole data-icon="inline-start" />
 											只读
@@ -196,7 +196,7 @@ function AccountDetails({
 													studentProfile?.college ||
 														data.college?.name ||
 														(["COLLEGE", "COUNSELOR"].includes(data.role)
-															? "归属待完善"
+															? "—"
 															: undefined),
 												],
 												["专业", studentProfile?.major],
@@ -206,14 +206,14 @@ function AccountDetails({
 												[
 													"责任辅导员",
 													studentProfile?.schoolClass?.counselor?.name ||
-														(studentProfile ? "待完善" : undefined),
+														(studentProfile ? "未设置" : undefined),
 												],
 												[
-													"学生归属状态",
+													"学生班级状态",
 													studentProfile
 														? studentProfile.classId
 															? "已配置班级"
-															: "待完善"
+															: "未设置"
 														: undefined,
 												],
 												["账号建立时间", dateText(data.createdAt)],

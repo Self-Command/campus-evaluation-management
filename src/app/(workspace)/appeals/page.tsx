@@ -17,7 +17,14 @@ export default async function Page({
   const { terms, term } = await measurementContext(user.sessionId, p.termId);
   return (
     <>
-      <PageHeading title="结果异议" description="逐项核对提出原因、证明材料、处理状态及后续更正版本。" />
+      <PageHeading
+        title={user.role === "ADMIN" ? "成绩异议处理" : "我的成绩异议"}
+        description={
+          user.role === "ADMIN"
+            ? "查看异议理由、证明材料和每次处理结果。"
+            : "查看本人提交的异议、处理进度和更正结果。"
+        }
+      />
       <TermContext terms={terms} selected={term?.id} />
       {term ? (
         <Appeals
