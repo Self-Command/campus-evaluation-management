@@ -55,6 +55,9 @@ export type Activity = {
 		sources: {
 			id: string;
 			status: string;
+			evidence?: {
+				evidence: { id: string; name: string; mime: string; size: number };
+			}[];
 			reviewReason?: string | null;
 			history?: {
 				action: string;
@@ -85,10 +88,13 @@ export function ActivityForm({
 	activity,
 	onSaved,
 }: {
-	term: { id: string; scheme: Scheme };
+	term: { id: string; phase: string; disposition?: string; scheme: Scheme };
 	activity?: Activity;
 	onSaved: (id: string) => void;
 }) {
+	const writable =
+		term.phase === "ACTIVE" &&
+		(!term.disposition || term.disposition === "NORMAL");
 	const [dirty, setDirty] = useState(false);
 	useUnsavedChanges(dirty);
 	const [draft, setDraft] = useState({
@@ -125,7 +131,7 @@ export function ActivityForm({
 			}}
 			onSubmit={async (e) => {
 				e.preventDefault();
-				if (busy) return;
+				if (busy || !writable) return;
 				const f = new FormData(e.currentTarget);
 				setBusy(true);
 				setError("");
@@ -352,7 +358,7 @@ export function ActivityForm({
 					}}
 				/>
 			</TemplateEditor>
-			<Button type="submit" disabled={busy}>
+			<Button type="submit" disabled={busy || !writable}>
 				{busy ? "正在保存…" : activity ? "保存活动信息" : "保存活动草稿"}
 			</Button>
 		</form>

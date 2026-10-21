@@ -25,7 +25,7 @@ export function ActivityList({
 	query,
 }: {
 	data: { items: Activity[]; total: number; page: number };
-	term: { id: string; phase: string; scheme: Scheme };
+	term: { id: string; phase: string; disposition?: string; scheme: Scheme };
 	role: AppRole;
 	query: string;
 }) {
@@ -163,7 +163,9 @@ export function ActivityList({
 					hidden: { termId: term.id, ...(tab ? { tab } : {}) },
 				}}
 				actions={
-					role !== "STUDENT" && term.phase === "ACTIVE" ? (
+					role !== "STUDENT" &&
+					term.phase === "ACTIVE" &&
+					(!term.disposition || term.disposition === "NORMAL") ? (
 						<Button size="sm" onClick={() => setOpen(true)}>
 							创建活动
 						</Button>

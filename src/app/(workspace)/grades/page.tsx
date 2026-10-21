@@ -64,7 +64,7 @@ export default async function Page({
 					key={`${term.id}-${p.login || ""}`}
 					term={JSON.parse(JSON.stringify(term))}
 					mode="grades"
-					readOnly={term.phase !== "ACTIVE"}
+					readOnly={term.phase !== "ACTIVE" || term.disposition !== "NORMAL"}
 					initialData={
 						initialData ? JSON.parse(JSON.stringify(initialData)) : undefined
 					}

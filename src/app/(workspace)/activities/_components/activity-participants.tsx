@@ -1,5 +1,6 @@
 "use client";
 // Complete users directory and profile details/history, preserving table/filter/pagination and sheet sections.
+import { EvidenceViewer } from "@/components/dashboard/evidence-viewer";
 import { useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -52,6 +53,9 @@ type Participant = {
 	sources: {
 		id: string;
 		status: string;
+		evidence?: {
+			evidence: { id: string; name: string; mime: string; size: number };
+		}[];
 		reviewReason?: string | null;
 		history?: History[];
 	}[];
@@ -167,6 +171,9 @@ export function OwnParticipation({
 						{statusLabels[source.status] || source.status}
 					</Badge>
 					<p className="text-sm text-muted-foreground">{source.reviewReason}</p>
+					{source.evidence?.map(({ evidence }) => (
+						<EvidenceViewer key={evidence.id} evidence={evidence} />
+					))}
 					<HistoryList items={source.history} />
 				</div>
 			))}
@@ -483,6 +490,9 @@ export function ActivityParticipants({
 									<p className="whitespace-pre-wrap text-sm">
 										{source.reviewReason}
 									</p>
+									{source.evidence?.map(({ evidence }) => (
+										<EvidenceViewer key={evidence.id} evidence={evidence} />
+									))}
 									<HistoryList items={source.history} />
 								</section>
 							))}

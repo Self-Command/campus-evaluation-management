@@ -1,12 +1,29 @@
 "use client";
-// Complete invoice/invoice.tsx two-panel editor adapted to scoring directory and node properties.
+// Selected template users directory with invoice field groups and profile rule details.
 import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, ChevronRight, FlaskConical } from "lucide-react";
 import { nodeSchema, type Scheme, type ScoringNode } from "@/lib/scoring/types";
-import { cn } from "cn";
+import type { ColumnDef } from "@tanstack/react-table";
+import type { DataTableFeatures } from "@/lib/data-table-features";
+import { TemplateDirectory } from "@/components/dashboard/template-directory";
+import { validateScheme } from "@/lib/scoring/validate";
+import { useRemote } from "@/components/dashboard/use-remote";
+import { RemoteState } from "@/components/dashboard/remote-state";
+import {
+	Collapsible,
+	CollapsibleTrigger,
+	CollapsibleContent,
+} from "@/components/ui/collapsible";
+import {
+	moveSchemeNode,
+	descendantsOf,
+	schemeConfigurationIssues,
+	type MovePlacement,
+} from "@/lib/scoring/scheme-operations";
+import { ChevronDown, GripVertical, Move } from "lucide-react";
 import {
 	Table,
 	TableHeader,
@@ -72,19 +89,33 @@ type Preview = {
 export function SchemeEditor({
 	term,
 	admin,
+	returnHref = "/terms",
 }: {
 	term: {
 		id: string;
 		name: string;
 		phase: string;
 		revision: number;
+		disposition?: string;
 		scheme: Scheme;
 	};
 	admin: boolean;
+	returnHref?: string;
 }) {
 	const router = useRouter();
+	const management = useRemote<{ nodeUsage: Record<string, number> }>(
+		admin ? `/api/terms/${term.id}` : null,
+	);
 	const [scheme, setScheme] = useState(term.scheme);
-	const [selected, setSelected] = useState(scheme.nodes[0].id);
+	const [selected, setSelected] = useState(
+		scheme.nodes.find((n) => n.parentId === null)!.id,
+	);
+	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+	const [moving, setMoving] = useState<string | null>(null);
+	const [dragging, setDragging] = useState<string | null>(null);
+	const [moveTarget, setMoveTarget] = useState("");
+	const [placement, setPlacement] = useState<MovePlacement>("inside");
+	const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
 	const [dirty, setDirty] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
@@ -104,6 +135,7 @@ export function SchemeEditor({
 	useUnsavedChanges(dirty);
 	const editable =
 		admin &&
+		(!term.disposition || term.disposition === "NORMAL") &&
 		(term.phase === "CONFIGURATION" ||
 			(term.phase === "ACTIVE" && correctionMode));
 	const node = scheme.nodes.find((n) => n.id === selected) || scheme.nodes[0];
@@ -117,12 +149,21 @@ export function SchemeEditor({
 		change({
 			...scheme,
 			nodes: scheme.nodes.map((n) =>
-				n.id === node.id ? { ...n, [key]: value } : n,
+				n.id === node.id
+					? {
+							...n,
+							[key]: value,
+							...(key === "kind" && value !== "GRADE"
+								? { required: false }
+								: {}),
+						}
+					: n,
 			),
 		});
 	}
 	async function save(activate = false) {
 		if (busy) return;
+		if (!checkScheme()) return;
 		if (activate && dirty) {
 			setError("请先保存评分方案，再开启申报。");
 			return;
@@ -170,18 +211,317 @@ export function SchemeEditor({
 		if (seen.has(item.node.id)) continue;
 		seen.add(item.node.id);
 		visible.push(item);
-		for (const child of (children.get(item.node.id) || []).slice().reverse())
+		for (const child of (collapsed.has(item.node.id)
+			? []
+			: children.get(item.node.id) || []
+		)
+			.slice()
+			.reverse())
 			stack.push({ node: child, depth: item.depth + 1 });
 	}
-	const descendants = new Set<string>();
-	const descendantsPending = [node.id];
-	while (descendantsPending.length) {
-		const id = descendantsPending.pop()!;
-		if (descendants.has(id)) continue;
-		descendants.add(id);
-		for (const child of children.get(id) || [])
-			descendantsPending.push(child.id);
+
+	const root = scheme.nodes.find((n) => n.parentId === null)!;
+	const configuration = schemeConfigurationIssues(scheme);
+	for (const [id, value] of Object.entries(weightInputs)) {
+		const item = scheme.nodes.find((n) => n.id === id);
+		if (item && !/^\d{1,3}(?:\.\d{1,10})?$/.test(value)) {
+			configuration[id] = [
+				...(configuration[id] || []),
+				"比例须为有效百分比，最多10位小数",
+			];
+			if (item.parentId)
+				configuration[item.parentId] = [
+					...(configuration[item.parentId] || []),
+					`${item.name}的比例尚未填写完整`,
+				];
+		}
 	}
+	const movingDescendants = moving
+		? descendantsOf(scheme.nodes, moving)
+		: new Set<string>();
+	function toggle(id: string) {
+		setCollapsed((previous) => {
+			const next = new Set(previous);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	}
+	function checkScheme() {
+		try {
+			for (const [id, value] of Object.entries(weightInputs)) {
+				if (scheme.nodes.some((n) => n.id === id)) {
+					if (!/^\d{1,3}(?:\.\d{1,10})?$/.test(value))
+						throw new Error(
+							`${scheme.nodes.find((n) => n.id === id)!.name}：请输入有效百分比，最多10位小数`,
+						);
+				}
+			}
+			validateScheme(scheme);
+			setError("");
+			return true;
+		} catch (err) {
+			const message = (err as Error).message;
+			setError(`评分制度尚未通过校验：${message}`);
+			const first = scheme.nodes.find((n) => message.includes(n.name));
+			if (first) {
+				setSelected(first.id);
+				setMobileEdit(true);
+			}
+			return false;
+		}
+	}
+	function addModule(parentId: string) {
+		const parent = scheme.nodes.find((n) => n.id === parentId)!;
+		let nodes = scheme.nodes;
+		if (!["SUM", "WEIGHTED"].includes(parent.kind)) {
+			if (parent.parentId !== null) {
+				setError("请先在模块设置中将计分方式改为汇总，再添加子模块。");
+				return;
+			}
+			if (
+				!window.confirm(
+					"添加大模块会将综合总分改为直接累加。现有规则只进入本次草稿，正式生效须完整校验；已有计分输入须通过更正影响核对。继续？",
+				)
+			)
+				return;
+			nodes = nodes.map((n) =>
+				n.id === parentId ? { ...n, kind: "SUM" as const, required: false } : n,
+			);
+		}
+		const id = crypto.randomUUID();
+		change({
+			...scheme,
+			nodes: [
+				...nodes,
+				nodeSchema.parse({
+					id,
+					parentId,
+					name: parentId === root.id ? "新大模块" : "新子模块",
+					kind: "ACTIVITY",
+					order: (children.get(parentId) || []).length,
+				}),
+			],
+		});
+		setCollapsed((previous) => {
+			const next = new Set(previous);
+			next.delete(parentId);
+			return next;
+		});
+		setSelected(id);
+		setMobileEdit(true);
+	}
+	function performMove(
+		sourceId: string,
+		targetId: string,
+		place: MovePlacement,
+	) {
+		try {
+			change(moveSchemeNode(scheme, sourceId, targetId, place));
+			setMoving(null);
+			setDragging(null);
+			setError("");
+			setSuccess("模块位置已调整。请核对受影响父级的比例合计，再保存制度。");
+		} catch (err) {
+			setError((err as Error).message);
+			setDragging(null);
+		}
+	}
+	function summary(n: ScoringNode) {
+		return `${kinds[n.kind]} · ${n.parentId && scheme.nodes.find((p) => p.id === n.parentId)?.kind === "WEIGHTED" ? `占上级 ${percentage(n.weight)}%` : "直接计入"} · 封顶 ${n.cap ?? "不限"}${n.normalize ? ` · ${n.rawMaximum}→${n.targetMaximum} 折算` : ""}${n.floor !== null ? ` · 最低 ${n.floor}` : ""}${n.required ? " · 必填" : ""}`;
+	}
+	function percentage(value: string) {
+		try {
+			return Rational.from(value).mul(Rational.from("100")).fixed();
+		} catch {
+			return "格式待完善";
+		}
+	}
+	function ruleDetails(n: ScoringNode) {
+		return [
+			["模块名称", n.name],
+			["计分方式", kinds[n.kind]],
+			["占上级比例", `${percentage(n.weight)}%`],
+			["原始分范围", `${n.minimum} 至 ${n.maximum}`],
+			["封顶分", n.cap ?? "不限制"],
+			["最低计入分", n.floor ?? "不限制"],
+			[
+				"满分折算",
+				n.normalize
+					? `${n.rawMaximum} 分折算为 ${n.targetMaximum} 分`
+					: "保留原分",
+			],
+			["缺失输入", n.required ? "必须提供，否则结果不完整" : "按零分计入"],
+			["同级顺序", String(n.order)],
+		];
+	}
+	function rowActions(n: ScoringNode) {
+		return (
+			<div className="flex flex-wrap gap-1">
+				<Button
+					variant="ghost"
+					size="sm"
+					onClick={() => {
+						setSelected(n.id);
+						setMobileEdit(true);
+					}}
+				>
+					{editable ? "设置" : "规则明细"}
+				</Button>
+				{editable && (
+					<>
+						{["SUM", "WEIGHTED"].includes(n.kind) && (
+							<Button variant="ghost" size="sm" onClick={() => addModule(n.id)}>
+								添加下级
+							</Button>
+						)}
+						{n.parentId !== null && (
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={() => {
+									setMoving(n.id);
+									setMoveTarget("");
+									setPlacement("inside");
+								}}
+							>
+								<Move data-icon="inline-start" />
+								移动到
+							</Button>
+						)}
+					</>
+				)}
+				{editable && dragging && dragging !== n.id && (
+					<div
+						className="flex flex-wrap gap-1"
+						aria-label={`${n.name}的放置位置`}
+					>
+						{(["before", "inside", "after"] as MovePlacement[])
+							.filter((p) =>
+								p === "inside"
+									? ["SUM", "WEIGHTED"].includes(n.kind)
+									: n.parentId !== null,
+							)
+							.map((p) => (
+								<Button
+									key={p}
+									variant="outline"
+									size="sm"
+									onDragOver={(e) => e.preventDefault()}
+									onDrop={(e) => {
+										e.preventDefault();
+										performMove(dragging, n.id, p);
+									}}
+									onClick={() => performMove(dragging, n.id, p)}
+								>
+									{p === "before"
+										? "放到前面"
+										: p === "after"
+											? "放到后面"
+											: "移入"}
+								</Button>
+							))}
+					</div>
+				)}
+			</div>
+		);
+	}
+	const columns: ColumnDef<
+		DataTableFeatures,
+		{ node: ScoringNode; depth: number }
+	>[] = [
+		{
+			id: "name",
+			header: "模块 / 层级",
+			cell: ({ row }) => {
+				const n = row.original.node;
+				return (
+					<div
+						className="flex min-w-44 items-center gap-2"
+						style={{ paddingLeft: Math.min(row.original.depth, 8) * 12 }}
+					>
+						{editable && n.parentId !== null && (
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								draggable
+								aria-label={`拖动${n.name}`}
+								onDragStart={(e) => {
+									e.dataTransfer.setData("text/plain", n.id);
+									e.dataTransfer.effectAllowed = "move";
+									setDragging(n.id);
+								}}
+								onDragEnd={() => setDragging(null)}
+							>
+								<GripVertical />
+							</Button>
+						)}
+						{(children.get(n.id)?.length || 0) > 0 && (
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label={
+									collapsed.has(n.id) ? `展开${n.name}` : `折叠${n.name}`
+								}
+								onClick={() => toggle(n.id)}
+							>
+								{collapsed.has(n.id) ? <ChevronRight /> : <ChevronDown />}
+							</Button>
+						)}
+						<span className="font-medium">{n.name}</span>
+						{n.parentId === null && <Badge variant="outline">系统总分</Badge>}
+					</div>
+				);
+			},
+		},
+		{
+			id: "kind",
+			header: "来源 / 汇总",
+			cell: ({ row }) => kinds[row.original.node.kind],
+		},
+		{
+			id: "weight",
+			header: "占上级比例",
+			cell: ({ row }) =>
+				row.original.node.parentId &&
+				scheme.nodes.find((n) => n.id === row.original.node.parentId)?.kind ===
+					"WEIGHTED"
+					? `${percentage(row.original.node.weight)}%`
+					: "—",
+		},
+		{
+			id: "rules",
+			header: "封顶 / 折算 / 必填",
+			cell: ({ row }) => summary(row.original.node),
+		},
+		{
+			id: "status",
+			header: "配置状态",
+			cell: ({ row }) => (
+				<div className="flex flex-col gap-1">
+					{configuration[row.original.node.id]?.map((message) => (
+						<Button
+							key={message}
+							variant="ghost"
+							size="sm"
+							onClick={() => {
+								setSelected(row.original.node.id);
+								setMobileEdit(true);
+							}}
+						>
+							{message}
+						</Button>
+					)) || <Badge variant="outline">已填写</Badge>}
+				</div>
+			),
+		},
+		{
+			id: "actions",
+			header: "操作",
+			cell: ({ row }) => rowActions(row.original.node),
+		},
+	];
+
 	return (
 		<>
 			<div className="flex flex-wrap items-center justify-between gap-3">
@@ -194,7 +534,7 @@ export function SchemeEditor({
 				</div>
 				<div className="flex flex-wrap gap-2">
 					<Link
-						href="/terms"
+						href={returnHref}
 						className={buttonVariants({ variant: "outline" })}
 						onClick={(e) => {
 							if (dirty && !window.confirm("放弃未保存修改并返回？"))
@@ -203,11 +543,14 @@ export function SchemeEditor({
 					>
 						返回周期
 					</Link>
-					{admin && term.phase === "ACTIVE" && !correctionMode && (
-						<Button variant="outline" onClick={() => setCorrectionMode(true)}>
-							更正评分方案
-						</Button>
-					)}
+					{admin &&
+						(!term.disposition || term.disposition === "NORMAL") &&
+						term.phase === "ACTIVE" &&
+						!correctionMode && (
+							<Button variant="outline" onClick={() => setCorrectionMode(true)}>
+								更正评分方案
+							</Button>
+						)}
 					{term.phase === "ACTIVE" && correctionMode && (
 						<>
 							<Button
@@ -220,6 +563,9 @@ export function SchemeEditor({
 										setScheme(term.scheme);
 										setDirty(false);
 										setCorrectionMode(false);
+										setWeightInputs({});
+										setError("");
+										setPreview(null);
 									}
 								}}
 							>
@@ -227,7 +573,9 @@ export function SchemeEditor({
 							</Button>
 							<Button
 								disabled={busy || !dirty}
-								onClick={() => setCorrectOpen(true)}
+								onClick={() => {
+									if (checkScheme()) setCorrectOpen(true);
+								}}
 							>
 								预览更正影响
 							</Button>
@@ -250,6 +598,7 @@ export function SchemeEditor({
 				</div>
 			</div>
 			<Feedback error={error} success={success} />
+			{editable && <RemoteState {...management} />}
 			<Dialog
 				open={correctOpen}
 				onOpenChange={(open) => {
@@ -301,222 +650,193 @@ export function SchemeEditor({
 					)}
 				</TabsList>
 				<TabsContent value="structure" className="mt-5">
-					<div className="grid items-start gap-5 xl:grid-cols-2">
-						<Card className={mobileEdit ? "hidden xl:flex" : ""}>
-							<CardHeader>
-								<CardTitle>评分目录</CardTitle>
-								<CardDescription>选择模块查看属性与计分规则。</CardDescription>
-							</CardHeader>
-							<CardContent className="px-3">
-								{visible.map(({ node: item, depth }) => (
-									<button
-										key={item.id}
-										type="button"
-										onClick={() => {
-											setSelected(item.id);
-											setMobileEdit(true);
-										}}
-										className={cn(
-											"flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-3 text-left text-sm hover:bg-muted",
-											node.id === item.id && "bg-muted font-medium",
-										)}
-										style={{ paddingLeft: `${12 + Math.min(depth, 6) * 16}px` }}
-									>
-										<span className="min-w-0 truncate">{item.name}</span>
-										<ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-									</button>
-								))}
-							</CardContent>
-							{editable && (
-								<CardFooter className="border-t">
-									<Button
-										variant="outline"
-										className="w-full"
-										disabled={!["SUM", "WEIGHTED"].includes(node.kind)}
-										onClick={() => {
-											const id = crypto.randomUUID();
-											change({
-												...scheme,
-												nodes: [
-													...scheme.nodes,
-													nodeSchema.parse({
-														id,
-														name: "新评分模块",
-														parentId: node.id,
-														kind: "ACTIVITY",
-														order: scheme.nodes.length,
-													}),
-												],
-											});
-											setSelected(id);
-											setMobileEdit(true);
-										}}
-									>
+					<TemplateDirectory
+						title="评分模块与规则"
+						description={
+							editable
+								? "展开大模块查看子模块；设置规则后保存整套制度。拖动时明确选择放到前面、后面或移入，比例不会自动调整。"
+								: "展开大模块查看子模块，选择规则明细查阅各模块的计分方式、比例、封顶与折算规则。"
+						}
+						data={visible}
+						columns={columns}
+						actions={
+							<>
+								<Button
+									variant="outline"
+									onClick={() => setCollapsed(new Set())}
+								>
+									展开全部
+								</Button>
+								<Button
+									variant="outline"
+									onClick={() =>
+										setCollapsed(new Set(scheme.nodes.map((n) => n.id)))
+									}
+								>
+									折叠全部
+								</Button>
+								{editable && (
+									<Button onClick={() => addModule(root.id)}>
 										<Plus data-icon="inline-start" />
-										添加下级模块
+										添加大模块
 									</Button>
-								</CardFooter>
-							)}
-						</Card>
-						<Card className={!mobileEdit ? "hidden xl:flex" : ""}>
-							<CardHeader>
-								<CardTitle>{node.name}</CardTitle>
-								<CardDescription>
-									{kinds[node.kind]} ·{" "}
+								)}
+							</>
+						}
+						mobile={({ node: item, depth }) => (
+							<div className="flex flex-col gap-3">
+								<div className="flex items-center gap-2">
+									{(children.get(item.id)?.length || 0) > 0 && (
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											aria-label={
+												collapsed.has(item.id)
+													? `展开${item.name}`
+													: `折叠${item.name}`
+											}
+											onClick={() => toggle(item.id)}
+										>
+											{collapsed.has(item.id) ? (
+												<ChevronRight />
+											) : (
+												<ChevronDown />
+											)}
+										</Button>
+									)}
+									<p className="font-medium">
+										{depth ? "↳ " : ""}
+										{item.name}
+									</p>
+								</div>
+								<p className="text-sm">{summary(item)}</p>
+								<p className="text-xs text-muted-foreground">
+									{configuration[item.id]?.join("；") || "配置已填写"}
+								</p>
+								{rowActions(item)}
+							</div>
+						)}
+					/>
+					<Dialog
+						open={mobileEdit}
+						onOpenChange={(open) => {
+							if (!busy && !correctBusy) setMobileEdit(open);
+						}}
+					>
+						<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+							<DialogHeader>
+								<DialogTitle>
+									{node.name} · {editable ? "模块设置" : "规则明细"}
+								</DialogTitle>
+								<DialogDescription>
 									{node.parentId
 										? `上级：${scheme.nodes.find((n) => n.id === node.parentId)?.name}`
-										: "综合总分"}
-								</CardDescription>
-							</CardHeader>
-							<CardContent>
-								<FieldGroup>
-									<Button
-										type="button"
-										variant="outline"
-										className="self-start xl:hidden"
-										onClick={() => setMobileEdit(false)}
-									>
-										返回评分目录
-									</Button>
-									<Field>
-										<FieldLabel htmlFor="node-name">模块名称</FieldLabel>
-										<Input
-											id="node-name"
-											value={node.name}
-											disabled={!editable}
-											onChange={(e) => update("name", e.target.value)}
-											maxLength={80}
-										/>
-									</Field>
-									<div className="grid gap-5 sm:grid-cols-2">
-										<Field>
-											<FieldLabel htmlFor="node-order">同级显示顺序</FieldLabel>
-											<Input
-												id="node-order"
-												type="number"
-												min={0}
-												max={100000}
-												step={1}
-												value={node.order}
-												disabled={!editable}
-												onChange={(e) =>
-													update("order", Number(e.target.value))
-												}
-											/>
-										</Field>
-										{node.parentId && (
+										: "综合总分由系统维护"}
+								</DialogDescription>
+							</DialogHeader>
+							<Feedback error={error} />
+							{editable ? (
+								<Card>
+									<CardHeader>
+										<CardTitle>{node.name}</CardTitle>
+										<CardDescription>
+											{kinds[node.kind]} ·{" "}
+											{node.parentId
+												? `上级：${scheme.nodes.find((n) => n.id === node.parentId)?.name}`
+												: "综合总分"}
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<FieldGroup>
 											<Field>
-												<FieldLabel htmlFor="node-parent">上级模块</FieldLabel>
+												<FieldLabel htmlFor="node-name">模块名称</FieldLabel>
+												<Input
+													id="node-name"
+													value={node.name}
+													readOnly={node.parentId === null}
+													onChange={(e) => update("name", e.target.value)}
+													maxLength={80}
+												/>
+											</Field>
+
+											<Field>
+												<FieldLabel htmlFor="node-kind">计分方式</FieldLabel>
 												<NativeSelect
-													id="node-parent"
-													value={node.parentId}
+													id="node-kind"
+													value={node.kind}
 													disabled={!editable}
-													onChange={(e) => update("parentId", e.target.value)}
+													onChange={(e) => {
+														if (
+															children.get(node.id)?.length &&
+															["ACTIVITY", "GRADE"].includes(e.target.value)
+														) {
+															setError(
+																"请先移走或删除下级模块，再设为最底层输入。",
+															);
+															return;
+														}
+														update("kind", e.target.value);
+													}}
 												>
-													{scheme.nodes
+													{Object.entries(kinds)
 														.filter(
-															(item) =>
-																["SUM", "WEIGHTED"].includes(item.kind) &&
-																!descendants.has(item.id),
+															([value]) =>
+																node.parentId !== null ||
+																["SUM", "WEIGHTED"].includes(value) ||
+																value === node.kind,
 														)
-														.map((item) => (
-															<NativeSelectOption key={item.id} value={item.id}>
-																{item.name}
+														.map(([value, label]) => (
+															<NativeSelectOption key={value} value={value}>
+																{label}
 															</NativeSelectOption>
 														))}
 												</NativeSelect>
 											</Field>
-										)}
-									</div>
-									<Field>
-										<FieldLabel htmlFor="node-kind">计分方式</FieldLabel>
-										<NativeSelect
-											id="node-kind"
-											value={node.kind}
-											disabled={!editable}
-											onChange={(e) => {
-												if (
-													children.get(node.id)?.length &&
-													["ACTIVITY", "GRADE"].includes(e.target.value)
-												) {
-													setError(
-														"请先移走或删除下级模块，再设为最底层输入。",
-													);
-													return;
-												}
-												update("kind", e.target.value);
-											}}
-										>
-											{Object.entries(kinds).map(([value, label]) => (
-												<NativeSelectOption key={value} value={value}>
-													{label}
-												</NativeSelectOption>
-											))}
-										</NativeSelect>
-									</Field>
-									{node.parentId &&
-										scheme.nodes.find((n) => n.id === node.parentId)?.kind ===
-											"WEIGHTED" && (
-											<Field>
-												<FieldLabel htmlFor="node-weight">
-													占上级比例（%）
-												</FieldLabel>
-												<Input
-													id="node-weight"
-													type="number"
-													step="any"
-													defaultValue={Rational.from(node.weight)
-														.mul(Rational.from("100"))
-														.fixed()}
-													key={`${node.id}-weight`}
-													disabled={!editable}
-													onBlur={(e) => {
-														try {
-															update(
-																"weight",
-																Rational.from(e.target.value)
-																	.div(Rational.from("100"))
-																	.fixed(12),
-															);
-														} catch {
-															setError("请输入有效比例");
-														}
-													}}
-												/>
-												<FieldDescription>
-													同一上级的直接下级比例合计需为100%。
-												</FieldDescription>
-											</Field>
-										)}
-									<div className="grid gap-5 sm:grid-cols-2">
-										{[
-											["cap", "封顶分"],
-											["floor", "最低计入分"],
-										].map(([key, label]) => (
-											<Field key={key}>
-												<FieldLabel htmlFor={`node-${key}`}>{label}</FieldLabel>
-												<Input
-													id={`node-${key}`}
-													value={String(node[key as "cap"] ?? "")}
-													disabled={!editable}
-													inputMode="decimal"
-													placeholder="不限制"
-													onChange={(e) =>
-														update(
-															key as "cap",
-															e.target.value === "" ? null : e.target.value,
-														)
-													}
-												/>
-											</Field>
-										))}
-									</div>
-									{["GRADE", "ACTIVITY"].includes(node.kind) && (
-										<>
+											{node.parentId &&
+												scheme.nodes.find((n) => n.id === node.parentId)
+													?.kind === "WEIGHTED" && (
+													<Field>
+														<FieldLabel htmlFor="node-weight">
+															占上级比例（%）
+														</FieldLabel>
+														<Input
+															id="node-weight"
+															type="number"
+															step="any"
+															value={
+																weightInputs[node.id] ?? percentage(node.weight)
+															}
+															onChange={(e) => {
+																const value = e.target.value;
+																setWeightInputs((previous) => ({
+																	...previous,
+																	[node.id]: value,
+																}));
+																setDirty(true);
+																setPreview(null);
+																if (/^\d{1,3}(?:\.\d{1,10})?$/.test(value)) {
+																	update(
+																		"weight",
+																		Rational.from(value)
+																			.div(Rational.from("100"))
+																			.fixed(12),
+																	);
+																	setError("");
+																} else
+																	setError(
+																		`${node.name}：请输入有效百分比，最多10位小数。`,
+																	);
+															}}
+														/>
+														<FieldDescription>
+															同一上级的直接下级比例合计需为100%。
+														</FieldDescription>
+													</Field>
+												)}
 											<div className="grid gap-5 sm:grid-cols-2">
 												{[
-													["minimum", "原始分下限"],
-													["maximum", "原始分上限"],
+													["cap", "封顶分"],
+													["floor", "最低计入分"],
 												].map(([key, label]) => (
 													<Field key={key}>
 														<FieldLabel htmlFor={`node-${key}`}>
@@ -524,112 +844,281 @@ export function SchemeEditor({
 														</FieldLabel>
 														<Input
 															id={`node-${key}`}
-															value={node[key as "minimum"]}
+															value={String(node[key as "cap"] ?? "")}
 															disabled={!editable}
 															inputMode="decimal"
+															placeholder="不限制"
 															onChange={(e) =>
-																update(key as "minimum", e.target.value)
+																update(
+																	key as "cap",
+																	e.target.value === "" ? null : e.target.value,
+																)
 															}
 														/>
 													</Field>
 												))}
 											</div>
-											<Field>
-												<FieldLabel htmlFor="node-required">
-													缺失输入
-												</FieldLabel>
-												<NativeSelect
-													id="node-required"
-													value={String(node.required)}
-													disabled={!editable}
-													onChange={(e) =>
-														update("required", e.target.value === "true")
+											{["GRADE", "ACTIVITY"].includes(node.kind) && (
+												<>
+													<div className="grid gap-5 sm:grid-cols-2">
+														{[
+															["minimum", "原始分下限"],
+															["maximum", "原始分上限"],
+														].map(([key, label]) => (
+															<Field key={key}>
+																<FieldLabel htmlFor={`node-${key}`}>
+																	{label}
+																</FieldLabel>
+																<Input
+																	id={`node-${key}`}
+																	value={node[key as "minimum"]}
+																	disabled={!editable}
+																	inputMode="decimal"
+																	onChange={(e) =>
+																		update(key as "minimum", e.target.value)
+																	}
+																/>
+															</Field>
+														))}
+													</div>
+													<Field>
+														<FieldLabel htmlFor="node-required">
+															缺失输入
+														</FieldLabel>
+														<NativeSelect
+															id="node-required"
+															value={String(node.required)}
+															disabled={!editable}
+															onChange={(e) =>
+																update("required", e.target.value === "true")
+															}
+														>
+															<NativeSelectOption value="false">
+																未提供时按零分计入
+															</NativeSelectOption>
+															<NativeSelectOption value="true">
+																必须提供，否则结果不完整
+															</NativeSelectOption>
+														</NativeSelect>
+													</Field>
+												</>
+											)}
+											<Collapsible
+												key={node.id}
+												defaultOpen={node.normalize}
+												className="flex flex-col gap-4"
+											>
+												<CollapsibleTrigger
+													render={
+														<Button
+															type="button"
+															variant="outline"
+															className="self-start"
+														/>
 													}
 												>
-													<NativeSelectOption value="false">
-														未提供时按零分计入
-													</NativeSelectOption>
-													<NativeSelectOption value="true">
-														必须提供，否则结果不完整
-													</NativeSelectOption>
-												</NativeSelect>
-											</Field>
-										</>
+													满分折算设置
+													{node.normalize ? "（已启用）" : "（未启用）"}
+													<ChevronDown data-icon="inline-end" />
+												</CollapsibleTrigger>
+												<CollapsibleContent className="flex flex-col gap-4">
+													{" "}
+													<Field>
+														<FieldLabel htmlFor="node-normalize">
+															满分折算
+														</FieldLabel>
+														<NativeSelect
+															id="node-normalize"
+															value={String(node.normalize)}
+															disabled={!editable}
+															onChange={(e) =>
+																update("normalize", e.target.value === "true")
+															}
+														>
+															<NativeSelectOption value="false">
+																不折算，保留原分
+															</NativeSelectOption>
+															<NativeSelectOption value="true">
+																按原始满分折算为目标满分
+															</NativeSelectOption>
+														</NativeSelect>
+													</Field>
+													{node.normalize && (
+														<div className="grid gap-5 sm:grid-cols-2">
+															{[
+																["rawMaximum", "原始满分"],
+																["targetMaximum", "目标满分"],
+															].map(([key, label]) => (
+																<Field key={key}>
+																	<FieldLabel htmlFor={`node-${key}`}>
+																		{label}
+																	</FieldLabel>
+																	<Input
+																		id={`node-${key}`}
+																		value={node[key as "rawMaximum"] || ""}
+																		disabled={!editable}
+																		inputMode="decimal"
+																		onChange={(e) =>
+																			update(
+																				key as "rawMaximum",
+																				e.target.value || null,
+																			)
+																		}
+																	/>
+																</Field>
+															))}
+														</div>
+													)}
+												</CollapsibleContent>
+											</Collapsible>
+										</FieldGroup>
+									</CardContent>
+									{editable && node.parentId && (
+										<CardFooter className="border-t">
+											<Button
+												variant="outline"
+												disabled={
+													!management.data ||
+													!!management.data.nodeUsage[node.id]
+												}
+												onClick={() => {
+													if (
+														!management.data ||
+														management.data.nodeUsage[node.id]
+													) {
+														setError(
+															"该模块已有业务引用，不能删除。请保留历史计分依据。",
+														);
+														return;
+													}
+													if (
+														scheme.nodes.some((n) => n.parentId === node.id) ||
+														scheme.deductions.some((d) => d.nodeId === node.id)
+													) {
+														setError("请先移除下级模块与关联扣分项目。");
+														return;
+													}
+													if (!window.confirm(`删除评分模块“${node.name}”？`))
+														return;
+													change({
+														...scheme,
+														nodes: scheme.nodes.filter((n) => n.id !== node.id),
+													});
+													setSelected(node.parentId!);
+													setMobileEdit(false);
+												}}
+											>
+												<Trash2 data-icon="inline-start" />
+												删除模块
+											</Button>
+											<FieldDescription>
+												{management.data?.nodeUsage[node.id]
+													? `已有 ${management.data.nodeUsage[node.id]} 条业务引用，不能删除。`
+													: "有下级或业务引用的模块不能删除。"}
+											</FieldDescription>
+										</CardFooter>
 									)}
+								</Card>
+							) : (
+								<dl className="grid gap-6 sm:grid-cols-2">
+									{ruleDetails(node).map(([label, value]) => (
+										<div key={label} className="flex flex-col gap-1">
+											<dt className="text-xs text-muted-foreground">{label}</dt>
+											<dd className="break-words text-sm">{value}</dd>
+										</div>
+									))}
+								</dl>
+							)}
+							{configuration[node.id]?.length ? (
+								<Feedback error={configuration[node.id].join("；")} />
+							) : null}
+							<Button variant="outline" onClick={() => setMobileEdit(false)}>
+								{editable ? "保留草稿并返回列表" : "完成查看"}
+							</Button>
+						</DialogContent>
+					</Dialog>
+					<Dialog
+						open={!!moving}
+						onOpenChange={(open) => {
+							if (!open) setMoving(null);
+						}}
+					>
+						<DialogContent>
+							<DialogHeader>
+								<DialogTitle>移动评分模块</DialogTitle>
+								<DialogDescription>
+									整组下级随父模块移动，模块标识、规则与比例保持不变。
+								</DialogDescription>
+							</DialogHeader>
+							<Feedback error={error} />
+							<form
+								className="flex flex-col gap-5"
+								onSubmit={(e) => {
+									e.preventDefault();
+									if (moving && moveTarget)
+										performMove(moving, moveTarget, placement);
+								}}
+							>
+								<FieldGroup>
 									<Field>
-										<FieldLabel htmlFor="node-normalize">满分折算</FieldLabel>
+										<FieldLabel htmlFor="scheme-move-target">
+											目标模块
+										</FieldLabel>
 										<NativeSelect
-											id="node-normalize"
-											value={String(node.normalize)}
-											disabled={!editable}
-											onChange={(e) =>
-												update("normalize", e.target.value === "true")
-											}
+											id="scheme-move-target"
+											required
+											value={moveTarget}
+											onChange={(e) => setMoveTarget(e.target.value)}
 										>
-											<NativeSelectOption value="false">
-												不折算，保留原分
+											<NativeSelectOption value="">
+												请选择目标
 											</NativeSelectOption>
-											<NativeSelectOption value="true">
-												按原始满分折算为目标满分
+											{scheme.nodes
+												.filter(
+													(n) =>
+														!movingDescendants.has(n.id) &&
+														(placement === "inside"
+															? ["SUM", "WEIGHTED"].includes(n.kind)
+															: n.parentId !== null),
+												)
+												.map((n) => (
+													<NativeSelectOption key={n.id} value={n.id}>
+														{n.name}
+														{n.id === root.id
+															? "（综合总分：移入即提升为大模块）"
+															: ""}
+													</NativeSelectOption>
+												))}
+										</NativeSelect>
+									</Field>
+									<Field>
+										<FieldLabel htmlFor="scheme-move-placement">
+											放置方式
+										</FieldLabel>
+										<NativeSelect
+											id="scheme-move-placement"
+											value={placement}
+											onChange={(e) => {
+												setPlacement(e.target.value as MovePlacement);
+												setMoveTarget("");
+											}}
+										>
+											<NativeSelectOption value="before">
+												放到目标前面
+											</NativeSelectOption>
+											<NativeSelectOption value="after">
+												放到目标后面
+											</NativeSelectOption>
+											<NativeSelectOption value="inside">
+												移入目标末尾
 											</NativeSelectOption>
 										</NativeSelect>
 									</Field>
-									{node.normalize && (
-										<div className="grid gap-5 sm:grid-cols-2">
-											{[
-												["rawMaximum", "原始满分"],
-												["targetMaximum", "目标满分"],
-											].map(([key, label]) => (
-												<Field key={key}>
-													<FieldLabel htmlFor={`node-${key}`}>
-														{label}
-													</FieldLabel>
-													<Input
-														id={`node-${key}`}
-														value={node[key as "rawMaximum"] || ""}
-														disabled={!editable}
-														inputMode="decimal"
-														onChange={(e) =>
-															update(
-																key as "rawMaximum",
-																e.target.value || null,
-															)
-														}
-													/>
-												</Field>
-											))}
-										</div>
-									)}
 								</FieldGroup>
-							</CardContent>
-							{editable && node.parentId && (
-								<CardFooter className="border-t">
-									<Button
-										variant="outline"
-										onClick={() => {
-											if (
-												scheme.nodes.some((n) => n.parentId === node.id) ||
-												scheme.deductions.some((d) => d.nodeId === node.id)
-											) {
-												setError("请先移除下级模块与关联扣分项目。");
-												return;
-											}
-											if (!window.confirm(`删除评分模块“${node.name}”？`))
-												return;
-											change({
-												...scheme,
-												nodes: scheme.nodes.filter((n) => n.id !== node.id),
-											});
-											setSelected(node.parentId!);
-										}}
-									>
-										<Trash2 data-icon="inline-start" />
-										删除模块
-									</Button>
-								</CardFooter>
-							)}
-						</Card>
-					</div>
+								<Button disabled={!moveTarget}>移动并保留草稿</Button>
+							</form>
+						</DialogContent>
+					</Dialog>
 				</TabsContent>
 				<TabsContent value="deductions" className="mt-5">
 					<Card>
@@ -645,89 +1134,112 @@ export function SchemeEditor({
 									当前方案尚未设置扣分项目。
 								</p>
 							)}
-							{scheme.deductions.map((d, index) => (
-								<FieldGroup key={d.id} className="rounded-lg border p-4">
-									<Field>
-										<FieldLabel htmlFor={`ded-name-${index}`}>
-											项目名称
-										</FieldLabel>
-										<Input
-											id={`ded-name-${index}`}
-											value={d.name}
-											disabled={!editable}
-											onChange={(e) =>
-												change({
-													...scheme,
-													deductions: scheme.deductions.map((p) =>
-														p.id === d.id ? { ...p, name: e.target.value } : p,
-													),
-												})
-											}
-										/>
-									</Field>
-									<Field>
-										<FieldLabel htmlFor={`ded-node-${index}`}>
-											扣分模块
-										</FieldLabel>
-										<NativeSelect
-											id={`ded-node-${index}`}
-											value={d.nodeId}
-											disabled={!editable}
-											onChange={(e) =>
-												change({
-													...scheme,
-													deductions: scheme.deductions.map((p) =>
-														p.id === d.id
-															? { ...p, nodeId: e.target.value }
-															: p,
-													),
-												})
-											}
-										>
-											{scheme.nodes.map((n) => (
-												<NativeSelectOption key={n.id} value={n.id}>
-													{n.name}
-												</NativeSelectOption>
-											))}
-										</NativeSelect>
-									</Field>
-									<Field>
-										<FieldLabel htmlFor={`ded-coef-${index}`}>
-											扣分系数
-										</FieldLabel>
-										<Input
-											id={`ded-coef-${index}`}
-											value={d.coefficient}
-											disabled={!editable}
-											onChange={(e) =>
-												change({
-													...scheme,
-													deductions: scheme.deductions.map((p) =>
-														p.id === d.id
-															? { ...p, coefficient: e.target.value }
-															: p,
-													),
-												})
-											}
-										/>
-									</Field>
-									{editable && (
-										<Button
-											variant="outline"
-											onClick={() =>
-												change({
-													...scheme,
-													deductions: scheme.deductions.filter(
-														(p) => p.id !== d.id,
-													),
-												})
-											}
-										>
-											移除项目
-										</Button>
-									)}
-								</FieldGroup>
-							))}
+							{scheme.deductions.map((d, index) =>
+								editable ? (
+									<FieldGroup key={d.id} className="rounded-lg border p-4">
+										<Field>
+											<FieldLabel htmlFor={`ded-name-${index}`}>
+												项目名称
+											</FieldLabel>
+											<Input
+												id={`ded-name-${index}`}
+												value={d.name}
+												disabled={!editable}
+												onChange={(e) =>
+													change({
+														...scheme,
+														deductions: scheme.deductions.map((p) =>
+															p.id === d.id
+																? { ...p, name: e.target.value }
+																: p,
+														),
+													})
+												}
+											/>
+										</Field>
+										<Field>
+											<FieldLabel htmlFor={`ded-node-${index}`}>
+												扣分模块
+											</FieldLabel>
+											<NativeSelect
+												id={`ded-node-${index}`}
+												value={d.nodeId}
+												disabled={!editable}
+												onChange={(e) =>
+													change({
+														...scheme,
+														deductions: scheme.deductions.map((p) =>
+															p.id === d.id
+																? { ...p, nodeId: e.target.value }
+																: p,
+														),
+													})
+												}
+											>
+												{scheme.nodes.map((n) => (
+													<NativeSelectOption key={n.id} value={n.id}>
+														{n.name}
+													</NativeSelectOption>
+												))}
+											</NativeSelect>
+										</Field>
+										<Field>
+											<FieldLabel htmlFor={`ded-coef-${index}`}>
+												扣分系数
+											</FieldLabel>
+											<Input
+												id={`ded-coef-${index}`}
+												value={d.coefficient}
+												disabled={!editable}
+												onChange={(e) =>
+													change({
+														...scheme,
+														deductions: scheme.deductions.map((p) =>
+															p.id === d.id
+																? { ...p, coefficient: e.target.value }
+																: p,
+														),
+													})
+												}
+											/>
+										</Field>
+										{editable && (
+											<Button
+												variant="outline"
+												onClick={() =>
+													change({
+														...scheme,
+														deductions: scheme.deductions.filter(
+															(p) => p.id !== d.id,
+														),
+													})
+												}
+											>
+												移除项目
+											</Button>
+										)}
+									</FieldGroup>
+								) : (
+									<dl key={d.id} className="grid gap-5 sm:grid-cols-3">
+										{[
+											["扣分项目", d.name],
+											[
+												"扣分模块",
+												scheme.nodes.find((n) => n.id === d.nodeId)?.name ||
+													"模块不存在",
+											],
+											["扣分系数", d.coefficient],
+										].map(([label, value]) => (
+											<div key={label} className="flex flex-col gap-1">
+												<dt className="text-xs text-muted-foreground">
+													{label}
+												</dt>
+												<dd className="text-sm">{value}</dd>
+											</div>
+										))}
+									</dl>
+								),
+							)}
 							{editable && (
 								<Button
 									variant="outline"
@@ -768,7 +1280,7 @@ export function SchemeEditor({
 									className="flex flex-col gap-5"
 									onSubmit={async (e) => {
 										e.preventDefault();
-										if (busy) return;
+										if (busy || !checkScheme()) return;
 										setBusy(true);
 										const f = new FormData(e.currentTarget);
 										setError("");

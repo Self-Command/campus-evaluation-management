@@ -73,7 +73,7 @@ async function administrator(tx: Prisma.TransactionClient, base: Base): Promise<
     id ? tx.recognitionSource.findMany({ where: { status: "PENDING", participation: { activity: { termId: id } } }, select: sourceSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 8 }) : [],
     id ? tx.personalClaim.findMany({ where: { status: "PENDING", project: { termId: id } }, select: claimSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 8 }) : [],
     id ? tx.resultAppeal.findMany({ where: { termId: id, status: { in: ["OPEN", "PROCESSING"] } }, select: { id: true, studentId: true, target: true, status: true, createdAt: true, publication: { select: { sequence: true } } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 6 }) : [],
-    tx.term.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8, select: { id: true, name: true, phase: true, revision: true, publishedResultSetId: true } }),
+    tx.term.findMany({ where: { disposition: "NORMAL" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 8, select: { id: true, name: true, phase: true, revision: true, publishedResultSetId: true } }),
   ]);
   const studentIds = [...new Set([...sources.map(row => row.participation.studentId), ...claims.map(row => row.studentId), ...appeals.map(row => row.studentId)])];
   const students = await tx.user.findMany({ where: { id: { in: studentIds } }, select: { id: true, name: true, login: true } });
@@ -180,7 +180,7 @@ export async function getWorkbench(sessionId: string, requestedTermId?: string):
     if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.disabled || session.version !== session.user.authVersion) throw new AccountError("会话已失效，请重新登录", 401);
     if (session.user.mustChangePassword) throw new AccountError("请先修改初始密码", 403);
     const term = termId ? await tx.term.findUnique({ where: { id: termId } }) : null;
-    if (termId && !term) throw new AccountError("测评周期不存在", 404);
+    if (termId && (!term || term.disposition === "DELETED")) throw new AccountError("测评周期不存在", 404);
     const base: Base = { role: session.user.role, user: { id: session.user.id, name: session.user.name, login: session.user.login }, term: term ? { id: term.id, name: term.name, phase: term.phase, revision: term.revision, inputRevision: term.inputRevision } : null };
     if (session.user.role === "ADMIN") return administrator(tx, base);
     if (session.user.role === "PUBLISHER") return publisher(tx, base);

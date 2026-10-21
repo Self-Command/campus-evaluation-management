@@ -43,6 +43,7 @@ export function ActivityDetail({
 		id: string;
 		name: string;
 		phase: string;
+		disposition?: string;
 		revision: number;
 		scheme: Scheme;
 	};
@@ -59,7 +60,9 @@ export function ActivityDetail({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [success, setSuccess] = useState("");
-	const active = term.phase === "ACTIVE";
+	const active =
+		term.phase === "ACTIVE" &&
+		(!term.disposition || term.disposition === "NORMAL");
 	const owner = user.id === activity.ownerId && user.role !== "STUDENT";
 	const params = useSearchParams();
 	const [publishPreview, setPublishPreview] = useState<AudiencePreview | null>(
@@ -376,21 +379,22 @@ export function ActivityDetail({
 					/>
 				</DialogContent>
 			</Dialog>
-			{user.role === "ADMIN" && (
-				<ScoringCorrection
-					key={`${activity.id}-${activity.revision}`}
-					term={term}
-					kind="activity"
-					item={activity}
-					open={correct}
-					onOpenChange={setCorrect}
-					onCommitted={() => {
-						setCorrect(false);
-						setSuccess("活动计分已更正，请重新核对并发布结果。");
-						router.refresh();
-					}}
-				/>
-			)}
+			{user.role === "ADMIN" &&
+				(!term.disposition || term.disposition === "NORMAL") && (
+					<ScoringCorrection
+						key={`${activity.id}-${activity.revision}`}
+						term={term}
+						kind="activity"
+						item={activity}
+						open={correct}
+						onOpenChange={setCorrect}
+						onCommitted={() => {
+							setCorrect(false);
+							setSuccess("活动计分已更正，请重新核对并发布结果。");
+							router.refresh();
+						}}
+					/>
+				)}
 			<Dialog
 				open={submit}
 				onOpenChange={(value) => {
@@ -419,7 +423,7 @@ export function ActivityDetail({
 						onChange={() => setDirty(true)}
 						onSubmit={async (e) => {
 							e.preventDefault();
-							if (busy || uploading) return;
+							if (busy || uploading || !active) return;
 							setBusy(true);
 							setError("");
 							const f = new FormData(e.currentTarget);

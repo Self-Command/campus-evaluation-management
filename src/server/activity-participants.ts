@@ -26,9 +26,9 @@ export async function pageActivityParticipants(sessionId: string, termId: string
     // A bounded identity lookup augments historical registration snapshots for search.
     const students = await tx.user.findMany({ where: query ? { OR: [{ login: { contains: query.slice(0, 80), mode: "insensitive" } }, { name: { contains: query.slice(0, 80), mode: "insensitive" } }] } : { id: { in: [] } }, select: { id: true } });
     const where: Prisma.ParticipationWhereInput = { activityId, registeredAt: { not: null }, ...(query ? { OR: [{ studentId: { in: students.map(student => student.id) } }, { registrationSnapshot: { path: ["login"], string_contains: query.slice(0, 80) } }, { registrationSnapshot: { path: ["name"], string_contains: query.slice(0, 80) } }] } : {}) };
-    const [items, total] = await Promise.all([tx.participation.findMany({ where, include: { sources: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, submitterId: true, status: true, reviewReason: true, note: true, revision: true, history: true, createdAt: true } } }, take: 20, skip: (safePage - 1) * 20, orderBy: [{ registeredAt: "desc" }, { id: "desc" }] }), tx.participation.count({ where })]);
+    const [items, total] = await Promise.all([tx.participation.findMany({ where, include: { sources: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, submitterId: true, status: true, reviewReason: true, note: true, revision: true, history: true, createdAt: true, evidence: { select: { evidence: { select: { id: true, name: true, mime: true, size: true } } } } } } }, take: 20, skip: (safePage - 1) * 20, orderBy: [{ registeredAt: "desc" }, { id: "desc" }] }), tx.participation.count({ where })]);
     return { items: items.map(item => ({ ...item, ...(item.registrationSnapshot as object ?? {}), score: item.score?.toFixed() ?? null })), total, page: safePage };
-  });
+  }, "read");
 }
 export async function saveActivityScore(sessionId: string, termId: string, input: unknown) {
   const data = z.object({ participationId: z.string(), revision: z.number().int().nonnegative(), value: decimalSchema, reason: z.string().trim().min(2).max(1000) }).parse(input);

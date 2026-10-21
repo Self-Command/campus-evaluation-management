@@ -1,7 +1,5 @@
 import { z } from "zod";
-import { db } from "@/server/db";
 import { AccountError } from "@/server/accounts";
-import { getCurrentSession } from "@/server/auth";
 import { termTransaction } from "@/server/terms";
 import { appendHistory, historyEntry, jsonValue, ownEvidence, reviewStatusSchema } from "@/server/claims";
 import { assertActivityOwner, eligible } from "@/server/activity-policy";
@@ -53,14 +51,15 @@ export async function reviewParticipation(sessionId: string, termId: string, inp
 }
 export async function listRecognitions(sessionId: string, termId: string, page = 1) { return pageRecognitions(sessionId, termId, page); }
 export async function pageRecognitions(sessionId: string, termId: string, page = 1, status?: string) {
-  const current = await getCurrentSession(sessionId);
-  if (!current || current.user.mustChangePassword) throw new AccountError("请重新登录", 401);
   const safePage = z.number().int().min(1).max(100000).parse(page);
   const parsed = reviewStatusSchema.optional().parse(status || undefined);
-  const where = { ...(parsed ? { status: parsed } : {}), participation: { activity: { termId, ...(current.user.role === "PUBLISHER" ? { ownerId: current.userId } : {}) }, ...(current.user.role === "STUDENT" ? { studentId: current.userId } : {}) } };
-  const [items, total] = await db.$transaction([db.recognitionSource.findMany({ where, include: { participation: { include: { activity: true } }, evidence: { select: { evidence: { select: { id: true, name: true } } } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, skip: (safePage - 1) * 20 }), db.recognitionSource.count({ where })]);
-  const students = await db.user.findMany({ where: { id: { in: [...new Set(items.map(s => s.participation.studentId))] } }, select: { id: true, name: true, login: true } });
-  return { items: items.map(s => ({ ...s, participation: { ...s.participation, activity: activityView(s.participation.activity, current.user.role), score: s.participation.score?.toFixed() ?? null }, student: students.find(u => u.id === s.participation.studentId) || null })), total, page: safePage };
+  return termTransaction(sessionId, termId, ["ADMIN", "PUBLISHER", "STUDENT"], ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"], async (tx, _term, actorId) => {
+    const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
+    const where = { ...(parsed ? { status: parsed } : {}), participation: { activity: { termId, ...(actor.role === "PUBLISHER" ? { ownerId: actorId } : {}) }, ...(actor.role === "STUDENT" ? { studentId: actorId } : {}) } };
+    const [items, total] = await Promise.all([tx.recognitionSource.findMany({ where, include: { participation: { include: { activity: true } }, evidence: { select: { evidence: { select: { id: true, name: true } } } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, skip: (safePage - 1) * 20 }), tx.recognitionSource.count({ where })]);
+    const students = await tx.user.findMany({ where: { id: { in: [...new Set(items.map(s => s.participation.studentId))] } }, select: { id: true, name: true, login: true } });
+    return { items: items.map(s => ({ ...s, participation: { ...s.participation, activity: activityView(s.participation.activity, actor.role), score: s.participation.score?.toFixed() ?? null }, student: students.find(u => u.id === s.participation.studentId) || null })), total, page: safePage };
+  }, "read");
 }
 
 export async function changeParticipation(sessionId: string, termId: string, input: unknown) {

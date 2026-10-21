@@ -4,6 +4,7 @@ import { db } from "@/server/db";
 import { previewAccountImport, commitAccountImport } from "@/server/account-import";
 import { parseAccountFile } from "@/server/spreadsheet";
 import { workbookFixture } from "./xlsx-fixture";
+import { organizationFixture } from "./organization-fixture";
 if (!new URL(process.env.DATABASE_URL!).pathname.startsWith("/campus_test_")) throw new Error("必须使用临时测试数据库");
 let session: string;
 const row = { login: "00002345", name: "导入学生", college: "信息学院", major: "计算机", className: "计科一班" };
@@ -13,6 +14,7 @@ beforeAll(async () => {
   await db.auditEvent.deleteMany();
   const admin = await db.user.create({ data: { login: "import-admin", name: "导入管理员", role: "ADMIN", passwordHash: "unused", mustChangePassword: false } });
   session = (await db.authSession.create({ data: { userId: admin.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } })).id;
+  await organizationFixture("import-org", row);
 });
 afterAll(async () => db.$disconnect());
 test("CSV 保留前导零，拒绝无效编码和超限名单", async () => {

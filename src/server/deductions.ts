@@ -28,5 +28,5 @@ export async function listDeductions(sessionId: string, termId: string, studentL
     const student = await inputStudent(tx, term, studentLogin);
     const records = await tx.deductionInput.findMany({ where: { termId: term.id, studentId: student.id } });
     return { student: { login: student.login, name: student.name }, records: records.map(item => ({ ...item, amount: item.amount.toFixed() })) };
-  });
+  }, "read");
 }

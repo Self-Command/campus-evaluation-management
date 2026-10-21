@@ -56,6 +56,7 @@ type Summary = {
 		id: string;
 		name: string;
 		phase: string;
+		disposition?: string;
 		revision: number;
 		inputRevision: number;
 		cohortPolicy?: "PREVIOUS" | "CURRENT";
@@ -253,17 +254,18 @@ export function Publication({ termId }: { termId: string }) {
 								{data.term.inputRevision}
 							</span>
 						</div>
-						{["CHECKING", "LOCKED"].includes(data.term.phase) && (
-							<Button
-								variant="outline"
-								onClick={() => {
-									setError("");
-									setReopen(true);
-								}}
-							>
-								填写理由并重开更正
-							</Button>
-						)}
+						{(!data.term.disposition || data.term.disposition === "NORMAL") &&
+							["CHECKING", "LOCKED"].includes(data.term.phase) && (
+								<Button
+									variant="outline"
+									onClick={() => {
+										setError("");
+										setReopen(true);
+									}}
+								>
+									填写理由并重开更正
+								</Button>
+							)}
 					</div>
 					<TemplateEditor
 						preview={
@@ -448,7 +450,13 @@ export function Publication({ termId }: { termId: string }) {
 							</TabsList>
 						</Tabs>
 						<Separator />
-						{data.term.phase === "ACTIVE" ? (
+						{data.term.disposition && data.term.disposition !== "NORMAL" ? (
+							<p className="text-sm text-muted-foreground">
+								{data.term.disposition === "ARCHIVED"
+									? "本周期已归档，发布与结算记录只读；需要重开或锁定时，请先在周期管理中取消归档。"
+									: "本周期已作废，发布与结算记录只读。"}
+							</p>
+						) : data.term.phase === "ACTIVE" ? (
 							<form
 								className="flex flex-col gap-5"
 								onSubmit={async (e) => {
@@ -710,7 +718,10 @@ export function Publication({ termId }: { termId: string }) {
 				</>
 			)}
 			<Dialog
-				open={extend}
+				open={
+					extend &&
+					(!data?.term.disposition || data.term.disposition === "NORMAL")
+				}
 				onOpenChange={(open) => {
 					if (!busy) setExtend(open);
 				}}
@@ -726,7 +737,12 @@ export function Publication({ termId }: { termId: string }) {
 						className="flex flex-col gap-5"
 						onSubmit={async (event) => {
 							event.preventDefault();
-							if (busy || !data?.current) return;
+							if (
+								busy ||
+								!data?.current ||
+								(data.term.disposition && data.term.disposition !== "NORMAL")
+							)
+								return;
 							const form = new FormData(event.currentTarget);
 							setBusy(true);
 							setError("");
@@ -792,7 +808,10 @@ export function Publication({ termId }: { termId: string }) {
 				</DialogContent>
 			</Dialog>
 			<Dialog
-				open={cohort}
+				open={
+					cohort &&
+					(!data?.term.disposition || data.term.disposition === "NORMAL")
+				}
 				onOpenChange={(open) => {
 					if (!busy) setCohort(open);
 				}}
@@ -808,7 +827,12 @@ export function Publication({ termId }: { termId: string }) {
 						className="flex flex-col gap-5"
 						onSubmit={async (event) => {
 							event.preventDefault();
-							if (busy || !data) return;
+							if (
+								busy ||
+								!data ||
+								(data.term.disposition && data.term.disposition !== "NORMAL")
+							)
+								return;
 							const form = new FormData(event.currentTarget);
 							setBusy(true);
 							setError("");
@@ -867,7 +891,10 @@ export function Publication({ termId }: { termId: string }) {
 				</DialogContent>
 			</Dialog>
 			<Dialog
-				open={reopen}
+				open={
+					reopen &&
+					(!data?.term.disposition || data.term.disposition === "NORMAL")
+				}
 				onOpenChange={(open) => {
 					if (!busy) setReopen(open);
 				}}
@@ -883,7 +910,12 @@ export function Publication({ termId }: { termId: string }) {
 						className="flex flex-col gap-5"
 						onSubmit={async (e) => {
 							e.preventDefault();
-							if (busy || !data) return;
+							if (
+								busy ||
+								!data ||
+								(data.term.disposition && data.term.disposition !== "NORMAL")
+							)
+								return;
 							setBusy(true);
 							setError("");
 							const f = new FormData(e.currentTarget);

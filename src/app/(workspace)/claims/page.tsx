@@ -69,7 +69,7 @@ export default async function Page({
 	searchParams: Promise<{ termId?: string; page?: string; status?: string }>;
 }) {
 	const user = await pageSession();
-	if (user.role === "PUBLISHER") notFound();
+	if (user.role !== "ADMIN" && user.role !== "STUDENT") notFound();
 	const p = await searchParams;
 	if (p.status && !reviewStatusSchema.safeParse(p.status).success) notFound();
 	const { terms, term } = await measurementContext(user.sessionId, p.termId);
@@ -97,6 +97,7 @@ export default async function Page({
 					term={{
 						id: term.id,
 						phase: term.phase,
+						disposition: term.disposition,
 						revision: term.revision,
 						scheme: schemeSchema.parse(term.scheme),
 					}}

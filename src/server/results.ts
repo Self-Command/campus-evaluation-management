@@ -47,7 +47,7 @@ export async function collectStudentResults(tx: Prisma.TransactionClient, term: 
     const result = calculate(term.scheme, { values, deductions: Object.fromEntries(studentDeductions.map(d => [d.projectId, d.amount.toFixed()])) });
     if (missingActivityScores.length) { result.complete = false; result.total = null; result.missing.push(...missingActivityScores); }
     return {
-      term: { id: term.id, name: term.name, phase: term.phase, revision: term.revision, inputRevision: term.inputRevision },
+      term: { id: term.id, name: term.name, phase: term.phase, disposition: term.disposition, revision: term.revision, inputRevision: term.inputRevision },
       student: { id: student.id, login: student.login, name: student.name, profile: student.studentProfile }, result,
       grades: studentGrades.map(g => ({ id: g.id, nodeId: g.nodeId, name: nodes.get(g.nodeId)!.name, value: g.value.toFixed(), revision: g.revision })),
       deductions: studentDeductions.map(item => {
@@ -96,7 +96,7 @@ export async function pageResultStudents(sessionId: string, termId: string, inpu
     ]);
     const computed = term.phase === "ACTIVE" ? await collectStudentResults(tx, term, students) : [];
     return { items: students.map((student, index) => ({ id: student.id, login: student.login, name: student.name, college: student.studentProfile!.college, major: student.studentProfile!.major, className: student.studentProfile!.className, total: computed[index]?.result.total ?? null, complete: computed[index]?.result.complete ?? null, confirmedAt: null })), total, page: filters.page, phase: term.phase, publication: null, scopeOptions: studentScopeOptions(scope, filters) };
-  });
+  }, "read");
 }
 export async function getStudentResult(sessionId: string, termId: string, studentId?: string) {
   return termTransaction(sessionId, termId, ["ADMIN", "STUDENT"], ["ACTIVE", "CHECKING", "LOCKED"], async (tx, term, actorId) => {
@@ -110,14 +110,14 @@ export async function getStudentResult(sessionId: string, termId: string, studen
       if (!record) throw new AccountError("该学生不在本次发布范围内", 404);
       const ranking = ranked(await tx.publishedResult.findMany({ where: { publicationId: term.publishedResultSetId }, select: { total: true, login: true, studentId: true } }));
       const payload = record.payload as unknown as StudentResultPayload;
-      return { ...payload, term: { ...payload.term, phase: term.phase }, publication: { id: record.publication.id, sequence: record.publication.sequence, publishedAt: record.publication.publishedAt, checkingEndsAt: await effectiveCheckingDeadline(tx, record.publication), requireConfirmation: record.publication.requireConfirmation }, resultHash: record.resultHash, confirmation: record.confirmation, rank: ranking.find(r => r.studentId === targetId)?.rank ?? null, population: ranking.length };
+      return { ...payload, term: { ...payload.term, phase: term.phase, disposition: term.disposition }, publication: { id: record.publication.id, sequence: record.publication.sequence, publishedAt: record.publication.publishedAt, checkingEndsAt: await effectiveCheckingDeadline(tx, record.publication), requireConfirmation: record.publication.requireConfirmation }, resultHash: record.resultHash, confirmation: record.confirmation, rank: ranking.find(r => r.studentId === targetId)?.rank ?? null, population: ranking.length };
     }
     const frozen = term.cohortPolicy === "PREVIOUS" && term.cohortPublicationId ? await tx.publishedResult.findUnique({ where: { publicationId_studentId: { publicationId: term.cohortPublicationId, studentId: targetId } } }) : null;
     const student = frozen ? frozenResultStudent(frozen) : term.cohortPolicy === "PREVIOUS" && term.cohortPublicationId ? null : await tx.user.findFirst({ where: { id: targetId, role: "STUDENT", disabled: false, studentProfile: { isNot: null } }, select: resultStudentSelect });
     if (!student) throw new AccountError("学生账号或档案无效", 404);
     return (await collectStudentResults(tx, term, [student]))[0];
-  });
+  }, "read");
 }
 function frozenResultStudent(row: { studentId: string; login: string; name: string; college: string; major: string; className: string }): ResultStudent {
-  return { id: row.studentId, login: row.login, name: row.name, studentProfile: { userId: row.studentId, studentNumber: row.login, college: row.college, major: row.major, className: row.className } };
+  return { id: row.studentId, login: row.login, name: row.name, studentProfile: { userId: row.studentId, studentNumber: row.login, college: row.college, major: row.major, className: row.className, classId: null } };
 }

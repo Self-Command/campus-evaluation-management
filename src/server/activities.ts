@@ -10,11 +10,12 @@ import { activityAudience, assertActivityOwner, audienceFields, audienceSchema, 
 import { verifyFlowToken } from "@/server/flow-token";
 const phases = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"] as const;
 const activitySchema = z.object({ name: z.string().trim().min(1).max(120), organizer: z.string().trim().min(1).max(120), content: z.string().trim().min(1).max(5000), requirements: z.string().trim().max(2000), startsAt: z.iso.datetime(), endsAt: z.iso.datetime(), nodeId: z.string().min(1).max(100), points: decimalSchema, scoreMode: z.enum(["FIXED", "INDIVIDUAL"]).default("FIXED"), audience: audienceSchema.default(emptyAudience) });
-type OwnParticipation = Prisma.ParticipationGetPayload<{ include: { sources: true } }>;
+const ownEvidenceInclude = { sources: { include: { evidence: { select: { evidence: { select: { id: true, name: true, mime: true, size: true } } } } } } } as const;
+type OwnParticipation = Prisma.ParticipationGetPayload<{ include: typeof ownEvidenceInclude }>;
 export function activityView(activity: Activity, role: string, ownParticipation?: OwnParticipation | null) {
   const { audienceColleges: _colleges, audienceClasses: _classes, audienceStudents: _students, ...safe } = activity;
   void _colleges; void _classes; void _students;
-  return { ...safe, points: activity.points.toFixed(), audience: role === "STUDENT" ? null : activityAudience(activity), ownParticipation: ownParticipation ? { id: ownParticipation.id, registeredAt: ownParticipation.registeredAt, registrationSnapshot: ownParticipation.registrationSnapshot, score: ownParticipation.score?.toFixed() ?? null, revision: ownParticipation.revision, history: ownParticipation.history, sources: ownParticipation.sources.map(source => ({ id: source.id, status: source.status, reviewReason: source.reviewReason, history: source.history })) } : null };
+  return { ...safe, points: activity.points.toFixed(), audience: role === "STUDENT" ? null : activityAudience(activity), ownParticipation: ownParticipation ? { id: ownParticipation.id, registeredAt: ownParticipation.registeredAt, registrationSnapshot: ownParticipation.registrationSnapshot, score: ownParticipation.score?.toFixed() ?? null, revision: ownParticipation.revision, history: ownParticipation.history, sources: ownParticipation.sources.map(source => ({ id: source.id, status: source.status, reviewReason: source.reviewReason, history: source.history, evidence: source.evidence })) } : null };
 }
 export async function pageActivityFeed(sessionId: string, termId: string, query = "", page = 1) { return pageDirectory(sessionId, termId, query, page, true); }
 export async function pageActivities(sessionId: string, termId: string, query = "", page = 1) { return pageDirectory(sessionId, termId, query, page, false); }
@@ -25,9 +26,9 @@ async function pageDirectory(sessionId: string, termId: string, query: string, p
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, include: { studentProfile: true } });
     const where: Prisma.ActivityWhereInput = { termId, ...(query ? { OR: [{ name: { contains: query.slice(0, 80), mode: "insensitive" } }, { organizer: { contains: query.slice(0, 80), mode: "insensitive" } }] } : {}), ...(actor.role === "PUBLISHER" ? { ownerId: actorId } : {}), ...(actor.role === "STUDENT" ? feed ? studentFeedWhere(actor) : { participations: { some: { studentId: actorId, registeredAt: { not: null } } } } : {}) };
     const [items, total] = await Promise.all([tx.activity.findMany({ where, orderBy: [{ startsAt: "desc" }, { id: "desc" }], take: 20, skip: (safePage - 1) * 20 }), tx.activity.count({ where })]);
-    const own = actor.role === "STUDENT" ? await tx.participation.findMany({ where: { activityId: { in: items.map(item => item.id) }, studentId: actorId, registeredAt: { not: null } }, include: { sources: true } }) : [];
+    const own = actor.role === "STUDENT" ? await tx.participation.findMany({ where: { activityId: { in: items.map(item => item.id) }, studentId: actorId, registeredAt: { not: null } }, include: ownEvidenceInclude }) : [];
     return { items: items.map(item => activityView(item, actor.role, own.find(fact => fact.activityId === item.id))), total, page: safePage };
-  });
+  }, "read");
 }
 export async function getActivity(sessionId: string, id: string) {
   const found = await db.activity.findUnique({ where: { id }, select: { termId: true } });
@@ -35,11 +36,11 @@ export async function getActivity(sessionId: string, id: string) {
   return termTransaction(sessionId, found.termId, ["ADMIN", "PUBLISHER", "STUDENT"], [...phases], async (tx, _term, actorId) => {
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, include: { studentProfile: true } });
     const activity = await tx.activity.findUniqueOrThrow({ where: { id } });
-    const own = actor.role === "STUDENT" ? await tx.participation.findUnique({ where: { activityId_studentId: { activityId: id, studentId: actorId } }, include: { sources: true } }) : null;
+    const own = actor.role === "STUDENT" ? await tx.participation.findUnique({ where: { activityId_studentId: { activityId: id, studentId: actorId } }, include: ownEvidenceInclude }) : null;
     const visible = actor.role !== "STUDENT" || !!own?.registeredAt || !!await tx.activity.findFirst({ where: { id, ...studentFeedWhere(actor) }, select: { id: true } });
     if (!visible || (actor.role === "PUBLISHER" && activity.ownerId !== actorId)) throw new AccountError("活动不存在或无权查看", 404);
     return { ...activityView(activity, actor.role, own?.registeredAt ? own : null), canSubmit: actor.role === "STUDENT" && !!await tx.activity.findFirst({ where: { id, ...studentFeedWhere(actor) }, select: { id: true } }) };
-  });
+  }, "read");
 }
 export async function saveActivity(sessionId: string, termId: string, input: unknown) {
   const data = z.object({ id: z.string().optional(), revision: z.number().int().nonnegative().optional(), activity: activitySchema }).parse(input);

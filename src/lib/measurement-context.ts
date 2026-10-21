@@ -10,9 +10,10 @@ export async function measurementContext(sessionId: string, requested?: string) 
     return { terms, term };
   }
   const remembered = (await cookies()).get("measurement_term")?.value;
+  const normal = terms.filter(item => item.disposition === "NORMAL");
   const term =
-    terms.find((item) => item.id === remembered) ||
-    terms.find((item) => ["ACTIVE", "CHECKING"].includes(item.phase)) ||
-    terms[0];
+    normal.find((item) => item.id === remembered) ||
+    normal.find((item) => ["ACTIVE", "CHECKING"].includes(item.phase)) ||
+    normal[0];
   return { terms, term };
 }

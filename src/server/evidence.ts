@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { db } from "@/server/db";
 import { getCurrentSession } from "@/server/auth";
 import { AccountError } from "@/server/accounts";
+import { scopedTransaction, scopedStudentWhere } from "@/server/access-scope";
 export const evidenceLimit = 5 * 1024 * 1024;
 // Evidence is runtime data on a separate volume, never a deployment build input.
 export const evidenceRoot = () => resolve(/* turbopackIgnore: true */ process.env.EVIDENCE_DIR ?? ".local/evidence");
@@ -30,17 +31,20 @@ export async function uploadEvidence(sessionId: string, name: string, bytes: Buf
   } catch (error) { await unlink(path).catch(() => {}); throw error; }
 }
 export async function downloadEvidence(sessionId: string, id: string) {
-  const current = await getCurrentSession(sessionId);
-  if (!current || current.user.mustChangePassword) throw new AccountError("请重新登录", 401);
-  const file = await db.evidence.findUnique({ where: { id }, include: { references: { include: { source: { include: { participation: { include: { activity: true } } } } } }, claimReferences: { select: { claim: { select: { studentId: true } } } }, appealReferences: { select: { appeal: { select: { studentId: true } } } } } });
+  return scopedTransaction(sessionId, ["ADMIN", "PUBLISHER", "COLLEGE", "COUNSELOR", "STUDENT"], false, async (tx, actor) => {
+  const file = await tx.evidence.findUnique({ where: { id }, include: { references: { include: { source: { include: { participation: { include: { activity: true } } } } } }, claimReferences: { select: { claim: { select: { studentId: true } } } }, appealReferences: { select: { appeal: { select: { studentId: true } } } } } });
   if (!file) throw new AccountError("证明不存在", 404);
-  const allowed = current.user.role === "ADMIN" || file.ownerId === current.userId || (current.user.role === "STUDENT" && (file.claimReferences.some(r => r.claim.studentId === current.userId) || file.appealReferences.some(r => r.appeal.studentId === current.userId))) || file.references.some(reference => {
+  const allowedByReference = actor.role === "ADMIN" || file.ownerId === actor.id || (actor.role === "STUDENT" && (file.claimReferences.some(r => r.claim.studentId === actor.id) || file.appealReferences.some(r => r.appeal.studentId === actor.id))) || file.references.some(reference => {
     const participation = reference.source.participation;
-    return current.user.role === "STUDENT" ? participation.studentId === current.userId : participation.activity.ownerId === current.userId;
+    return actor.role === "STUDENT" ? participation.studentId === actor.id : participation.activity.ownerId === actor.id;
   });
-  if (!allowed) throw new AccountError("没有查看该证明的权限", 403);
+  const studentIds = [...new Set([...file.references.map(r => r.source.participation.studentId), ...file.claimReferences.map(r => r.claim.studentId), ...file.appealReferences.map(r => r.appeal.studentId)])];
+  const allowedByScope = !allowedByReference && (actor.role === "COLLEGE" || actor.role === "COUNSELOR") && studentIds.length > 0 && await tx.user.count({ where: { AND: [scopedStudentWhere(actor), { id: { in: studentIds } }] } }) > 0;
+  if (!allowedByReference && !allowedByScope) throw new AccountError("没有查看该证明的权限", 403);
   if (!/^[a-f0-9]{48}$/.test(file.storageKey)) throw new AccountError("证明存储标识无效", 500);
   const bytes = await readFile(/* turbopackIgnore: true */ join(/* turbopackIgnore: true */ evidenceRoot(), file.storageKey));
   if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new AccountError("证明文件校验失败", 500);
+  if (identify(bytes) !== file.mime) throw new AccountError("证明文件类型校验失败", 500);
   return { file, bytes };
+  });
 }

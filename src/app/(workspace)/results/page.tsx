@@ -12,7 +12,7 @@ export default async function Page({
   searchParams: Promise<{ termId?: string; login?: string; q?: string; page?: string }>;
 }) {
   const user = await pageSession();
-  if (user.role === "PUBLISHER") notFound();
+  if (user.role !== "ADMIN" && user.role !== "STUDENT") notFound();
   const p = await searchParams;
   const { terms, term } = await measurementContext(user.sessionId, p.termId);
   return (

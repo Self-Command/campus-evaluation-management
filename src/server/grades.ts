@@ -28,5 +28,5 @@ export async function listGrades(sessionId: string, termId: string, studentLogin
     const student = await inputStudent(tx, term, studentLogin);
     const inputs = await tx.gradeInput.findMany({ where: { termId: term.id, studentId: student.id } });
     return { student: { login: student.login, name: student.name }, inputs: inputs.map(item => ({ ...item, value: item.value.toFixed() })) };
-  });
+  }, "read");
 }

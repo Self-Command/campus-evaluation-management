@@ -8,6 +8,7 @@ import { decimalSchema, schemeSchema } from "@/lib/scoring/types";
 import { Rational } from "@/lib/scoring/rational";
 import { jsonValue } from "@/server/claims";
 import { issueFlowToken, verifyFlowToken, stateDigest } from "@/server/flow-token";
+import { schemeReferences, schemeReferenceErrors } from "@/server/scheme-references";
 
 const correctionSchema = z.object({ action: z.enum(["preview", "commit"]), kind: z.enum(["scheme", "activity", "project"]), revision: z.number().int().nonnegative().optional(), reason: z.string().trim().min(2).max(1000).optional(), token: z.string().max(4000).optional(), id: z.string().optional(), scheme: schemeSchema.optional(), nodeId: z.string().optional(), points: decimalSchema.optional(), scoreMode: z.enum(["FIXED", "INDIVIDUAL"]).optional() });
 async function impactedStudents(tx: Prisma.TransactionClient, term: Term) {
@@ -33,11 +34,8 @@ export async function correctScoring(sessionId: string, termId: string, input: u
     const errors: string[] = [];
     if (data.kind === "scheme") {
       if (!data.scheme) throw new AccountError("请提供完整评分制度");
-      const { scheme, nodes } = validateScheme(data.scheme);
-      const [activities, projects, grades, deductions] = await Promise.all([tx.activity.findMany({ where: { termId } }), tx.recognitionProject.findMany({ where: { termId } }), tx.gradeInput.findMany({ where: { termId } }), tx.deductionInput.findMany({ where: { termId, revoked: false } })]);
-      for (const item of [...activities, ...projects]) if (nodes.get(item.nodeId)?.kind !== "ACTIVITY") errors.push(`“${item.name}”引用的活动模块被删除或类型改变`);
-      for (const grade of grades) if (nodes.get(grade.nodeId)?.kind !== "GRADE") errors.push(`已有成绩的模块${grade.nodeId}被删除或类型改变`);
-      for (const deduction of deductions) if (!scheme.deductions.some(item => item.id === deduction.projectId)) errors.push(`已有有效扣分项目${deduction.projectId}被删除`);
+      const { scheme } = validateScheme(data.scheme);
+      errors.push(...schemeReferenceErrors(scheme, await schemeReferences(tx, termId)));
       original = term.scheme; nextTerm = { ...term, scheme: JSON.parse(JSON.stringify(scheme)) as Prisma.JsonValue };
     } else {
       if (!data.id || !data.nodeId || data.points === undefined) throw new AccountError("请选择更正对象、评分模块并填写分值");

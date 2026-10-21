@@ -11,6 +11,8 @@ enum Role {
   ADMIN
   PUBLISHER
   STUDENT
+  COLLEGE
+  COUNSELOR
 }
 
 model User {
@@ -29,6 +31,12 @@ model User {
   grades             GradeInput[]
   deductions         DeductionInput[]
   revision           Int      @default(0)
+  collegeId          String?
+  college            College? @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  assignedClasses    SchoolClass[]
+  counselorAssignments ClassCounselorAssignment[]
+  affiliations       StudentAffiliation[]
+  @@index([collegeId, role])
 }
 
 model StudentProfile {
@@ -38,6 +46,81 @@ model StudentProfile {
   college       String
   major         String
   className     String
+  classId       String?
+  schoolClass   SchoolClass? @relation(fields: [classId], references: [id], onDelete: Restrict)
+  @@index([classId])
+}
+
+model College {
+  id        String @id @default(cuid())
+  code      String @unique
+  name      String
+  enabled   Boolean @default(true)
+  revision  Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  majors    Major[]
+  staff     User[]
+}
+
+model Major {
+  id        String @id @default(cuid())
+  collegeId String
+  college   College @relation(fields: [collegeId], references: [id], onDelete: Restrict)
+  code      String
+  name      String
+  enabled   Boolean @default(true)
+  revision  Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  classes   SchoolClass[]
+  @@unique([collegeId, code])
+}
+
+model SchoolClass {
+  id          String @id @default(cuid())
+  majorId     String
+  major       Major @relation(fields: [majorId], references: [id], onDelete: Restrict)
+  code        String
+  name        String
+  enabled     Boolean @default(true)
+  counselorId String?
+  counselor   User? @relation(fields: [counselorId], references: [id], onDelete: Restrict)
+  revision    Int @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  students    StudentProfile[]
+  assignments ClassCounselorAssignment[]
+  affiliations StudentAffiliation[]
+  @@unique([majorId, code])
+  @@index([counselorId])
+}
+
+model ClassCounselorAssignment {
+  id          String @id @default(cuid())
+  classId     String
+  schoolClass SchoolClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  counselorId String
+  counselor   User @relation(fields: [counselorId], references: [id], onDelete: Restrict)
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  actorId     String
+  reason      String
+  @@index([classId, endedAt])
+}
+
+model StudentAffiliation {
+  id          String @id @default(cuid())
+  studentId   String
+  student     User @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  classId     String
+  schoolClass SchoolClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  identity    Json
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  actorId     String
+  reason      String
+  @@index([studentId, endedAt])
 }
 
 model AuthSession {
@@ -70,10 +153,20 @@ enum TermPhase {
   LOCKED
 }
 
+enum TermDisposition {
+  NORMAL
+  ARCHIVED
+  VOID
+  DELETED
+}
+
 model Term {
   id String @id @default(cuid())
   name String
   phase TermPhase @default(CONFIGURATION)
+  disposition TermDisposition @default(NORMAL)
+  dispositionReason String?
+  dispositionAt DateTime?
   scheme Json
   revision Int @default(0)
   inputRevision Int @default(0)
@@ -437,6 +530,22 @@ model SiteSettings {
   id String @id @default("site")
   content Json
   revision Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model LoginCaptcha {
+  id String @id
+  answerHash String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+
+model LoginFailureState {
+  key String @id
+  failures Int @default(0)
+  policyKey String
+  lockedUntil DateTime?
   updatedAt DateTime @updatedAt
 }
 

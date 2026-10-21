@@ -37,7 +37,7 @@ export async function listProjects(sessionId: string, termId: string) {
   return termTransaction(sessionId, termId, ["ADMIN", "PUBLISHER", "STUDENT"], ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"], async (tx, _term, actorId) => {
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
     return tx.recognitionProject.findMany({ where: { termId, ...(actor.role !== "ADMIN" ? { enabled: true } : {}) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 500 });
-  });
+  }, "read");
 }
 const claimSchema = z.object({ projectId: z.string(), activityId: z.string().max(100).optional(), factKey: z.string().trim().min(1).max(120).transform(v => v.normalize("NFKC").toLocaleLowerCase()), occurredOn: z.iso.date(), note: z.string().trim().min(2).max(2000), evidenceIds: z.array(z.string().min(1)).min(1).max(5) });
 export async function submitClaim(sessionId: string, termId: string, input: unknown) {
@@ -110,5 +110,5 @@ export async function pageClaims(sessionId: string, termId: string, page = 1, st
     const items = await tx.personalClaim.findMany({ where, include: { project: true, evidence: { select: { evidence: { select: { id: true, name: true } } } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, skip: (safePage - 1) * 20 });
     const students = await tx.user.findMany({ where: { id: { in: items.map(i => i.studentId) } }, select: { id: true, name: true, login: true } });
     return { items: items.map(i => ({ ...i, evidence: i.evidence.map(e => e.evidence), student: students.find(s => s.id === i.studentId) ?? null })), total: await tx.personalClaim.count({ where }), page: safePage };
-  });
+  }, "read");
 }

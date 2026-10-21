@@ -1,4 +1,5 @@
 "use client";
+import { EvidenceViewer } from "@/components/dashboard/evidence-viewer";
 import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
 import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
 import { TemplateDirectory } from "@/components/dashboard/template-directory";
@@ -49,7 +50,7 @@ export function Recognitions({
 	userId,
 }: {
 	data: { items: Recognition[]; total: number; page: number };
-	term: { id: string; phase: string };
+	term: { id: string; phase: string; disposition?: string };
 	role: AppRole;
 	status: string;
 	userId: string;
@@ -260,15 +261,7 @@ export function Recognitions({
 								<h3 className="mb-3 text-sm font-medium">证明材料</h3>
 								<div className="flex flex-col gap-2">
 									{selected.evidence.map(({ evidence }) => (
-										<a
-											key={evidence.id}
-											href={`/api/evidence/${evidence.id}`}
-											target="_blank"
-											rel="noreferrer"
-											className="break-all rounded-lg border p-3 text-sm underline underline-offset-4"
-										>
-											{evidence.name}
-										</a>
+										<EvidenceViewer key={evidence.id} evidence={evidence} />
 									))}
 								</div>
 							</section>
@@ -285,6 +278,7 @@ export function Recognitions({
 							)}
 							{role === "ADMIN" &&
 								term.phase === "ACTIVE" &&
+								(!term.disposition || term.disposition === "NORMAL") &&
 								selected.status === "PENDING" && (
 									<form
 										className="flex flex-col gap-5 border-t pt-5"
@@ -355,6 +349,7 @@ export function Recognitions({
 									</form>
 								)}
 							{term.phase === "ACTIVE" &&
+								(!term.disposition || term.disposition === "NORMAL") &&
 								selected.status === "APPROVED" &&
 								role === "ADMIN" && (
 									<form
@@ -406,6 +401,7 @@ export function Recognitions({
 								)}
 							{role === "ADMIN" &&
 								term.phase === "ACTIVE" &&
+								(!term.disposition || term.disposition === "NORMAL") &&
 								["PENDING", "NEEDS_CHANGES"].includes(selected.status) && (
 									<form
 										className="flex flex-col gap-4"
@@ -455,6 +451,7 @@ export function Recognitions({
 									</form>
 								)}
 							{term.phase === "ACTIVE" &&
+								(!term.disposition || term.disposition === "NORMAL") &&
 								canManage &&
 								["PENDING", "NEEDS_CHANGES"].includes(selected.status) && (
 									<>
@@ -488,6 +485,7 @@ export function Recognitions({
 									</>
 								)}
 							{term.phase === "ACTIVE" &&
+								(!term.disposition || term.disposition === "NORMAL") &&
 								canManage &&
 								["REJECTED", "NEEDS_CHANGES", "WITHDRAWN"].includes(
 									selected.status,

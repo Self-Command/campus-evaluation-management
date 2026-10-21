@@ -47,7 +47,11 @@ export default async function RecognitionsPage({
 				<Recognitions
 					key={`${term.id}-${p.page || 1}-${status || ""}`}
 					data={JSON.parse(JSON.stringify(data))}
-					term={{ id: term.id, phase: term.phase }}
+					term={{
+						id: term.id,
+						phase: term.phase,
+						disposition: term.disposition,
+					}}
 					role={user.role}
 					userId={user.id}
 					status={status || ""}

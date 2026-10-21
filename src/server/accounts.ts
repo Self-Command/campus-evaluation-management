@@ -4,20 +4,25 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { getCurrentSession } from "@/server/auth";
 import type { Prisma } from "@/generated/prisma/client";
+import { AccountError } from "@/server/account-error";
+import { scopedTransaction, scopedStudentWhere } from "@/server/access-scope";
+import { configuredClass, classProfile, profileSelect, recordStudentAffiliation } from "@/server/organizations";
+export { AccountError } from "@/server/account-error";
 
 const text = z.string().trim().min(1, "此项不能为空").max(80, "最多80个字符");
 export const accountSchema = z.object({
   name: text,
   login: z.string().trim().min(3).max(64).regex(/^[A-Za-z0-9._-]+$/, "账号仅允许字母、数字、点、下划线和连字符"),
-  role: z.enum(["ADMIN", "PUBLISHER", "STUDENT"]),
-  college: z.string().trim().max(80).default(""),
-  major: z.string().trim().max(80).default(""),
-  className: z.string().trim().max(80).default(""),
-}).superRefine((v, ctx) => {
-  if (v.role === "STUDENT") for (const key of ["college", "major", "className"] as const) if (!v[key]) ctx.addIssue({ code: "custom", path: [key], message: "学生归属不能为空" });
+  role: z.enum(["ADMIN", "COLLEGE", "COUNSELOR", "STUDENT"]),
+  collegeId: z.string().trim().max(100).optional(),
+  classId: z.string().trim().max(100).optional(),
+}).strict().superRefine((v, ctx) => {
+  if ((v.role === "COLLEGE" || v.role === "COUNSELOR") && !v.collegeId) ctx.addIssue({ code: "custom", path: ["collegeId"], message: "请选择所属学院" });
+  if (v.role !== "STUDENT" && v.classId) ctx.addIssue({ code: "custom", path: ["classId"], message: "该身份不使用学生班级归属" });
+  if (v.role !== "COLLEGE" && v.role !== "COUNSELOR" && v.collegeId) ctx.addIssue({ code: "custom", path: ["collegeId"], message: "学生学院由班级推导，管理员无需学院归属" });
 });
-export class AccountError extends Error { constructor(message: string, public status = 400) { super(message); } }
-const publicSelect = { id: true, login: true, name: true, role: true, disabled: true, mustChangePassword: true, revision: true, createdAt: true, studentProfile: true } as const;
+const publicSelect = { id: true, login: true, name: true, role: true, disabled: true, mustChangePassword: true, revision: true, createdAt: true, collegeId: true,
+  college: { select: { id: true, name: true, code: true, enabled: true } }, studentProfile: { select: profileSelect } } as const;
 export type AccountView = Prisma.UserGetPayload<{ select: typeof publicSelect }>;
 
 export async function adminTransaction<T>(sessionId: string, operation: (tx: Prisma.TransactionClient, actorId: string) => Promise<T>) {
@@ -30,26 +35,36 @@ export async function adminTransaction<T>(sessionId: string, operation: (tx: Pri
     return operation(tx, session.userId);
   });
 }
-export async function listAccounts(sessionId: string, query: string, page: number, filters: { role?: "ADMIN" | "PUBLISHER" | "STUDENT"; disabled?: boolean } = {}) {
+export async function listAccounts(sessionId: string, query: string, page: number, filters: { role?: "ADMIN" | "PUBLISHER" | "STUDENT" | "COLLEGE" | "COUNSELOR"; disabled?: boolean } = {}) {
   const current = await getCurrentSession(sessionId);
   if (!current || current.user.role !== "ADMIN" || current.user.mustChangePassword) throw new AccountError("没有管理权限", 403);
   z.number().int().min(1).max(100000).parse(page);
-  const selected = z.object({ role: z.enum(["ADMIN", "PUBLISHER", "STUDENT"]).optional(), disabled: z.boolean().optional() }).parse(filters);
+  const selected = z.object({ role: z.enum(["ADMIN", "PUBLISHER", "STUDENT", "COLLEGE", "COUNSELOR"]).optional(), disabled: z.boolean().optional() }).parse(filters);
   const where: Prisma.UserWhereInput = { ...selected, ...(query ? { OR: [{ name: { contains: query, mode: "insensitive" } }, { login: { contains: query, mode: "insensitive" } }, { studentProfile: { college: { contains: query, mode: "insensitive" } } }, { studentProfile: { className: { contains: query, mode: "insensitive" } } }] } : {}) };
   const [items, total] = await db.$transaction([db.user.findMany({ where, select: publicSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, skip: (page - 1) * 20 }), db.user.count({ where })]);
   return { items, total, page };
 }
 export async function createAccount(sessionId: string, input: unknown) {
   const data = accountSchema.parse(input);
+  if (data.role === "STUDENT" && !data.classId) throw new AccountError("请选择已配置的班级");
   const password = `Init!${randomBytes(18).toString("base64url")}7a`;
   const passwordHash = await hash(password, 12);
   return adminTransaction(sessionId, async (tx, actorId) => {
-    const user = await tx.user.create({ data: { name: data.name, login: data.login, role: data.role, passwordHash, studentProfile: data.role === "STUDENT" ? { create: { studentNumber: data.login, college: data.college, major: data.major, className: data.className } } : undefined }, select: publicSelect });
-    await tx.auditEvent.create({ data: { actorId, action: "ACCOUNT_CREATED", targetId: user.id, details: { login: user.login, role: user.role, name: user.name, profile: user.studentProfile } } });
+    const schoolClass = data.role === "STUDENT" ? await configuredClass(tx, data.classId!) : null;
+    await validateStaffCollege(tx, data);
+    const user = await tx.user.create({ data: { name: data.name, login: data.login, role: data.role, collegeId: data.collegeId || null, passwordHash, studentProfile: schoolClass ? { create: { studentNumber: data.login, ...classProfile(schoolClass) } } : undefined }, select: publicSelect });
+    if (schoolClass) await recordStudentAffiliation(tx, user.id, schoolClass, actorId, "学生建档");
+    await tx.auditEvent.create({ data: { actorId, action: "ACCOUNT_CREATED", targetId: user.id, details: JSON.parse(JSON.stringify({ login: user.login, role: user.role, name: user.name, profile: user.studentProfile, collegeId: user.collegeId })) } });
     return { user, initialPassword: password };
   });
 }
-const updateSchema = z.object({ revision: z.number().int().nonnegative(), reason: z.string().trim().min(2).max(500), disabled: z.boolean(), account: accountSchema });
+async function validateStaffCollege(tx: Prisma.TransactionClient, account: z.infer<typeof accountSchema>) {
+  if (account.role === "COLLEGE" || account.role === "COUNSELOR") {
+    const college = await tx.college.findUnique({ where: { id: account.collegeId! } });
+    if (!college?.enabled) throw new AccountError("请选择已启用的学院");
+  }
+}
+const updateSchema = z.object({ revision: z.number().int().nonnegative(), reason: z.string().trim().min(2).max(500), disabled: z.boolean(), account: accountSchema }).strict();
 export async function updateAccount(sessionId: string, id: string, input: unknown) {
   const { revision, reason, disabled, account } = updateSchema.parse(input);
   return adminTransaction(sessionId, async (tx, actorId) => {
@@ -58,12 +73,23 @@ export async function updateAccount(sessionId: string, id: string, input: unknow
     if (previous.revision !== revision) throw new AccountError("账号已被修改，请刷新后重试", 409);
     if (id === actorId && (disabled || account.role !== "ADMIN")) throw new AccountError("不能停用自身账号或移除自身管理员权限");
     if (previous.studentProfile && account.login !== previous.login) throw new AccountError("已有学生档案的学号不可更改");
-    const authChanged = previous.role !== account.role || previous.disabled !== disabled;
-    await tx.user.update({ where: { id }, data: { name: account.name, login: account.login, role: account.role, disabled, revision: { increment: 1 }, authVersion: authChanged ? { increment: 1 } : undefined }, select: publicSelect });
-    if (account.role === "STUDENT") await tx.studentProfile.upsert({ where: { userId: id }, create: { userId: id, studentNumber: account.login, college: account.college, major: account.major, className: account.className }, update: { college: account.college, major: account.major, className: account.className } });
+    await validateStaffCollege(tx, account);
+    const classId = account.classId || (previous.role === "STUDENT" ? previous.studentProfile?.classId : null);
+    if (account.role === "STUDENT" && !classId && previous.role !== "STUDENT") throw new AccountError("请选择已配置的班级");
+    const schoolClass = account.role === "STUDENT" && classId ? await configuredClass(tx, classId) : null;
+    const collegeId = account.collegeId || null;
+    if (previous.role === "COUNSELOR" && (account.role !== "COUNSELOR" || previous.collegeId !== collegeId || disabled)) {
+      if (await tx.schoolClass.count({ where: { counselorId: id } })) throw new AccountError("请先交接该辅导员负责的全部班级");
+    }
+    const authChanged = previous.role !== account.role || previous.disabled !== disabled || previous.collegeId !== collegeId;
+    await tx.user.update({ where: { id }, data: { name: account.name, login: account.login, role: account.role, collegeId, disabled, revision: { increment: 1 }, authVersion: authChanged ? { increment: 1 } : undefined }, select: publicSelect });
+    if (schoolClass) {
+      await tx.studentProfile.upsert({ where: { userId: id }, create: { userId: id, studentNumber: account.login, ...classProfile(schoolClass) }, update: classProfile(schoolClass) });
+      if (previous.role !== "STUDENT" || previous.studentProfile?.classId !== schoolClass.id) await recordStudentAffiliation(tx, id, schoolClass, actorId, reason);
+    } else if (previous.role === "STUDENT") await tx.studentAffiliation.updateMany({ where: { studentId: id, endedAt: null }, data: { endedAt: new Date() } });
     if (authChanged) await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     const updated = await tx.user.findUniqueOrThrow({ where: { id }, select: publicSelect });
-    await tx.auditEvent.create({ data: { actorId, action: "ACCOUNT_UPDATED", targetId: id, details: { reason, before: { name: previous.name, role: previous.role, login: previous.login, disabled: previous.disabled, profile: previous.studentProfile }, after: { name: updated.name, role: updated.role, login: updated.login, disabled: updated.disabled, profile: updated.studentProfile } } } });
+    await tx.auditEvent.create({ data: { actorId, action: "ACCOUNT_UPDATED", targetId: id, details: JSON.parse(JSON.stringify({ reason, before: { name: previous.name, role: previous.role, collegeId: previous.collegeId, login: previous.login, disabled: previous.disabled, profile: previous.studentProfile }, after: { name: updated.name, role: updated.role, collegeId: updated.collegeId, login: updated.login, disabled: updated.disabled, profile: updated.studentProfile } })) } });
     return updated;
   });
 }
@@ -83,10 +109,11 @@ export async function resetAccountPassword(sessionId: string, id: string, input:
   });
 }
 export async function readStudentProfile(sessionId: string, userId: string) {
-  const session = await getCurrentSession(sessionId);
-  if (!session || session.user.mustChangePassword) throw new AccountError("请重新登录或完成首次改密", 401);
-  if (session.user.role !== "ADMIN" && (session.user.role !== "STUDENT" || session.userId !== userId)) throw new AccountError("没有查看权限", 403);
-  const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, name: true, login: true, studentProfile: true } });
-  if (!user?.studentProfile) throw new AccountError("学生档案不存在", 404);
-  return user;
+  return scopedTransaction(sessionId, ["ADMIN", "COLLEGE", "COUNSELOR", "STUDENT"], false, async (tx, actor) => {
+    if (actor.role === "STUDENT" && actor.id !== userId) throw new AccountError("没有查看权限", 403);
+    const user = await tx.user.findFirst({ where: { AND: [scopedStudentWhere(actor), { id: userId }] }, select: { id: true, name: true, login: true, revision: true, studentProfile: { select: profileSelect } } });
+    if (!user?.studentProfile) throw new AccountError("学生档案不存在或不在权限范围", 404);
+    const affiliationHistory = await tx.studentAffiliation.findMany({ where: { studentId: userId }, orderBy: [{ startedAt: "desc" }, { id: "desc" }], take: 20 });
+    return { ...user, affiliationHistory };
+  });
 }

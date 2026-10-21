@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const page = Number(url.searchParams.get("page") ?? 1);
   if (!Number.isSafeInteger(page) || page < 1 || page > 100000) return NextResponse.json({ error: "页码无效" }, { status: 400 });
   try {
-    const role = z.enum(["ADMIN", "PUBLISHER", "STUDENT"]).optional().parse(url.searchParams.get("role") || undefined);
+    const role = z.enum(["ADMIN", "PUBLISHER", "STUDENT", "COLLEGE", "COUNSELOR"]).optional().parse(url.searchParams.get("role") || undefined);
     const disabled = z.enum(["true", "false"]).optional().parse(url.searchParams.get("disabled") || undefined);
     return NextResponse.json(await listAccounts(auth.user.sessionId, (url.searchParams.get("q") ?? "").slice(0, 80), page, { role, disabled: disabled === undefined ? undefined : disabled === "true" }), { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return apiError(error); }

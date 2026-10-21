@@ -1,4 +1,5 @@
 "use client";
+import { EvidenceViewer } from "@/components/dashboard/evidence-viewer";
 // Complete users directory plus invoice form, retaining template header, filtering, table and editor panels.
 import { useState } from "react";
 import { Plus } from "lucide-react";
@@ -96,7 +97,13 @@ export function Claims({
 	initialProjects,
 	initialClaims,
 }: {
-	term: { id: string; phase: string; revision: number; scheme: Scheme };
+	term: {
+		id: string;
+		phase: string;
+		disposition?: string;
+		revision: number;
+		scheme: Scheme;
+	};
 	role: "ADMIN" | "STUDENT";
 	page: number;
 	status: string;
@@ -124,28 +131,38 @@ export function Claims({
 	const [dirty, setDirty] = useState(false);
 	const [resubmit, setResubmit] = useState(false);
 	const [correction, setCorrection] = useState<Project | null>(null);
-	const active = term.phase === "ACTIVE";
+	const active =
+		term.phase === "ACTIVE" &&
+		(!term.disposition || term.disposition === "NORMAL");
 	const enabledProjects = (projects.data ?? []).filter(
 		(project) => project.enabled,
 	);
 	const stageNotice =
-		term.phase === "CONFIGURATION"
+		term.disposition && term.disposition !== "NORMAL"
 			? {
-					title: "本周期配置中，尚未开放个人申报",
-					description:
-						"请等待管理员完成评分制度配置并启用周期后，再提交个人申报。",
+					title:
+						term.disposition === "VOID"
+							? "本周期已作废，个人申报只读"
+							: "本周期已归档，个人申报只读",
+					description: "可以查询原有申报与处理记录。",
 				}
-			: term.phase === "CHECKING"
+			: term.phase === "CONFIGURATION"
 				? {
-						title: "本周期核对中，个人申报已关闭",
+						title: "本周期配置中，尚未开放个人申报",
 						description:
-							"请核对已发布的测评结果。如对结果有疑问，请通过结果异议提交问题和证明材料。",
+							"请等待管理员完成评分制度配置并启用周期后，再提交个人申报。",
 					}
-				: {
-						title: "本周期已锁定，个人申报已关闭",
-						description:
-							"当前记录可查询，不能新增或补交申报。如需更正，请联系管理员按更正流程处理。",
-					};
+				: term.phase === "CHECKING"
+					? {
+							title: "本周期核对中，个人申报已关闭",
+							description:
+								"请核对已发布的测评结果。如对结果有疑问，请通过结果异议提交问题和证明材料。",
+						}
+					: {
+							title: "本周期已锁定，个人申报已关闭",
+							description:
+								"当前记录可查询，不能新增或补交申报。如需更正，请联系管理员按更正流程处理。",
+						};
 	function beginSubmission(project: Project | null = null) {
 		if (
 			role !== "STUDENT" ||
@@ -872,19 +889,17 @@ export function Claims({
 								</Link>
 							)}
 							<div className="flex flex-col gap-2">
-								{selected.evidence.map((item, i) => {
+								{selected.evidence.map((item) => {
 									const evidence = item.evidence || item;
-									return (
-										<a
-											key={evidence.id || i}
-											href={`/api/evidence/${evidence.id}`}
-											target="_blank"
-											rel="noreferrer"
-											className="break-all rounded-lg border p-3 text-sm underline"
-										>
-											{evidence.name}
-										</a>
-									);
+									return evidence.id ? (
+										<EvidenceViewer
+											key={evidence.id}
+											evidence={{
+												id: evidence.id,
+												name: evidence.name || "证明材料",
+											}}
+										/>
+									) : null;
 								})}
 							</div>
 							{selected.reviewReason && (

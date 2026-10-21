@@ -60,5 +60,5 @@ export async function pageAppeals(sessionId: string, termId: string, page = 1, s
     const items = await tx.resultAppeal.findMany({ where, include: { publication: { select: publicationSelect }, evidence: { select: { evidence: { select: { id: true, name: true } } } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, skip: (safePage - 1) * 20 });
     const students = await tx.publishedResult.findMany({ where: { publicationId: { in: items.map(i => i.publicationId) }, studentId: { in: items.map(i => i.studentId) } }, select: { studentId: true, publicationId: true, name: true, login: true } });
     return { items: items.map(i => ({ ...i, student: students.find(s => s.studentId === i.studentId && s.publicationId === i.publicationId) ?? null, evidence: i.evidence.map(e => e.evidence) })), total: await tx.resultAppeal.count({ where }), page: safePage };
-  });
+  }, "read");
 }

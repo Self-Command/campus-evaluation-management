@@ -4,27 +4,34 @@ import { createAccount, updateAccount, resetAccountPassword, readStudentProfile,
 import { pageStudents, updateStudentProfile } from "@/server/students";
 import { getCurrentSession } from "@/server/auth";
 import { compare } from "bcryptjs";
+import { organizationFixture } from "./organization-fixture";
 if (!new URL(process.env.DATABASE_URL!).pathname.startsWith("/campus_test_")) throw new Error("必须使用临时测试数据库");
 let adminSession: string;
 let adminId: string;
-const student = { name: "档案学生", login: "00001234", role: "STUDENT", college: "工程学院", major: "计算机", className: "计科01班" };
+const student = { name: "档案学生", login: "00001234", role: "STUDENT", classId: "" };
+let firstOrg: Awaited<ReturnType<typeof organizationFixture>>, nextOrg: Awaited<ReturnType<typeof organizationFixture>>;
 beforeAll(async () => {
   await db.user.deleteMany(); await db.auditEvent.deleteMany();
   const admin = await db.user.create({ data: { login: "accounts-admin", name: "账号管理员", role: "ADMIN", passwordHash: "not-used", mustChangePassword: false } });
   adminId = admin.id;
   adminSession = (await db.authSession.create({ data: { userId: admin.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } })).id;
+  firstOrg = await organizationFixture("accounts-A", { college: "工程学院", major: "计算机", className: "计科01班" });
+  nextOrg = await organizationFixture("accounts-B", { college: "信息学院", major: "软件工程", className: "软件01班" });
+  student.classId = firstOrg.schoolClass.id;
 });
 afterAll(async () => db.$disconnect());
-test("三角色建号，学生保留前导零，重复及缺失字段不产生半份档案", async () => {
+test("四类身份建号只能选配置归属，学生保留前导零且拒绝旧发布者和自由文本", async () => {
   const result = await createAccount(adminSession, student);
   expect(result.user.studentProfile?.studentNumber).toBe("00001234");
   expect(result.user.mustChangePassword).toBe(true);
   const stored = await db.user.findUniqueOrThrow({ where: { id: result.user.id } });
   expect(await compare(result.initialPassword, stored.passwordHash)).toBe(true);
   await expect(createAccount(adminSession, student)).rejects.toThrow();
-  await expect(createAccount(adminSession, { ...student, login: "invalid-student", college: "" })).rejects.toThrow();
+  await expect(createAccount(adminSession, { ...student, login: "invalid-student", classId: "" })).rejects.toThrow();
+  await expect(createAccount(adminSession, { ...student, login: "forged-text", college: "自由文本" })).rejects.toThrow();
+  await expect(createAccount(adminSession, { login: "old-publisher", name: "旧角色", role: "PUBLISHER" })).rejects.toThrow();
   expect(await db.studentProfile.count({ where: { studentNumber: "00001234" } })).toBe(1);
-  for (const role of ["ADMIN", "PUBLISHER"]) expect((await createAccount(adminSession, { ...student, login: `created-${role}`, role })).user.role).toBe(role);
+  for (const role of ["ADMIN", "COLLEGE", "COUNSELOR"]) expect((await createAccount(adminSession, { name: student.name, login: `created-${role}`, role, ...(role === "ADMIN" ? {} : { collegeId: firstOrg.college.id }) })).user.role).toBe(role);
   const audit = await db.auditEvent.findFirstOrThrow({ where: { action: "ACCOUNT_CREATED", targetId: result.user.id } });
   expect(JSON.stringify(audit)).not.toContain(result.initialPassword);
 });
@@ -32,7 +39,7 @@ test("学生只能读本人；发布者和学生不能建号", async () => {
   const user = await db.user.findUniqueOrThrow({ where: { login: student.login } });
   await db.user.update({ where: { id: user.id }, data: { mustChangePassword: false } });
   const session = await db.authSession.create({ data: { userId: user.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } });
-  expect((await readStudentProfile(session.id, user.id)).studentProfile?.college).toBe(student.college);
+  expect((await readStudentProfile(session.id, user.id)).studentProfile?.college).toBe("工程学院");
   await expect(readStudentProfile(session.id, adminId)).rejects.toThrow("没有查看权限");
   await expect(createAccount(session.id, { ...student, login: "unauthorized" })).rejects.toThrow("没有管理权限");
 });
@@ -40,15 +47,16 @@ test("编辑档案有修订冲突保护，角色和停用变化撤销会话", as
   const target = await createAccount(adminSession, { ...student, login: "edit-student" });
   await db.user.update({ where: { id: target.user.id }, data: { mustChangePassword: false } });
   const session = await db.authSession.create({ data: { userId: target.user.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } });
-  const edited = await updateAccount(adminSession, target.user.id, { revision: 0, reason: "更正学院", disabled: false, account: { ...student, login: "edit-student", college: "信息学院" } });
+  const edited = await updateAccount(adminSession, target.user.id, { revision: 0, reason: "更正学院", disabled: false, account: { ...student, login: "edit-student", classId: nextOrg.schoolClass.id } });
   expect(edited.studentProfile?.college).toBe("信息学院");
   await expect(updateAccount(adminSession, target.user.id, { revision: 0, reason: "过期修改", disabled: true, account: { ...student, login: "edit-student" } })).rejects.toThrow("账号已被修改");
-  await updateAccount(adminSession, target.user.id, { revision: 1, reason: "调整职责", disabled: false, account: { ...student, login: "edit-student", role: "PUBLISHER" } });
+  const staff = { name: student.name, login: "edit-student", role: "COLLEGE", collegeId: nextOrg.college.id };
+  await updateAccount(adminSession, target.user.id, { revision: 1, reason: "调整职责", disabled: false, account: staff });
   expect(await getCurrentSession(session.id)).toBeNull();
   const next = await db.authSession.create({ data: { userId: target.user.id, version: 1, expiresAt: new Date(Date.now() + 600_000) } });
-  await updateAccount(adminSession, target.user.id, { revision: 2, reason: "停用账号", disabled: true, account: { ...student, login: "edit-student", role: "PUBLISHER" } });
+  await updateAccount(adminSession, target.user.id, { revision: 2, reason: "停用账号", disabled: true, account: staff });
   expect(await getCurrentSession(next.id)).toBeNull();
-  await expect(updateAccount(adminSession, adminId, { revision: 0, reason: "停用自己", disabled: true, account: { ...student, login: "accounts-admin", role: "ADMIN" } })).rejects.toThrow("不能停用自身");
+  await expect(updateAccount(adminSession, adminId, { revision: 0, reason: "停用自己", disabled: true, account: { name: "账号管理员", login: "accounts-admin", role: "ADMIN" } })).rejects.toThrow("不能停用自身");
 });
 test("重置密码撤销会话、强制改密，日志不保存密码", async () => {
   const target = await createAccount(adminSession, { ...student, login: "reset-student" });
@@ -70,16 +78,16 @@ test("学生档案独立分页筛选和理由更正，不允许借档案入口�
   const second = await pageStudents(adminSession, { q: "directory-", college: "档案学院", page: 2 });
   expect(second.items).toHaveLength(1); expect(second.items[0].login).toBe("directory-020");
   expect(first.scopeOptions.colleges).toContain("档案学院");
-  const input = { revision: 0, name: "更正学生姓名", college: "更正学院", major: "更正专业", className: "更正班级", reason: "依据学籍档案更正" };
+  const input = { revision: 0, name: "更正学生姓名", classId: nextOrg.schoolClass.id, reason: "依据学籍档案更正" };
   await expect(updateStudentProfile(adminSession, fixtures[0].id, { ...input, role: "ADMIN" })).rejects.toThrow();
   const session = await db.authSession.create({ data: { userId: fixtures[0].id, version: 0, expiresAt: new Date(Date.now() + 600_000) } });
   await expect(pageStudents(session.id, {})).rejects.toThrow("管理权限");
   await expect(updateStudentProfile(session.id, fixtures[1].id, input)).rejects.toThrow("管理权限");
   const updated = await updateStudentProfile(adminSession, fixtures[0].id, input);
-  expect(updated.studentProfile?.college).toBe("更正学院"); expect(updated.name).toBe("更正学生姓名");
+  expect(updated.studentProfile?.college).toBe("信息学院"); expect(updated.studentProfile?.schoolClass?.counselor?.id).toBe(nextOrg.counselor.id); expect(updated.name).toBe("更正学生姓名");
   await expect(updateStudentProfile(adminSession, fixtures[0].id, input)).rejects.toThrow("已变化");
   const account = await db.user.findUniqueOrThrow({ where: { id: fixtures[0].id } });
   expect(account.role).toBe("STUDENT"); expect(account.login).toBe(fixtures[0].login); expect(account.passwordHash).toBe(fixtures[0].passwordHash);
   expect((await listAccounts(adminSession, "directory-", 1, { role: "STUDENT", disabled: true })).items.map(row => row.id)).toEqual([fixtures[20].id]);
-  expect((await pageStudents(adminSession, { college: "更正学院" })).items[0].id).toBe(fixtures[0].id);
+  expect((await pageStudents(adminSession, { q: "directory-", college: "信息学院" })).items[0].id).toBe(fixtures[0].id);
 });

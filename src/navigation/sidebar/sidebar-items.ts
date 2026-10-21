@@ -13,6 +13,7 @@ import {
 	MessageSquareWarning,
 	Trophy,
 	Send,
+	Building2,
 	type LucideIcon,
 } from "lucide-react";
 import type { AppRole } from "@/lib/business-labels";
@@ -47,6 +48,55 @@ export interface NavGroup {
 	items: NavMainItem[];
 }
 export function navigation(role: AppRole): NavGroup[] {
+	if (role === "COLLEGE" || role === "COUNSELOR")
+		return [
+			{
+				id: 1,
+				label: "总览",
+				items: [
+					{
+						id: "home",
+						title: "学生名录",
+						url: "/students",
+						icon: GraduationCap,
+					},
+					{
+						id: "terms",
+						title: "测评周期与制度",
+						url: "/terms",
+						icon: CalendarDays,
+					},
+				],
+			},
+			...(role === "COLLEGE"
+				? [
+						{
+							id: 3,
+							label: "组织管理",
+							items: [
+								{
+									id: "organizations",
+									title: "组织目录",
+									url: "/organizations",
+									icon: Building2,
+								},
+							],
+						},
+					]
+				: []),
+			{
+				id: 4,
+				label: "个人",
+				items: [
+					{
+						id: "account",
+						title: "个人资料与安全",
+						url: "/account",
+						icon: ShieldCheck,
+					},
+				],
+			},
+		];
 	return [
 		{
 			id: 1,
@@ -120,6 +170,12 @@ export function navigation(role: AppRole): NavGroup[] {
 						id: 3,
 						label: "数据与账号",
 						items: [
+							{
+								id: "organizations",
+								title: "组织目录",
+								url: "/organizations",
+								icon: Building2,
+							},
 							{
 								id: "grades",
 								title: "成绩录入",

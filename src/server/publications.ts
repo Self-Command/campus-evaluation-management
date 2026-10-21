@@ -25,7 +25,7 @@ async function candidate(tx: Prisma.TransactionClient, term: Term) {
   if (studentCount > 2000) throw new AccountError("当前有效学生超过单周期2000人的处理上限，无法完整核对名录变化；请联系管理员调整处理容量，本次未发布", 409);
   const currentStudents = await tx.user.findMany({ where, select: resultStudentSelect, orderBy: { id: "asc" }, take: 2001 });
   const frozen = term.cohortPublicationId ? await tx.publishedResult.findMany({ where: { publicationId: term.cohortPublicationId }, orderBy: { studentId: "asc" } }) : [];
-  const students = term.cohortPolicy === "PREVIOUS" && term.cohortPublicationId ? frozen.map(student => ({ id: student.studentId, login: student.login, name: student.name, studentProfile: { userId: student.studentId, studentNumber: student.login, college: student.college, major: student.major, className: student.className } })) : currentStudents;
+  const students = term.cohortPolicy === "PREVIOUS" && term.cohortPublicationId ? frozen.map(student => ({ id: student.studentId, login: student.login, name: student.name, studentProfile: { userId: student.studentId, studentNumber: student.login, college: student.college, major: student.major, className: student.className, classId: null } })) : currentStudents;
   if (students.length > 2000) throw new AccountError("本次参评名单超过2000人的处理上限，本次未发布", 409);
   const records = await collectStudentResults(tx, term, students);
   const [recognitionsPending, recognitionsNeedsChanges, claimsPending, claimsNeedsChanges] = await Promise.all([
@@ -80,8 +80,8 @@ export async function publicationHistory(sessionId: string, termId: string) {
   return termTransaction(sessionId, termId, ["ADMIN"], [...phases], async (tx, term) => {
     const publications = await tx.resultPublication.findMany({ where: { termId }, select: publicationSelect, orderBy: { sequence: "desc" } });
     const history = await Promise.all(publications.map(async publication => ({ ...publication, effectiveCheckingEndsAt: await effectiveCheckingDeadline(tx, publication), extensions: await tx.publicationExtension.findMany({ where: { publicationId: publication.id }, select: { id: true, actorId: true, checkingEndsAt: true, reason: true, createdAt: true }, orderBy: { createdAt: "desc" } }) })));
-    return { term: { id: term.id, name: term.name, phase: term.phase, revision: term.revision, inputRevision: term.inputRevision, cohortPolicy: term.cohortPolicy, cohortPublicationId: term.cohortPublicationId }, current: history.find(p => p.id === term.publishedResultSetId) ?? null, history };
-  });
+    return { term: { id: term.id, name: term.name, phase: term.phase, disposition: term.disposition, revision: term.revision, inputRevision: term.inputRevision, cohortPolicy: term.cohortPolicy, cohortPublicationId: term.cohortPublicationId }, current: history.find(p => p.id === term.publishedResultSetId) ?? null, history };
+  }, "read");
 }
 export async function confirmResult(sessionId: string, termId: string, publicationId: string, resultHash: string) {
   z.string().regex(/^[a-f0-9]{64}$/).parse(resultHash);
@@ -131,7 +131,7 @@ export async function previewSettlement(sessionId: string, termId: string) {
     const state = await settlementState(tx, term), expiresAt = new Date(Date.now() + 900_000).toISOString();
     const encoded = Buffer.from(JSON.stringify({ actorId, termId, stateHash: digest(state), expiresAt })).toString("base64url");
     return { ...state, token: `${encoded}.${signature(encoded)}`, expiresAt };
-  });
+  }, "read");
 }
 export async function lockSettlement(sessionId: string, termId: string, input: unknown) {
   const data = z.object({ revision: revisionSchema, token: z.string().min(10).max(4000), requestId: z.uuid() }).parse(input);
@@ -173,7 +173,7 @@ export async function reopenTerm(sessionId: string, termId: string, input: unkno
   });
 }
 export async function listSnapshots(sessionId: string, termId: string) {
-  return termTransaction(sessionId, termId, ["ADMIN"], [...phases], (tx) => tx.settlementSnapshot.findMany({ where: { termId }, select: { id: true, termId: true, publicationId: true, actorId: true, sha256: true, createdAt: true }, orderBy: { createdAt: "desc" } }));
+  return termTransaction(sessionId, termId, ["ADMIN"], [...phases], (tx) => tx.settlementSnapshot.findMany({ where: { termId }, select: { id: true, termId: true, publicationId: true, actorId: true, sha256: true, createdAt: true }, orderBy: { createdAt: "desc" } }), "read");
 }
 export async function extendChecking(sessionId: string, termId: string, input: unknown) {
   const data = z.object({ revision: revisionSchema, publicationId: z.string(), checkingEndsAt: z.iso.datetime(), reason: z.string().trim().min(2).max(1000) }).parse(input);

@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { db } from "@/server/db";
 import { AccountError } from "@/server/accounts";
+import { profileSelect } from "@/server/organizations";
 
-const select = { id: true, login: true, name: true, role: true, mustChangePassword: true, revision: true, createdAt: true, studentProfile: true } as const;
+const select = { id: true, login: true, name: true, role: true, collegeId: true, college: { select: { id: true, code: true, name: true, enabled: true } }, mustChangePassword: true, revision: true, createdAt: true, studentProfile: { select: profileSelect } } as const;
 export async function selfAccount(sessionId: string, input?: unknown) {
   const data = input === undefined ? null : z.object({ name: z.string().trim().min(2).max(80), revision: z.number().int().nonnegative() }).strict().parse(input);
   return db.$transaction(async tx => {

@@ -23,7 +23,7 @@ export async function getRankings(sessionId: string, termId: string, input: unkn
     const items = (exporting ? rows : rows.slice((filters.page - 1) * 20, filters.page * 20)).map(r => ({ ...r, total: r.total.toFixed(2) }));
     if (exporting) await tx.auditEvent.create({ data: { actorId, action: "RANKINGS_EXPORTED", targetId: publicationId, details: { termId, count: rows.length, scope: { college: filters.college ?? null, major: filters.major ?? null, className: filters.className ?? null }, hash: digest(items) } } });
     return { items, total: rows.length, page: filters.page, publication, scopeOptions: { colleges: [...new Set(all.map(r => r.college))].sort(), majors: [...new Set(all.filter(r => !filters.college || r.college === filters.college).map(r => r.major))].sort(), classes: [...new Set(all.filter(r => (!filters.college || r.college === filters.college) && (!filters.major || r.major === filters.major)).map(r => r.className))].sort() } };
-  });
+  }, "read");
 }
 export function csvText(value: string) { const safe = /^[\s\uFEFF]*[=+\-@]/.test(value) || /^[\t\r\n]/.test(value) ? "'" + value : value; return '"' + safe.replaceAll('"', '""') + '"'; }
 export async function rankingCsv(sessionId: string, termId: string, input: unknown) {

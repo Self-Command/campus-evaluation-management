@@ -54,6 +54,7 @@ export default async function ImportsPage({
 			{kind !== "accounts" &&
 			(!term ||
 				term.phase !== "ACTIVE" ||
+				term.disposition !== "NORMAL" ||
 				(kind === "participation" && !activity?.confirmed)) ? (
 				<NoData
 					title="导入上下文无效"

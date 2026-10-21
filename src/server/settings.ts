@@ -4,9 +4,9 @@ import { db } from "@/server/db";
 import { adminTransaction, AccountError } from "@/server/accounts";
 import { getCurrentSession } from "@/server/auth";
 import { jsonValue } from "@/server/claims";
+import { settingsSchema, defaultSettings } from "@/lib/settings-schema";
 
-export const settingsSchema = z.object({ siteName: z.string().trim().min(1).max(40), siteDescription: z.string().trim().min(1).max(160), pageTitle: z.string().trim().min(1).max(80), themePreset: z.enum(["default", "violet", "blue"]), logoAssetId: z.string().max(100).nullable(), faviconAssetId: z.string().max(100).nullable() }).strict();
-export const defaultSettings = { siteName: "序衡", siteDescription: "高校综合测评管理", pageTitle: "高校综合测评管理", themePreset: "default" as const, logoAssetId: null, faviconAssetId: null };
+export { settingsSchema, defaultSettings } from "@/lib/settings-schema";
 export async function publicSettings() {
   const saved = await db.siteSettings.findUnique({ where: { id: "site" } });
   return { ...(saved ? settingsSchema.parse(saved.content) : defaultSettings), revision: saved?.revision ?? 0, updatedAt: saved?.updatedAt ?? null };
@@ -26,6 +26,8 @@ export async function saveSettings(sessionId: string, input: unknown) {
     const assetIds = [...new Set([content.logoAssetId, content.faviconAssetId].filter((i): i is string => !!i))];
     if (await tx.brandAsset.count({ where: { id: { in: assetIds } } }) !== assetIds.length) throw new AccountError("品牌图片不存在，请重新上传");
     const saved = await tx.siteSettings.upsert({ where: { id: "site" }, create: { content: jsonValue(content), revision: 1 }, update: { content: jsonValue(content), revision: { increment: 1 } } });
+    const oldPolicy = previous ? settingsSchema.parse(previous.content) : defaultSettings;
+    if (oldPolicy.loginFailureLimitEnabled !== content.loginFailureLimitEnabled || oldPolicy.loginFailureMaxAttempts !== content.loginFailureMaxAttempts || oldPolicy.loginFailureLockMinutes !== content.loginFailureLockMinutes) await tx.loginFailureState.deleteMany();
     await tx.auditEvent.create({ data: { actorId, action: "SETTINGS_CHANGED", targetId: "site", details: { reason, before: previous?.content ?? defaultSettings, after: content, revision: saved.revision } } });
     return { ...content, revision: saved.revision, updatedAt: saved.updatedAt };
   });

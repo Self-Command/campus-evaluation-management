@@ -29,6 +29,7 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
+import { EvidenceViewer } from "@/components/dashboard/evidence-viewer";
 import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
 import { dateText, phaseLabels } from "@/lib/business-labels";
 import { InputHistory } from "@/components/dashboard/input-history";
@@ -72,8 +73,15 @@ type Result = {
 		name: string;
 		points: string;
 		approvedSourceCount?: number;
+		sources?: { id: string; evidence: { evidenceId: string }[] }[];
 	}[];
-	claims?: { id: string; name: string; points: string; factKey?: string }[];
+	claims?: {
+		id: string;
+		name: string;
+		points: string;
+		factKey?: string;
+		evidenceIds?: string[];
+	}[];
 	grades?: {
 		id: string;
 		nodeId: string;
@@ -427,6 +435,20 @@ export function ResultView({
 												<span className="text-sm tabular-nums">
 													{item.points} 分 · 计分一次
 												</span>
+												<div className="flex w-full flex-col gap-2">
+													{[
+														...new Set(
+															(item.sources || []).flatMap((source) =>
+																source.evidence.map((file) => file.evidenceId),
+															),
+														),
+													].map((id, index) => (
+														<EvidenceViewer
+															key={id}
+															evidence={{ id, name: `活动证明${index + 1}` }}
+														/>
+													))}
+												</div>
 											</div>
 										))
 									) : (
@@ -440,13 +462,21 @@ export function ResultView({
 										data.claims.map((item) => (
 											<div
 												key={item.id}
-												className="flex justify-between gap-3 text-sm"
+												className="flex flex-wrap justify-between gap-3 text-sm"
 											>
 												<span>
 													{item.name}
 													{item.factKey ? ` · ${item.factKey}` : ""}
 												</span>
 												<span>{item.points} 分</span>
+												<div className="flex w-full flex-col gap-2">
+													{(item.evidenceIds || []).map((id, index) => (
+														<EvidenceViewer
+															key={id}
+															evidence={{ id, name: `申报证明${index + 1}` }}
+														/>
+													))}
+												</div>
 											</div>
 										))
 									) : (
@@ -490,7 +520,7 @@ export function ResultView({
 												key={item.id}
 												className="flex flex-col gap-1 border-b pb-3"
 											>
-												<div className="flex justify-between gap-3 text-sm">
+												<div className="flex flex-wrap justify-between gap-3 text-sm">
 													<span>{item.name}</span>
 													<span>
 														{item.amount} × {item.coefficient}
