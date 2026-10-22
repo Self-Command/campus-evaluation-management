@@ -53,3 +53,18 @@ test("历史配色值不会让全站读取失败，按默认主题回退", async
   expect(settings.themePreset).toBe("default");
   expect(settings.revision).toBe(7);
 });
+
+test("可保存的主题值全覆盖，未知主题被拒绝", async () => {
+  const themes = ["default", "brutalist", "soft-pop", "tangerine", "vercel", "claude", "t3-chat", "supabase", "mono"] as const;
+  let revision = (await publicSettings()).revision;
+  for (const themePreset of themes) {
+    const saved = await saveSettings(sessionId, { ...defaultSettings, themePreset, revision, reason: `主题切换 ${themePreset}` });
+    expect(saved.themePreset).toBe(themePreset);
+    revision = saved.revision;
+    expect((await publicSettings()).themePreset).toBe(themePreset);
+  }
+  await expect(
+    saveSettings(sessionId, { ...defaultSettings, themePreset: "not-a-theme", revision, reason: "非法主题" }),
+  ).rejects.toThrow();
+  expect((await publicSettings()).themePreset).toBe("mono");
+});

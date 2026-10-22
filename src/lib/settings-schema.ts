@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // The saved value is a complete visual theme (see src/styles/presets/*.css).
-export const themePresetValues = ["default", "brutalist", "soft-pop", "tangerine", "vercel", "claude", "t3-chat"] as const;
+export const themePresetValues = ["default", "brutalist", "soft-pop", "tangerine", "vercel", "claude", "t3-chat", "supabase", "mono"] as const;
 export const themePresetSchema = z.enum(themePresetValues);
 
 export const settingsSchema = z.object({
