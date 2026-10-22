@@ -377,13 +377,12 @@ export function ResultView({
 							>
 								我的异议
 							</Link>
-							<Link
+							<a
 								href={`/api/grades/export?${new URLSearchParams({ termId, studentId: data.student.id })}`}
 								className={buttonVariants({ variant: "outline" })}
-								prefetch={false}
 							>
 								导出成绩单
-							</Link>
+							</a>
 						</div>
 					</div>
 					{!data.result.complete && (

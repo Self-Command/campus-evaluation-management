@@ -48,13 +48,12 @@ export default async function Page({
 								导入成绩
 							</Link>
 							{user.role === "ADMIN" && (
-								<Link
+								<a
 									href={`/api/grades/export?termId=${term.id}&scope=school`}
 									className={buttonVariants({ variant: "outline" })}
-									prefetch={false}
 								>
 									导出全校成绩明细表
-								</Link>
+								</a>
 							)}
 						</>
 					) : undefined
