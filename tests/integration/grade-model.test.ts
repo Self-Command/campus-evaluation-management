@@ -27,17 +27,17 @@ test("生成的公式工作簿含输入、固定引用与派生公式", () => {
   expect(score.columns[0].header).toContain("评分方案第 3 版");
   // 第 1 行是总分，第 2 行是学业成绩（叶子）
   const grade = score.rows[2];
+  const formula = (cell: unknown) => (cell as { formula: string }).formula;
   expect(grade[2]).toBe(88);
-  expect(JSON.stringify(grade[3])).toContain('IF(C3="","",C3)');
-  expect(JSON.stringify(grade[4])).toContain("MIN(D3,B3)");
-  expect(JSON.stringify(grade[6])).toContain("F3");
-  expect(JSON.stringify(grade[7])).toContain("MAX(G3,E3)");
-  // 总分只累加子项计入分（H3、H4）
-  expect(JSON.stringify(score.rows[1][3])).toContain("SUM(H3,H4)");
+  expect(formula(grade[3])).toContain('IF(C3="","",C3)');
+  expect(formula(grade[4])).toContain("MIN(D3,B3)");
+  expect(formula(grade[6])).toContain("F3");
+  expect(formula(grade[7])).toContain("MAX(G3,E3)");
+  expect(formula(score.rows[1][3])).toContain("SUM(H3,H4)");
 
   expect(params.rows).toHaveLength(5); // 表头 + 三个模块 + 一条扣分项目
   expect(params.rows[1][5]).toBe(0); // 总分无扣分
-  expect(JSON.stringify(params.rows[2][5])).toContain("SUM(F5)");
+  expect(formula(params.rows[2][5])).toContain("SUM(F5)");
   expect(params.rows[3][5]).toBe(0);
   expect(params.rows[4][5]).toBe(2); // 扣分项目金额是输入
   expect(params.rows[4][6]).toBe(2); // 系数是输入
