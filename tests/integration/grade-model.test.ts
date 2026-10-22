@@ -35,13 +35,13 @@ test("生成的公式工作簿含输入、固定引用与派生公式", () => {
   expect(formula(grade[7])).toContain("MAX(G3,E3)");
   expect(formula(score.rows[1][3])).toContain("SUM(H3,H4)");
 
-  expect(params.rows).toHaveLength(5); // 表头 + 三个模块 + 一条扣分项目
-  expect(params.rows[1][5]).toBe(0); // 总分无扣分
-  expect(formula(params.rows[2][5])).toContain("SUM(F5)");
-  expect(params.rows[3][5]).toBe(0);
-  expect(params.rows[4][5]).toBe(2); // 扣分项目金额是输入
-  expect(params.rows[4][6]).toBe(2); // 系数是输入
-  expect(params.rows[2][6]).toBe(0.7); // 占上级权重
+  expect(params.rows).toHaveLength(4); // 三个模块 + 一条扣分项目（表头在 columns 中）
+  expect(params.rows[0][5]).toBe(0); // 总分无扣分
+  expect(formula(params.rows[1][5])).toContain("SUM(F5)");
+  expect(params.rows[2][5]).toBe(0);
+  expect(params.rows[3][5]).toBe(2); // 扣分项目金额是输入
+  expect(params.rows[3][6]).toBe(2); // 系数是输入
+  expect(params.rows[1][6]).toBe(0.7); // 占上级权重
 
   expect(buildWorkbook(score).subarray(0, 2).toString()).toBe("PK");
 });
