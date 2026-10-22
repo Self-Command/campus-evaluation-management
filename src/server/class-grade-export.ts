@@ -14,15 +14,16 @@ import { validateScheme } from "@/lib/scoring/validate";
 const allPhases = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"] as const;
 
 export async function exportClassGradeWorkbook(sessionId: string, termId: string, input: unknown) {
-  const { classId } = z.object({ classId: z.string().min(1).max(100) }).parse(input);
+  const { classId } = z.object({ classId: z.string().min(1).max(100).optional() }).parse(input);
   return termTransaction(sessionId, termId, ["ADMIN", "COLLEGE", "COUNSELOR"], [...allPhases], async (tx, term, actorId) => {
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, select: { id: true, role: true, collegeId: true } });
-    const where: Prisma.UserWhereInput = { AND: [scopedStudentWhere(actor), { studentProfile: { is: { classId } } }] };
+    if (!classId && actor.role !== "ADMIN") throw new AccountError("请指定要导出的班级", 400);
+    const where: Prisma.UserWhereInput = { AND: [scopedStudentWhere(actor), ...(classId ? [{ studentProfile: { is: { classId } } }] : [])] };
     const students = await tx.user.findMany({
       where,
       select: { id: true, login: true, name: true, studentProfile: { select: { studentNumber: true, college: true, major: true, className: true } } },
       orderBy: [{ login: "asc" }, { id: "asc" }],
-      take: 500,
+      take: classId ? 500 : 3000,
     });
     if (!students.length) throw new AccountError("该班级没有可导出的学生", 404);
     const { nodes } = validateScheme(term.scheme);
@@ -67,18 +68,20 @@ export async function exportClassGradeWorkbook(sessionId: string, termId: string
       };
     });
 
-    const className = students[0].studentProfile
-      ? `${students[0].studentProfile.college}${students[0].studentProfile.major}${students[0].studentProfile.className}`
-      : "班级";
+    const scopeLabel = classId
+      ? students[0].studentProfile
+        ? `${students[0].studentProfile.college}${students[0].studentProfile.major}${students[0].studentProfile.className}`
+        : "班级"
+      : "全校";
     const sheet = buildClassSheet({
-      title: `${className}综合素质测评成绩明细表`,
+      title: `${scopeLabel}综合素质测评成绩明细表`,
       batchLabel: term.publishedResultSetId ? `${term.name} · 已发布` : `${term.name} · 当前录入进度`,
       scheme: term.scheme as never,
       students: rows,
     });
     const buffer = buildMultiSheetWorkbook([sheet]);
     const safe = (value: string) => value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
-    const fileName = `成绩明细表_${safe(className)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fileName = `成绩明细表_${safe(scopeLabel)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     return { buffer, fileName, count: rows.length };
   }, "read");
 }

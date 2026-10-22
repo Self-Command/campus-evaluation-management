@@ -14,8 +14,9 @@ export async function GET(request: Request) {
     const query = new URL(request.url).searchParams;
     const termId = z.string().min(1).max(100).parse(query.get("termId"));
     const classId = query.get("classId");
-    if (classId) {
-      const { buffer, fileName } = await exportClassGradeWorkbook(auth.user.sessionId, termId, { classId });
+    const scope = query.get("scope");
+    if (classId || scope === "school") {
+      const { buffer, fileName } = await exportClassGradeWorkbook(auth.user.sessionId, termId, classId ? { classId } : {});
       return new Response(new Uint8Array(buffer), {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

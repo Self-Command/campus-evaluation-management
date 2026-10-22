@@ -40,12 +40,23 @@ export default async function Page({
 				description={text.description}
 				action={
 					term && (user.role === "ADMIN" || user.role === "COUNSELOR") ? (
-						<Link
-							href={`/imports?kind=grades&termId=${term.id}`}
-							className={buttonVariants({ variant: "outline" })}
-						>
-							导入成绩
-						</Link>
+						<>
+							<Link
+								href={`/imports?kind=grades&termId=${term.id}`}
+								className={buttonVariants({ variant: "outline" })}
+							>
+								导入成绩
+							</Link>
+							{user.role === "ADMIN" && (
+								<Link
+									href={`/api/grades/export?termId=${term.id}&scope=school`}
+									className={buttonVariants({ variant: "outline" })}
+									prefetch={false}
+								>
+									导出全校成绩明细表
+								</Link>
+							)}
+						</>
 					) : undefined
 				}
 			/>
