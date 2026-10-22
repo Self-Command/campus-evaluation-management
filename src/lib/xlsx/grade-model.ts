@@ -73,8 +73,12 @@ export function buildGradeSheets(input: GradeSheetsInput): { score: SheetSpec; p
       ? { formula: `IF(${S.deduction}${r}="","",MAX(${S.deduction}${r},${P.floor}${p}))` }
       : { formula: `${S.deduction}${r}` };
 
+    const hints: string[] = [];
+    if (node.parentId && nodes.get(node.parentId)?.kind === "WEIGHTED") hints.push(`占 ${Number(node.weight) * 100}%`);
+    if (node.cap !== null) hints.push(`不超过 ${node.cap} 分`);
+    if (node.normalize) hints.push(`${node.rawMaximum} 分折算为 ${node.targetMaximum} 分`);
     scoreRows.push([
-      `${"    ".repeat(row.depth)}${node.name}`,
+      `${"    ".repeat(row.depth)}${node.name}${hints.length ? `（${hints.join("，")}）` : ""}`,
       node.kind === "GRADE" ? "成绩输入" : node.kind === "ACTIVITY" ? "活动得分" : node.kind === "WEIGHTED" ? "比例汇总" : "汇总",
       leaf ? number(input.values[node.id]) : null,
       subtotal,
@@ -118,21 +122,21 @@ export function buildGradeSheets(input: GradeSheetsInput): { score: SheetSpec; p
         { header: `${input.student.name}（${input.student.login}）· ${input.student.college} ${input.student.major} ${input.student.className}`, width: 60 },
       ],
       rows: [
-        ["模块", "计分方式", "输入分", "小计", "封顶后", "折算后", "扣分后", "计入分"],
+        ["项目", "计分方式", "实际分", "合计", "按规定上限", "折算后", "扣分后", "计入分"],
         ...scoreRows,
       ],
     },
     params: {
-      name: "参数",
+      name: "评分规则",
       freezeRows: 1,
       columns: [
-        { header: "模块 / 扣分项目", width: 28 },
-        { header: "封顶", width: 10 },
-        { header: "原始满分", width: 12 },
-        { header: "目标满分", width: 12 },
-        { header: "最低计入分", width: 12 },
-        { header: "扣分合计 / 扣分值", width: 16 },
-        { header: "占上级权重 / 系数", width: 16 },
+        { header: "项目", width: 28 },
+        { header: "单项上限", width: 10 },
+        { header: "原满分", width: 12 },
+        { header: "折算满分", width: 12 },
+        { header: "最低分", width: 12 },
+        { header: "扣分", width: 16 },
+        { header: "占比 / 系数", width: 16 },
       ],
       rows: paramRows,
     },
