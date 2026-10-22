@@ -41,7 +41,7 @@ test("生成的公式工作簿含输入、固定引用与派生公式", () => {
   expect(params.rows[2][5]).toBe(0);
   expect(params.rows[3][5]).toBe(2); // 扣分项目金额是输入
   expect(params.rows[3][6]).toBe(2); // 系数是输入
-  expect(params.rows[1][6]).toBe(0.7); // 占上级权重
+  expect(params.rows[1][6]).toBeNull(); // 上级是汇总而不是比例，权重不参与计算
 
   expect(buildWorkbook(score).subarray(0, 2).toString()).toBe("PK");
 });
