@@ -4,7 +4,7 @@ import { AccountError } from "@/server/account-error";
 import { termTransaction } from "@/server/terms";
 import { scopedStudentWhere } from "@/server/access-scope";
 import { buildGradeSheets } from "@/lib/xlsx/grade-model";
-import { buildWorkbook } from "@/lib/xlsx/workbook";
+import { buildMultiSheetWorkbook } from "@/lib/xlsx/workbook";
 import { validateScheme } from "@/lib/scoring/validate";
 
 // Authorized single-student grade workbook. Scope is resolved from the stored class /
@@ -63,7 +63,7 @@ export async function exportStudentGradeWorkbook(sessionId: string, termId: stri
       values,
       deductions: deductionValues,
     });
-    const buffer = buildWorkbook(sheets.score);
+    const buffer = buildMultiSheetWorkbook([sheets.score, sheets.params]);
     const safe = (value: string) => value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
     const fileName = `成绩_${safe(term.name)}_${safe(student.login)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     return { buffer, fileName, studentName: student.name, studentLogin: student.login };
