@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authorize } from "@/server/authorization";
 import { apiError } from "@/server/http";
-import { exportStudentGradeWorkbook, exportClassGradeWorkbooks } from "@/server/grade-export";
+import { exportStudentGradeWorkbook } from "@/server/grade-export";
+import { exportClassGradeWorkbook } from "@/server/class-grade-export";
 
 // Authorized formula workbook download. The scope is taken from the signed-in account,
 // so a forged studentId/classId simply fails the scope check instead of leaking data.
@@ -14,10 +15,10 @@ export async function GET(request: Request) {
     const termId = z.string().min(1).max(100).parse(query.get("termId"));
     const classId = query.get("classId");
     if (classId) {
-      const { buffer, fileName } = await exportClassGradeWorkbooks(auth.user.sessionId, termId, { classId });
+      const { buffer, fileName } = await exportClassGradeWorkbook(auth.user.sessionId, termId, { classId });
       return new Response(new Uint8Array(buffer), {
         headers: {
-          "Content-Type": "application/zip",
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
