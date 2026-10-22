@@ -4,7 +4,7 @@ import { AccountError } from "@/server/account-error";
 import { termTransaction } from "@/server/terms";
 import { scopedStudentWhere } from "@/server/access-scope";
 import { buildGradeSheets } from "@/lib/xlsx/grade-model";
-import { buildMultiSheetWorkbook } from "@/lib/xlsx/workbook";
+import { buildMultiSheetWorkbook, createZip } from "@/lib/xlsx/workbook";
 import { validateScheme } from "@/lib/scoring/validate";
 
 // Authorized single-student grade workbook. Scope is resolved from the stored class /
@@ -12,6 +12,30 @@ import { validateScheme } from "@/lib/scoring/validate";
 // same inputs the result service scores so the workbook can be reconciled with it.
 
 const allPhases = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"] as const;
+
+/**
+ * Class-scoped bulk export: one authorized workbook per student, packed into a single
+ * ZIP so a counselor can hand out individual sheets without seeing other classes.
+ * The school-style single table is a separate layout and is not faked here.
+ */
+export async function exportClassGradeWorkbooks(sessionId: string, termId: string, input: unknown) {
+  const { classId } = z.object({ classId: z.string().min(1).max(100) }).parse(input);
+  const single = await termTransaction(sessionId, termId, ["ADMIN", "COLLEGE", "COUNSELOR"], [...allPhases], async (tx, term, actorId) => {
+    const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, select: { id: true, role: true, collegeId: true } });
+    const where: Prisma.UserWhereInput = { AND: [scopedStudentWhere(actor), { studentProfile: { is: { classId } } }] };
+    const students = await tx.user.findMany({ where, select: { id: true }, orderBy: [{ login: "asc" }, { id: "asc" }], take: 500 });
+    if (!students.length) throw new AccountError("该班级没有可导出的学生", 404);
+    return { studentIds: students.map((student) => student.id), termName: term.name };
+  }, "read");
+  const files: { name: string; data: Buffer }[] = [];
+  for (const studentId of single.studentIds) {
+    const workbook = await exportStudentGradeWorkbook(sessionId, termId, { studentId });
+    files.push({ name: workbook.fileName, data: workbook.buffer });
+  }
+  const safe = (value: string) => value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
+  const fileName = `成绩_${safe(single.termName)}_${files.length}人_${new Date().toISOString().slice(0, 10)}.zip`;
+  return { buffer: createZip(files), fileName, count: files.length };
+}
 
 export async function exportStudentGradeWorkbook(sessionId: string, termId: string, input: unknown) {
   const { studentId } = z.object({ studentId: z.string().min(1).max(100) }).parse(input);
