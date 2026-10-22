@@ -124,14 +124,7 @@ export function SchemeEditor({
 		placement: MovePlacement;
 	} | null>(null);
 	const listRef = useRef<HTMLDivElement>(null);
-	const press = useRef<{
-		id: string;
-		name: string;
-		x: number;
-		y: number;
-		pointerId: number;
-		timer: number;
-	} | null>(null);
+
 	const hint = useRef<{ targetId: string; placement: MovePlacement } | null>(
 		null,
 	);
@@ -355,11 +348,6 @@ export function SchemeEditor({
 		marked.current = row;
 	}
 	function clearDrag() {
-		const pointerId = press.current?.pointerId;
-		if (pointerId !== undefined && listRef.current?.hasPointerCapture?.(pointerId))
-			listRef.current.releasePointerCapture(pointerId);
-		if (press.current) window.clearTimeout(press.current.timer);
-		press.current = null;
 		hint.current = null;
 		markRow(null, null);
 		setDrag(null);
@@ -394,75 +382,9 @@ export function SchemeEditor({
 		if (placement !== "inside" && target.parentId === null) return null;
 		return { targetId, placement };
 	}
-	function onModulePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-		if (!editable || event.button !== 0 || drag) return;
-		const element = event.target as HTMLElement;
-		if (element.closest("button,a,input,select,textarea,label,[role=button]")) return;
-		const holder = element.closest("[data-node-id]") as HTMLElement | null;
-		const id = holder?.getAttribute("data-node-id");
-		const item = id ? scheme.nodes.find((n) => n.id === id) : undefined;
-		if (!holder || !item || item.parentId === null) return;
-		const { clientX: x, clientY: y } = event;
-		press.current = {
-			id: item.id,
-			name: item.name,
-			x,
-			y,
-			pointerId: event.pointerId,
-			timer: window.setTimeout(() => {
-				const current = press.current;
-				if (!current) return;
-				listRef.current?.setPointerCapture(current.pointerId);
-				setError("");
-				setSuccess("");
-				setDrag({ id: current.id, name: current.name, x: current.x, y: current.y });
-				document.body.style.cursor = "grabbing";
-			}, 180),
-		};
-	}
-	function onModulePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-		if (!drag) {
-			const current = press.current;
-			if (!current) return;
-			const moved =
-				Math.abs(event.clientX - current.x) > 6 ||
-				Math.abs(event.clientY - current.y) > 6;
-			if (!moved) return;
-			window.clearTimeout(current.timer);
-			// A mouse drag starts as soon as it moves; touch keeps the long press so
-			// that scrolling the list still works.
-			if (event.pointerType === "mouse") {
-				listRef.current?.setPointerCapture(current.pointerId);
-				setDrag({
-					id: current.id,
-					name: current.name,
-					x: event.clientX,
-					y: event.clientY,
-				});
-				document.body.style.cursor = "grabbing";
-			} else {
-				press.current = null;
-			}
-			return;
-		}
-		event.preventDefault();
-		const next = hitTest(event.clientX, event.clientY, drag.id);
-		hint.current = next;
-		setDropHint(next);
-		markRow(next ? ((document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null)?.closest("tr") ?? null) : null, next?.placement ?? null);
-		setDrag({ ...drag, x: event.clientX, y: event.clientY });
-	}
-	function onModulePointerUp() {
-		if (!drag) {
-			if (press.current) window.clearTimeout(press.current.timer);
-			press.current = null;
-			return;
-		}
-		const source = drag.id;
-		const target = hint.current;
-		if (target) performMove(source, target.targetId, target.placement);
-		else clearDrag();
-	}
+
+
+
 	function summary(n: ScoringNode) {
 		return `${kinds[n.kind]} · ${n.parentId && scheme.nodes.find((p) => p.id === n.parentId)?.kind === "WEIGHTED" ? `占上级 ${percentage(n.weight)}%` : "直接计入"} · 封顶 ${n.cap ?? "不限"}${n.normalize ? ` · ${n.rawMaximum}→${n.targetMaximum} 折算` : ""}${n.floor !== null ? ` · 最低 ${n.floor}` : ""}${n.required ? " · 必填" : ""}`;
 	}
@@ -553,6 +475,9 @@ export function SchemeEditor({
 			root.removeEventListener("drop", onDrop);
 			root.removeEventListener("dragend", onDragEnd);
 		};
+		// The handlers below are recreated per render on purpose; the effect only needs
+		// to rebind when the dragged module, editability or the scheme changes.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [drag, editable, scheme]);
 	function rowActions(n: ScoringNode) {
 		return (

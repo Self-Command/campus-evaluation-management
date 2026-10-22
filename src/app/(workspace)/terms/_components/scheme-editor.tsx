@@ -853,6 +853,7 @@ export function SchemeEditor({
 											</p>
 										</div>
 										<FieldGroup>
+											<p className="font-medium text-sm">1. 基本信息</p>
 											<Field>
 												<FieldLabel htmlFor="node-name">模块名称</FieldLabel>
 												<Input
@@ -864,6 +865,7 @@ export function SchemeEditor({
 												/>
 											</Field>
 
+											<p className="font-medium text-sm">2. 这一项怎么算</p>
 											<Field>
 												<FieldLabel htmlFor="node-kind">计分方式</FieldLabel>
 												<NativeSelect
