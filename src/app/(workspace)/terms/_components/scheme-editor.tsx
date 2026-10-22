@@ -902,6 +902,8 @@ export function SchemeEditor({
 											{node.parentId &&
 												scheme.nodes.find((n) => n.id === node.parentId)
 													?.kind === "WEIGHTED" && (
+													<>
+													<p className="font-medium text-sm">3. 层级关系</p>
 													<Field>
 														<FieldLabel htmlFor="node-weight">
 															占上级比例（%）
@@ -939,6 +941,7 @@ export function SchemeEditor({
 															同一上级的直接下级比例合计需为100%。
 														</FieldDescription>
 													</Field>
+													</>
 												)}
 											<div className="grid gap-5 sm:grid-cols-2">
 												{[
