@@ -5,6 +5,7 @@ import { organizationFixture } from "./organization-fixture";
 import { createTerm, saveScheme, activateTerm } from "@/server/terms";
 import { saveGrade } from "@/server/grades";
 import { exportStudentGradeWorkbook } from "@/server/grade-export";
+import { exportClassGradeWorkbook } from "@/server/class-grade-export";
 import { nodeSchema } from "@/lib/scoring/types";
 
 const address = new URL(process.env.DATABASE_URL!);
@@ -83,4 +84,16 @@ test("导出按角色限域，生成的工作簿可解包且包含该生成绩",
 
   await expect(exportStudentGradeWorkbook(users["counselor-b"].session, termId, { studentId: users["student-a"].id })).rejects.toThrow("可导出范围");
   await expect(exportStudentGradeWorkbook(users["student-b"].session, termId, { studentId: users["student-a"].id })).rejects.toThrow("可导出范围");
+});
+
+test("班级与全校明细表导出严格按范围返回", async () => {
+  const profile = await db.studentProfile.findUniqueOrThrow({ where: { userId: users["student-a"].id } });
+  const classSheet = await exportClassGradeWorkbook(users["counselor-a"].session, termId, { classId: profile.classId! });
+  expect(classSheet.buffer.subarray(0, 2).toString()).toBe("PK");
+  expect(classSheet.count).toBeGreaterThanOrEqual(1);
+  await expect(exportClassGradeWorkbook(users["counselor-b"].session, termId, { classId: profile.classId! })).rejects.toThrow("没有可导出的学生");
+  await expect(exportClassGradeWorkbook(users["counselor-a"].session, termId, {})).rejects.toThrow("请指定要导出的班级");
+  await expect(exportClassGradeWorkbook(users["student-a"].session, termId, { classId: profile.classId! })).rejects.toThrow("没有操作权限");
+  const school = await exportClassGradeWorkbook(users["admin"].session, termId, {});
+  expect(school.buffer.subarray(0, 2).toString()).toBe("PK");
 });
