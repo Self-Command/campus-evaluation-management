@@ -19,7 +19,9 @@ coverage
 *.tsbuildinfo
 超新星智能体平台配置审计报告.md
 测试账号（仅本地）.md
-docs
+docs/*
+!docs/examples/
+!docs/examples/学校评分模板.json
 README.md
 README.en.md
 compose*.yaml
