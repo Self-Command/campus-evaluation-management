@@ -58,7 +58,7 @@ export function AppSidebar({
               {brand.logoAssetId ? (
                 <Image
                   src={`/api/brand-assets/${brand.logoAssetId}`}
-                  alt=""
+                  alt={brand.siteName}
                   width={brand.logoSize}
                   height={brand.logoSize}
                   unoptimized
@@ -66,12 +66,14 @@ export function AppSidebar({
                   className="shrink-0 object-contain group-data-[collapsible=icon]:max-h-8 group-data-[collapsible=icon]:max-w-8"
                 />
               ) : (
-                <GraduationCap />
+                <>
+                  <GraduationCap />
+                  <div className="grid min-w-0 text-left">
+                    <span className="truncate text-base font-semibold">{brand.siteName}</span>
+                    <span className="truncate text-xs text-muted-foreground">{brand.siteDescription}</span>
+                  </div>
+                </>
               )}
-              <div className="grid min-w-0 text-left">
-                <span className="truncate text-base font-semibold">{brand.siteName}</span>
-                <span className="truncate text-xs text-muted-foreground">{brand.siteDescription}</span>
-              </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
