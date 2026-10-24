@@ -9,6 +9,7 @@ if (!new URL(process.env.DATABASE_URL!).pathname.startsWith("/campus_test_")) th
 let session: string;
 const row = { login: "00002345", name: "导入学生", college: "信息学院", major: "计算机", className: "计科一班" };
 beforeAll(async () => {
+  await db.duplicateIdentityException.deleteMany();
   await db.accountImport.deleteMany();
   await db.user.deleteMany();
   await db.auditEvent.deleteMany();
@@ -22,6 +23,9 @@ test("CSV 保留前导零，拒绝无效编码和超限名单", async () => {
   expect(result.rows[0][0]).toEqual({ value: "00002345", numeric: false });
   await expect(parseAccountFile("学生.csv", Buffer.from([255, 254]))).rejects.toThrow("UTF-8");
   await expect(parseAccountFile("学生.csv", Buffer.from("学号\n" + "00001\n".repeat(101)))).rejects.toThrow("100");
+  await expect(parseAccountFile("学生.csv", Buffer.from("学号,学号\n00001,00002"))).rejects.toThrow("重复");
+  await expect(parseAccountFile("学生.csv", Buffer.from("学号,\n00001,00002"))).rejects.toThrow("表头不能为空");
+  await expect(parseAccountFile("学生.csv", Buffer.from("学号\n00001"), { maxRows: 2000, maxBytes: 5 })).rejects.toThrow("5MB");
 });
 test("XLSX 保留文本学号，标记数字学号并拒绝公式与损坏文件", async () => {
   const text = await parseAccountFile("学生.xlsx", workbookFixture("00002345"));
@@ -66,4 +70,40 @@ test("过期、他人批次与过时预览均拒绝提交", async () => {
   await db.accountImport.update({ where: { id: expired.id }, data: { expiresAt: new Date(0) } });
   await expect(commitAccountImport(session, expired.id)).rejects.toThrow("已过期");
   expect(await db.user.count({ where: { login: "expired-row" } })).toBe(0);
+});
+test("同班同名不同学号默认阻断，理由确认后才建立账号并永久记录", async () => {
+  const base = { ...row, name: "同名同学" };
+  const preview = await previewAccountImport(session, [
+    { ...base, login: "00005678" },
+    { ...base, login: "00005679" },
+  ]);
+  expect(preview.rows.map(row => row.state)).toEqual(["NEW", "DUPLICATE"]);
+  expect(preview.rows[1].fileDuplicateOf).toBe(preview.rows[0].line);
+  expect(preview.unresolved).toBe(1);
+  await expect(commitAccountImport(session, preview.id)).rejects.toThrow("未处理");
+  expect(await db.user.count({ where: { login: { in: ["00005678", "00005679"] } } })).toBe(0);
+
+  const line = preview.rows[1].line;
+  const committed = await commitAccountImport(session, preview.id, {
+    resolutions: [{ line, action: "KEEP_BOTH", reason: "辅导员核对两名学生同名但学号不同" }],
+  });
+  expect(committed.created).toBe(2);
+  expect(await db.user.count({ where: { login: { in: ["00005678", "00005679"] } } })).toBe(2);
+  expect(await db.duplicateIdentityException.count()).toBe(1);
+
+  const third = await previewAccountImport(session, [{ ...base, login: "00005680" }]);
+  expect(third.rows[0].state).toBe("DUPLICATE");
+  expect(third.rows[0].duplicateCandidates?.length).toBeGreaterThan(0);
+  await expect(commitAccountImport(session, third.id, {
+    resolutions: [{ line: third.rows[0].line, action: "KEEP_BOTH", reason: "短" }],
+  })).rejects.toThrow("10个字");
+  const thirdCommitted = await commitAccountImport(session, third.id, {
+    resolutions: [{ line: third.rows[0].line, action: "KEEP_BOTH", reason: "学院学籍名单核对确认第三名学生确实独立存在" }],
+  });
+  expect(thirdCommitted.created).toBe(1);
+  const batch = await db.accountImport.findUniqueOrThrow({ where: { id: preview.id } });
+  expect(batch.status).toBe("COMMITTED");
+  expect(batch.fileHash).toBeNull();
+  expect(batch.templateVersion).toBe("accounts-v2");
+  expect(batch.rowResults).toBeTruthy();
 });

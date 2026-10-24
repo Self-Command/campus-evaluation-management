@@ -114,7 +114,7 @@ async function main() {
     await workbench(admin, "ADMIN", "管理工作台");
     await workbench(publisher, "PUBLISHER", "活动工作台");
     await workbench(student, "STUDENT", "我的测评概览");
-    for (const [role, session, paths] of [["ADMIN", admin, ["/", "/account", "/accounts", "/students", "/terms", "/activities", "/recognitions", "/claims", "/grades", "/deductions", "/imports", "/results", "/publication", "/appeals", "/rankings", "/settings"]], ["STUDENT", student, ["/", "/account", "/profile", "/terms", "/activities", "/activity-feed", "/recognitions", "/claims", "/results", "/appeals"]], ["PUBLISHER", publisher, ["/", "/account", "/terms", "/activities", "/recognitions"]]] as const) {
+    for (const [role, session, paths] of [["ADMIN", admin, ["/", "/account", "/accounts", "/students", "/terms", "/activities", "/recognitions", "/claims", "/grades", "/deductions", "/imports", "/results", "/publication", "/appeals", "/rankings", "/settings"]], ["STUDENT", student, ["/", "/account", "/profile", "/terms", "/my-activities", "/my-activities?view=feed", "/claims", "/results", "/appeals"]], ["PUBLISHER", publisher, ["/", "/account", "/terms", "/activities", "/recognitions"]]] as const) {
       for (const path of paths) { await session.page(path); results.push({ label: `${role} ${path}`, status: 200 }); }
     }
     check((await student.fetch("/api/admin/settings")).status === 403, "学生设置权限错误");
@@ -204,18 +204,18 @@ async function main() {
     check(emptyClaims.includes("没有匹配的记录") && buttonTexts(emptyClaims).includes("新建个人申报"), "学生默认申报页应直接提供新建申报，而不是等待项目配置");
     check(!buttonTexts(emptyClaims).includes("新建认定项目"), "学生不能创建已取消的认定项目");
     results.push({ label: "STUDENT /claims direct submission action without project catalog", status: 200 });
-    const audience = { colleges: ["学院"], classes: [{ college: "学院", major: "专业", className: "班级" }], studentIds: [selfId] };
-    const activity = await college.json("/api/activities", { termId: term.id, action: "save", activity: { name: "完整工作区活动", organizer: "学院", content: "活动内容与参与要求", requirements: "提交参与证明", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "1", scoreMode: "INDIVIDUAL", audience } });
+    const audience = { scope: "CLASS", colleges: [], classes: [{ college: "学院", major: "专业", className: "班级" }] };
+    const activity = await college.json("/api/activities", { termId: term.id, action: "save", activity: { name: "完整工作区活动", organizer: "学院", content: "活动内容与参与要求", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "1", audience } });
     check(activity.college?.id === collegeId, "主办学院创建活动未归属本院");
     await admin.json("/api/activities", { termId: term.id, action: "confirm", id: activity.id, revision: activity.revision });
-    check((await publisher.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, action: "save", activity: { name: "发布者新建应被阻断", organizer: "学院", content: "内容", requirements: "要求", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "2", audience } }) })).status === 403, "历史发布者不应创建新活动");
+    check((await publisher.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, action: "save", activity: { name: "发布者新建应被阻断", organizer: "学院", content: "内容", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "2", audience } }) })).status === 403, "历史发布者不应创建新活动");
     // 历史发布者的既有活动以隔离夹具数据保留，由管理员受控移交主办学院。
     const publisherActivityId = `http-${runId}-pubact`;
-    await fixture.query('INSERT INTO "Activity" (id,"termId","ownerId",name,organizer,content,requirements,"startsAt","endsAt","nodeId",points,confirmed,"publishRevision","scoreMode","audienceColleges","audienceClasses","audienceStudents",revision,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,0,$12,$13,$14,$15,0,now(),now())', [publisherActivityId, term.id, `http-${runId}-PUBLISHER`, "发布者专属运营活动", "学院", "本人负责活动的完整内容", "提交参加证明", "2026-10-01T08:00:00.000Z", "2026-10-02T08:00:00.000Z", "total", "2", "FIXED", audience.colleges, audience.classes.map(item => JSON.stringify([item.college, item.major, item.className])), audience.studentIds]);
+    await fixture.query('INSERT INTO "Activity" (id,"termId","ownerId",name,organizer,content,"startsAt","endsAt","nodeId",points,confirmed,"publishRevision","audienceScope","audienceColleges","audienceClasses",revision,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,0,\'CLASS\',$12,$13,0,now(),now())', [publisherActivityId, term.id, `http-${runId}-PUBLISHER`, "发布者专属运营活动", "学院", "本人负责活动的完整内容", "2026-10-01T08:00:00.000Z", "2026-10-02T08:00:00.000Z", "total", "2", audience.colleges, audience.classes.map(item => JSON.stringify([item.college, item.major, item.className]))]);
     await admin.json("/api/activities", { termId: term.id, action: "reassign", id: publisherActivityId, revision: 0, collegeId, reason: "隔离检查历史活动归属移交" });
     await admin.json("/api/activities", { termId: term.id, action: "confirm", id: publisherActivityId, revision: 1 });
     const audiencePreview = await college.json("/api/activities/audience", { action: "preview", termId: term.id, audience });
-    check(audiencePreview.count === 1 && audiencePreview.errors.length === 0, "三组范围预检失败");
+    check(audiencePreview.count === 1 && audiencePreview.errors.length === 0, "学院与班级范围预检失败");
     const publishedActivity = await college.json("/api/activities", { termId: term.id, action: "publish", id: activity.id, revision: 1, token: audiencePreview.token });
     check(publishedActivity.publishedAt, "主办学院发布活动失败");
     check((await student.json(`/api/activities?termId=${term.id}&view=feed`)).total === 1, "学生信息流未按已发布范围显示");
@@ -228,7 +228,7 @@ async function main() {
     const rosterForm = () => {
       const form = new FormData();
       form.append("termId", term.id); form.append("action", "preview"); form.append("activityId", activity.id); form.append("kind", "INITIAL"); form.append("note", "正式参与名单");
-      form.append("file", new Blob(["\uFEFF学号,姓名,学院,专业,班级,活动原始分\r\nhttp-student,HTTP学生,学院,专业,班级,1\r\n"], { type: "text/csv" }), "参与名单.csv");
+      form.append("file", new Blob(["\uFEFF学号,姓名,学院,专业,班级\r\nhttp-student,HTTP学生,学院,专业,班级\r\n"], { type: "text/csv" }), "参与名单.csv");
       return form;
     };
     const importPreview = await college.form("/api/participation-import", rosterForm());
@@ -237,19 +237,20 @@ async function main() {
     check((await college.fetch("/api/participation-import", { method: "POST", body: rosterForm() })).status === 409, "首份正式名单提交后未封存普通导入");
     check((await student.json(`/api/activities?termId=${term.id}`)).total === 1, "名单提交后本人活动目录未出现");
     const participants = await college.json(`/api/activities/participants?termId=${term.id}&activityId=${activity.id}`);
-    check(participants.total === 1 && participants.items[0].login === "http-student" && participants.items[0].score === "1", "参与名录缺少身份快照或原始分");
+    check(participants.total === 1 && participants.items[0].login === "http-student" && activity.points === "1", "参与名录缺少身份快照或固定分");
     const source = participants.items[0].sources[0];
     check(source.status === "PENDING_COUNSELOR" && source.activityEvidenceId === sharedEvidence.id, "参与来源未绑定当前活动证明或初审状态");
     check((await publisher.fetch(`/api/activities/participants?termId=${term.id}&activityId=${activity.id}`)).status === 404, "非主办发布者不得查看活动参与名单");
     check((await student.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, action: "counselorApprove", id: source.id, revision: source.revision }) })).status === 403, "学生不得自行通过活动参与审核");
     const counselorApproved = await counselor.json("/api/activities", { termId: term.id, action: "counselorApprove", id: source.id, revision: source.revision });
     check(counselorApproved.status === "PENDING_COLLEGE", "辅导员初核未提交归属学院");
-    const activityApproved = await college.json("/api/activities", { termId: term.id, action: "collegeApprove", id: source.id, revision: counselorApproved.revision, reason: "材料与原始分核对无误" });
+    const activityApproved = await college.json("/api/activities", { termId: term.id, action: "collegeApprove", id: source.id, revision: counselorApproved.revision, reason: "材料与固定分核对无误" });
     check(activityApproved.status === "APPROVED", "学院终审未通过活动参与");
     const ownActivities = await student.json(`/api/activities?termId=${term.id}`);
-    check(ownActivities.items[0].ownParticipation.score === "1" && ownActivities.items[0].ownParticipation.sources[0].status === "APPROVED", "本人活动详情缺少分数或审核状态");
+    check(ownActivities.items[0].points === "1" && ownActivities.items[0].ownParticipation.sources[0].status === "APPROVED", "本人活动详情缺少固定分或审核状态");
     check((await student.json(`/api/results?termId=${term.id}`)).result.total === "1.00", "活动认定未进入真实结果计分");
-    await student.page(`/activity-feed?termId=${term.id}`);
+    await student.page(`/my-activities?termId=${term.id}&view=feed`);
+    await student.page(`/my-activities?termId=${term.id}`);
     await admin.page(`/activities/${activity.id}`);
     await college.page(`/recognitions?termId=${term.id}`);
     await counselor.page(`/recognitions?termId=${term.id}`);
@@ -346,7 +347,7 @@ async function main() {
     const preview = await admin.json(`/api/terms/${term.id}/publication`, { action: "preview" }); check(preview.canPublish, "完整结果应可发布");
     const publication = await admin.json(`/api/terms/${term.id}/publication`, { action: "publish", revision: preview.termRevision, inputRevision: preview.inputRevision, token: preview.token, checkingEndsAt: new Date(Date.now() + 4500).toISOString(), requireConfirmation: true, requestId: randomUUID() });
     const result = await student.json(`/api/results?termId=${term.id}`); check(result.result.total === "4.00", "结果计分不一致");
-    check(result.participations[0]?.name === "完整工作区活动" && result.participations[0]?.points === "1", "冻结结果丢失活动参与或原始分");
+    check(result.participations[0]?.name === "完整工作区活动" && result.participations[0]?.points === "1", "冻结结果丢失活动参与或固定分");
     check(result.claims[0].name === "个人成果" && result.claims[0].evidenceIds.includes(evidence.id), "冻结结果丢失申报标题或原证明关联");
     await student.json(`/api/results/${publication.id}/confirm`, { termId: term.id, resultHash: result.resultHash });
     const publishedHome = await workbench(student, "STUDENT", "我的测评概览", term.id);

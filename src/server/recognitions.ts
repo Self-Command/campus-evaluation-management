@@ -5,8 +5,6 @@ import { termTransaction } from "@/server/terms";
 import { appendHistory, historyEntry } from "@/server/claims";
 import { canManageActivity } from "@/server/activity-policy";
 import { scopedStudentWhere } from "@/server/access-scope";
-import { decimalSchema } from "@/lib/scoring/types";
-import { Rational } from "@/lib/scoring/rational";
 
 export const recognitionStatusSchema = z.enum([
 	"PENDING_COUNSELOR",
@@ -81,7 +79,6 @@ const recognitionActivitySelect = {
 	ownerId: true,
 	collegeId: true,
 	termId: true,
-	scoreMode: true,
 	points: true,
 	college: { select: { id: true, name: true } },
 } as const;
@@ -142,16 +139,6 @@ async function assertMaterial(
 ) {
 	if (source.participation.removedAt)
 		throw new AccountError("该参与事实已移除，不能继续审核", 409);
-	if (source.participation.activity.scoreMode === "INDIVIDUAL") {
-		if (
-			source.participation.score === null ||
-			source.participation.score === undefined
-		)
-			throw new AccountError(
-				"主办学院尚未录入该学生的活动原始分，不能通过初审",
-				409,
-			);
-	}
 	if (source.activityEvidenceId) {
 		const active = await tx.activityEvidence.findFirst({
 			where: {
@@ -524,7 +511,6 @@ export async function pageRecognitions(
 						},
 						participation: {
 							...source.participation,
-							score: source.participation.score?.toFixed() ?? null,
 							student,
 							activity,
 						},
@@ -563,7 +549,6 @@ const changeSchema = z
 		action: z.enum(["resubmit", "remove"]),
 		reason: z.string().trim().min(2).max(1000).optional(),
 		note: z.string().trim().min(2).max(2000).optional(),
-		score: decimalSchema.optional(),
 	})
 	.strict();
 
@@ -594,22 +579,6 @@ export async function changeParticipation(
 				if (source.status !== "RETURNED")
 					throw new AccountError("仅退回修改的记录可重新提交", 409);
 				if (!data.note) throw new AccountError("请填写补充说明");
-				if (
-					source.participation.activity.scoreMode === "INDIVIDUAL" &&
-					data.score === undefined &&
-					source.participation.score === null
-				)
-					throw new AccountError("请填写活动原始分后再提交");
-				if (data.score !== undefined) {
-					const value = Rational.from(data.score);
-					if (
-						value.compare(Rational.from("0")) < 0 ||
-						value.compare(
-							Rational.from(source.participation.activity.points.toFixed()),
-						) > 0
-					)
-						throw new AccountError("活动原始分须在0与活动分值上限之间");
-				}
 				const active = await tx.activityEvidence.findFirst({
 					where: {
 						activityId: source.participation.activityId,
@@ -622,26 +591,6 @@ export async function changeParticipation(
 						"请先在活动详情上传当前有效的活动证明，再重新提交",
 						409,
 					);
-				if (
-					data.score !== undefined &&
-					!source.participation.score?.equals(data.score)
-				) {
-					await tx.participation.update({
-						where: { id: source.participationId },
-						data: {
-							score: data.score,
-							revision: { increment: 1 },
-							history: appendHistory(
-								source.participation.history,
-								historyEntry(actorId, "SCORE_CORRECTED", {
-									before: source.participation.score?.toFixed() ?? null,
-									after: data.score,
-									reason: data.reason ?? null,
-								}),
-							),
-						},
-					});
-				}
 				const saved = await tx.recognitionSource.update({
 					where: { id: source.id },
 					data: {

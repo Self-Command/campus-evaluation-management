@@ -4,6 +4,8 @@ import { z } from "zod";
 export const themePresetValues = ["default", "brutalist", "soft-pop", "tangerine", "vercel", "claude", "t3-chat", "supabase", "mono"] as const;
 export const themePresetSchema = z.enum(themePresetValues);
 
+export const defaultAttachmentExtensions = ["png", "jpg", "jpeg", "webp", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "txt", "md"] as const;
+
 export const settingsSchema = z.object({
   siteName: z.string().trim().min(1).max(40),
   siteDescription: z.string().trim().min(1).max(160),
@@ -14,6 +16,9 @@ export const settingsSchema = z.object({
   loginFailureLimitEnabled: z.boolean().default(false),
   loginFailureMaxAttempts: z.number().int().min(1).max(100).default(5),
   loginFailureLockMinutes: z.number().int().min(1).max(1440).default(15),
+  activityAttachmentMaxFiles: z.number().int().min(1).max(20).default(5),
+  activityAttachmentMaxSizeMb: z.number().int().min(1).max(50).default(10),
+  activityAttachmentAllowedExtensions: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9]{1,10}$/)).min(1).max(20).default([...defaultAttachmentExtensions]),
 }).strict();
 
 // Reading already-saved records tolerates values that are no longer offered

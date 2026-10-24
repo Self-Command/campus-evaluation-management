@@ -1,4 +1,5 @@
 import { MeasurementEmpty } from "@/components/dashboard/measurement-empty";
+import { redirect } from "next/navigation";
 import { pageSession } from "@/server/page-session";
 import { measurementContext } from "@/lib/measurement-context";
 import { pageRecognitions } from "@/server/recognitions";
@@ -29,6 +30,15 @@ export default async function RecognitionsPage({
 }) {
 	const user = await pageSession();
 	const p = await searchParams;
+	if (user.role === "STUDENT") {
+		const query = new URLSearchParams({
+			view: "joined",
+			...(p.termId ? { termId: p.termId } : {}),
+			...(p.q ? { q: p.q } : {}),
+			...(p.page ? { page: p.page } : {}),
+		}).toString();
+		redirect(query ? `/my-activities?${query}` : "/my-activities");
+	}
 	const { terms, term } = await measurementContext(user.sessionId, p.termId);
 	const status = filterableStatuses.includes(p.status || "")
 		? p.status
@@ -48,23 +58,19 @@ export default async function RecognitionsPage({
 			<PageHeading
 				title={
 					user.role === "ADMIN"
-						? "活动参与审核"
-						: user.role === "STUDENT"
-							? "我的活动参与"
-							: user.role === "PUBLISHER"
-								? "活动参与"
-								: "活动参与审核"
+						? "活动参与记录"
+						: user.role === "PUBLISHER"
+							? "活动参与"
+							: "活动参与审核"
 				}
 				description={
-					user.role === "STUDENT"
-						? "查看本人活动参与、活动得分和审核结果。"
-						: user.role === "COUNSELOR"
-							? "核对学生的参与记录、活动得分和证明，通过后交学院审核。"
-							: user.role === "COLLEGE"
-								? "审核本学院学生的活动参与；活动主办学院只维护活动，不能审核其他学院学生。"
-								: user.role === "ADMIN"
-									? "查看活动参与记录、活动得分、证明和两级审核结果。"
-									: "查看你负责活动的参与记录、得分和审核进度。"
+					user.role === "COUNSELOR"
+						? "核对学生的参与记录、活动得分和证明，通过后交学院审核。"
+						: user.role === "COLLEGE"
+							? "审核本学院学生的活动参与；活动主办学院只维护活动，不能审核其他学院学生。"
+							: user.role === "ADMIN"
+								? "查看活动参与记录、得分、证明和辅导员与学院两级审核结果；管理员不参与审核。"
+								: "查看你负责活动的参与记录、得分和审核进度。"
 				}
 			/>
 			<TermContext terms={terms} selected={term?.id} />

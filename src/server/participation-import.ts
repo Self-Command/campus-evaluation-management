@@ -1,13 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { AccountError } from "@/server/accounts";
 import { termTransaction } from "@/server/terms";
 import { assertActivityManager, eligible } from "@/server/activity-policy";
 import { registerFact } from "@/server/activity-participants";
-import { appendHistory, historyEntry, jsonValue } from "@/server/claims";
-import { decimalSchema } from "@/lib/scoring/types";
-import { Rational } from "@/lib/scoring/rational";
+import { historyEntry, jsonValue } from "@/server/claims";
+import { duplicateIdentityMessage, loadIdentityIndex } from "@/server/student-identity";
 
 const rowSchema = z
 	.object({
@@ -16,7 +15,6 @@ const rowSchema = z
 		college: z.string().trim().min(1).max(80),
 		major: z.string().trim().min(1).max(80),
 		className: z.string().trim().min(1).max(80),
-		score: decimalSchema.optional(),
 	})
 	.strict();
 const rowsSchema = z.array(rowSchema).min(1).max(2000);
@@ -30,8 +28,6 @@ export type ParticipationPreviewRow = {
 	college: string;
 	major: string;
 	className: string;
-	score: string | null;
-	before: string | null;
 	state: "NEW" | "EXISTING" | "UNCHANGED" | "UPDATE" | "ERROR";
 	message: string;
 };
@@ -49,42 +45,6 @@ const studentInclude = {
 	},
 } as const;
 type ImportStudent = Prisma.UserGetPayload<{ include: typeof studentInclude }>;
-
-function scoreText(value: Prisma.Decimal | null) {
-	return value?.toFixed() ?? null;
-}
-
-function sameScore(left: Prisma.Decimal | null, right: string) {
-	if (left === null) return false;
-	try {
-		return Rational.from(left.toFixed()).compare(Rational.from(right)) === 0;
-	} catch {
-		return false;
-	}
-}
-
-function validateRowScore(
-	activity: { scoreMode: string; points: Prisma.Decimal },
-	row: ParticipationImportRow,
-) {
-	if (activity.scoreMode !== "INDIVIDUAL") {
-		if (row.score !== undefined)
-			return "固定分活动名单不得填写个人分数";
-		return null;
-	}
-	if (row.score === undefined || row.score === "")
-		return "逐人分活动必须填写每位学生的活动原始分";
-	try {
-		const value = Rational.from(row.score);
-		if (value.compare(Rational.from("0")) < 0)
-			return "活动原始分不能为负";
-		if (value.compare(Rational.from(activity.points.toFixed())) > 0)
-			return `活动原始分不能超过活动上限 ${activity.points.toFixed()} 分`;
-	} catch {
-		return "活动原始分格式无效";
-	}
-	return null;
-}
 
 function identityError(
 	row: ParticipationImportRow,
@@ -121,7 +81,7 @@ function identityError(
 	if (profile.major !== row.major) return "专业与权威档案不一致";
 	if (profile.className !== row.className) return "班级与权威档案不一致";
 	if (!eligible(activity, student))
-		return "学生不同时满足活动的学院、班级和指定学生范围";
+		return "学生不属于活动面向的学院和班级";
 	return null;
 }
 
@@ -148,7 +108,7 @@ async function inspect(
 	assertActivityManager(activity, actor);
 	if (input.kind === "INITIAL" && activity.rosterCommittedAt)
 		throw new AccountError(
-			"该活动正式名单已封存，漏报或错分请使用补录更正",
+			"该活动正式名单已封存，漏报学生请使用补录更正",
 			409,
 		);
 	if (input.kind === "CORRECTION" && !activity.rosterCommittedAt)
@@ -170,6 +130,17 @@ async function inspect(
 		orderBy: { id: "asc" },
 	});
 	const known = new Map(students.map((student) => [student.login, student]));
+	const identityIndex = await loadIdentityIndex(
+		tx,
+		students
+			.filter((student) => student.studentProfile)
+			.map((student) => ({
+				classId: student.studentProfile!.classId,
+				college: student.studentProfile!.college,
+				major: student.studentProfile!.major,
+				className: student.studentProfile!.className,
+			})),
+	);
 	const studentIds = students.map((student) => student.id);
 	const facts = await tx.participation.findMany({
 		where: { activityId: activity.id, studentId: { in: studentIds } },
@@ -199,8 +170,6 @@ async function inspect(
 			college: row.college,
 			major: row.major,
 			className: row.className,
-			score: row.score ?? null,
-			before: scoreText(fact?.score ?? null),
 			state: "NEW",
 			message: "",
 		};
@@ -213,8 +182,23 @@ async function inspect(
 		const invalidIdentity = identityError(row, student, activity);
 		if (invalidIdentity)
 			return { ...base, state: "ERROR", message: invalidIdentity };
-		const invalidScore = validateRowScore(activity, row);
-		if (invalidScore) return { ...base, state: "ERROR", message: invalidScore };
+		if (student?.studentProfile) {
+			const duplicateCandidates = identityIndex.candidatesFor({
+				userId: student.id,
+				studentNumber: student.studentProfile.studentNumber,
+				name: student.name,
+				classId: student.studentProfile.classId,
+				college: student.studentProfile.college,
+				major: student.studentProfile.major,
+				className: student.studentProfile.className,
+			});
+			if (duplicateCandidates.length)
+				return {
+					...base,
+					state: "ERROR",
+					message: `${duplicateIdentityMessage(duplicateCandidates)} 参与名单在重复账号处置前不可写入。`,
+				};
+		}
 		if (fact?.removedAt)
 			return {
 				...base,
@@ -222,61 +206,26 @@ async function inspect(
 				message:
 					"该学生参与事实已移除；如需恢复，请在补录更正中说明理由并重新提交审核",
 			};
-		if (input.kind === "INITIAL") {
-			if (!fact)
-				return {
-					...base,
-					state: "NEW",
-					message: "新增参与事实并提交辅导员初核",
-				};
-			if (
-				activity.scoreMode === "INDIVIDUAL" &&
-				fact.score !== null &&
-				row.score !== undefined &&
-				!sameScore(fact.score, row.score)
-			)
-				return {
-					...base,
-					state: "ERROR",
-					message:
-						"活动已有参与事实且分数不同；请先完成首份名单，再通过补录更正分数",
-				};
-			return {
-				...base,
-				state: "EXISTING",
-				message: fact.sources.length
-					? "沿用已有参与事实和审核记录"
-					: "沿用已有参与事实，并补充待审核来源",
-			};
-		}
-		if (!fact || !fact.registeredAt)
+		if (!fact || !fact.registeredAt) {
 			return {
 				...base,
 				state: "NEW",
-				message: "补录漏报学生；提交后重新进入辅导员初核",
+				message:
+					input.kind === "INITIAL"
+						? "新增参与事实并提交辅导员初核"
+						: "补录漏报学生；提交后重新进入辅导员初核",
 			};
-		if (activity.scoreMode !== "INDIVIDUAL")
+		}
+		if (fact.sources.length)
 			return {
 				...base,
 				state: "UNCHANGED",
 				message: "名单已包含该学生，本次无变更",
 			};
-		if (row.score === undefined)
-			return {
-				...base,
-				state: "ERROR",
-				message: "逐人分活动必须填写更正后的活动原始分",
-			};
-		if (sameScore(fact.score, row.score))
-			return {
-				...base,
-				state: "UNCHANGED",
-				message: "活动原始分与当前记录一致，本次无变更",
-			};
 		return {
 			...base,
-			state: "UPDATE",
-			message: "更正活动原始分；已通过的认定将重新进入审核",
+			state: "EXISTING",
+			message: "沿用已有参与事实，并补充待审核来源",
 		};
 	});
 	const snapshot = snapshotHash({
@@ -287,10 +236,9 @@ async function inspect(
 			rosterRevision: activity.rosterRevision,
 			rosterCommittedAt: activity.rosterCommittedAt,
 			points: activity.points.toFixed(),
-			scoreMode: activity.scoreMode,
+			audienceScope: activity.audienceScope,
 			audienceColleges: activity.audienceColleges,
 			audienceClasses: activity.audienceClasses,
-			audienceStudents: activity.audienceStudents,
 		},
 		rows: input.rows,
 		students: students
@@ -307,11 +255,11 @@ async function inspect(
 				id: fact.id,
 				studentId: fact.studentId,
 				revision: fact.revision,
-				score: scoreText(fact.score),
 				removedAt: fact.removedAt,
 				sources: fact.sources,
 			}))
 			.sort((a, b) => a.id.localeCompare(b.id)),
+		identity: identityIndex.snapshot,
 	});
 	return {
 		activity,
@@ -322,7 +270,7 @@ async function inspect(
 		snapshot,
 		errors: rows.filter((row) => row.state === "ERROR").length,
 		changes: rows.filter(
-			(row) => row.state === "NEW" || row.state === "UPDATE",
+			(row) => row.state === "NEW" || row.state === "EXISTING",
 		).length,
 	};
 }
@@ -338,10 +286,13 @@ const previewSchema = z
 	})
 	.strict();
 
+type PreviewMeta = { fileHash?: string; templateVersion?: string; requestId?: string };
+
 export async function previewParticipationImport(
 	sessionId: string,
 	termId: string,
 	input: unknown,
+	meta: PreviewMeta = {},
 ) {
 	const data = previewSchema.parse(input);
 	if (data.kind === "CORRECTION" && !data.reason)
@@ -353,6 +304,8 @@ export async function previewParticipationImport(
 		["ACTIVE"],
 		async (tx, term, actorId) => {
 			const preview = await inspect(tx, term.id, actorId, data);
+			const requestId = meta.requestId ?? randomUUID();
+			const templateVersion = meta.templateVersion ?? "participation-v5-fixed";
 			const batch = await tx.participationImport.create({
 				data: {
 					termId,
@@ -366,11 +319,17 @@ export async function previewParticipationImport(
 					diff: jsonValue(preview.rows),
 					snapshot: preview.snapshot,
 					baselineRevision: preview.activity.rosterRevision,
+					fileHash: meta.fileHash ?? null,
+					templateVersion,
+					scopeKey: `${term.id}:participation:${data.activityId}`,
+					requestId,
 					expiresAt: new Date(Date.now() + 30 * 60_000),
 				},
 			});
 			return {
 				id: batch.id,
+				requestId,
+				templateVersion,
 				kind: data.kind,
 				expiresAt: batch.expiresAt,
 				rows: preview.rows,
@@ -452,8 +411,8 @@ export async function commitParticipationImport(
 				batch.baselineRevision !== freshActivity.rosterRevision
 			)
 				throw new AccountError("名单版本已变化，请重新预览差异", 409);
-			if (!freshActivity.confirmed)
-				throw new AccountError("活动分值尚未确认，不能提交参与名单", 409);
+			if (!freshActivity.publishedAt)
+				throw new AccountError("活动尚未发布，不能提交参与名单", 409);
 			const preview = await inspect(tx, termId, actorId, {
 				activityId: batch.activityId,
 				kind,
@@ -476,9 +435,7 @@ export async function commitParticipationImport(
 					409,
 				);
 			let submitted = 0;
-			let updated = 0;
 			let unchanged = 0;
-			let reopened = 0;
 			for (const row of preview.rows) {
 				if (row.state === "ERROR") continue;
 				if (row.state === "UNCHANGED") {
@@ -487,229 +444,47 @@ export async function commitParticipationImport(
 				}
 				const student = preview.known.get(row.login)!;
 				const fact = preview.factsByStudent.get(student.id);
-				if (row.state === "EXISTING") {
-					if (fact?.sources.length) {
-						unchanged++;
-						continue;
-					}
-					const registered = await registerFact(
-						tx,
-						batch.activityId,
-						student,
-						actorId,
-						batch.id,
-						{ score: row.score ?? undefined },
-					);
-					await tx.recognitionSource.create({
-						data: {
-							participationId: registered.id,
-							submitterId: actorId,
-							origin: "IMPORT",
-							importBatchId: batch.id,
-							status: "PENDING_COUNSELOR",
-							activityEvidenceId: activeEvidence.id,
-							note: batch.note,
-							history: jsonValue([
-								historyEntry(actorId, "IMPORTED", {
+				const registered = await registerFact(
+					tx,
+					batch.activityId,
+					student,
+					actorId,
+					batch.id,
+				);
+				if (fact?.sources.length) {
+					unchanged++;
+					continue;
+				}
+				await tx.recognitionSource.create({
+					data: {
+						participationId: registered.id,
+						submitterId: actorId,
+						origin: kind === "CORRECTION" ? "CORRECTION" : "IMPORT",
+						importBatchId: batch.id,
+						status: "PENDING_COUNSELOR",
+						activityEvidenceId: activeEvidence.id,
+						note: batch.note,
+						history: jsonValue([
+							historyEntry(
+								actorId,
+								kind === "CORRECTION" ? "CORRECTION_ADDED" : "IMPORTED",
+								{
 									batchId: batch.id,
 									kind,
 									note: batch.note,
+									reason: batch.reason ?? null,
 									activityEvidenceId: activeEvidence.id,
-								}),
-							]),
-						},
-					});
-					submitted++;
-					continue;
-				}
-				if (row.state === "NEW") {
-					const registered = await registerFact(
-						tx,
-						batch.activityId,
-						student,
-						actorId,
-						batch.id,
-						{ score: row.score ?? undefined },
-					);
-					await tx.recognitionSource.create({
-						data: {
-							participationId: registered.id,
-							submitterId: actorId,
-							origin: kind === "CORRECTION" ? "CORRECTION" : "IMPORT",
-							importBatchId: batch.id,
-							status: "PENDING_COUNSELOR",
-							activityEvidenceId: activeEvidence.id,
-							note: kind === "CORRECTION" ? batch.note : batch.note,
-							history: jsonValue([
-								historyEntry(
-									actorId,
-									kind === "CORRECTION" ? "CORRECTION_ADDED" : "IMPORTED",
-									{
-										batchId: batch.id,
-										kind,
-										note: batch.note,
-										reason: batch.reason ?? null,
-										activityEvidenceId: activeEvidence.id,
-									},
-								),
-							]),
-						},
-					});
-					submitted++;
-					continue;
-				}
-				// UPDATE: only individual raw scores can change. The old approved
-				// version stays in history as SUPERSEDED while a new review starts.
-				if (!fact) throw new AccountError("参与记录已变化，请重新预览", 409);
-				const score = row.score!;
-				const entry = historyEntry(actorId, "SCORE_CORRECTED", {
-					before: fact.score?.toFixed() ?? null,
-					after: score,
-					reason: batch.reason ?? null,
-					batchId: batch.id,
-				});
-				await tx.participation.update({
-					where: { id: fact.id },
-					data: {
-						score,
-						revision: { increment: 1 },
-						history: appendHistory(fact.history, entry),
+								},
+							),
+						]),
 					},
 				});
-				const sources = await tx.recognitionSource.findMany({
-					where: { participationId: fact.id },
-					orderBy: { id: "asc" },
-				});
-				const willHavePending = sources.some((source) =>
-					["PENDING_COUNSELOR", "PENDING_COLLEGE", "RETURNED"].includes(
-						source.status,
-					),
-				);
-				for (const source of sources) {
-					if (source.status === "APPROVED") {
-						await tx.recognitionSource.update({
-							where: { id: source.id },
-							data: {
-								status: "SUPERSEDED",
-								revision: { increment: 1 },
-								history: appendHistory(
-									source.history,
-									historyEntry(actorId, "CORRECTION_SUPERSEDED", {
-										before: "APPROVED",
-										after: "SUPERSEDED",
-										reason: batch.reason ?? null,
-										batchId: batch.id,
-									}),
-								),
-							},
-						});
-						reopened++;
-					} else if (
-						source.status === "RETURNED" ||
-						source.status === "WITHDRAWN" ||
-						source.status === "REJECTED"
-					) {
-						await tx.recognitionSource.update({
-							where: { id: source.id },
-							data: {
-								status:
-									source.status === "RETURNED"
-										? "PENDING_COUNSELOR"
-										: "SUPERSEDED",
-								activityEvidenceId: activeEvidence.id,
-								reviewReason: null,
-								returnedByRole: null,
-								counselorId: null,
-								counseledAt: null,
-								collegeReviewerId: null,
-								collegeReviewedAt: null,
-								revision: { increment: 1 },
-								history: appendHistory(
-									source.history,
-									historyEntry(actorId, "CORRECTION_RESUBMITTED", {
-										before: source.status,
-										after:
-											source.status === "RETURNED"
-												? "PENDING_COUNSELOR"
-												: "SUPERSEDED",
-										reason: batch.reason ?? null,
-										batchId: batch.id,
-									}),
-								),
-							},
-						});
-					} else if (source.status === "PENDING_COLLEGE") {
-						await tx.recognitionSource.update({
-							where: { id: source.id },
-							data: {
-								status: "PENDING_COUNSELOR",
-								activityEvidenceId: activeEvidence.id,
-								reviewReason: null,
-								reviewerId: null,
-								reviewedAt: null,
-								returnedByRole: null,
-								counselorId: null,
-								counseledAt: null,
-								collegeReviewerId: null,
-								collegeReviewedAt: null,
-								revision: { increment: 1 },
-								history: appendHistory(
-									source.history,
-									historyEntry(actorId, "CORRECTION_REOPENED", {
-										before: "PENDING_COLLEGE",
-										after: "PENDING_COUNSELOR",
-										reason: batch.reason ?? null,
-										batchId: batch.id,
-									}),
-								),
-							},
-						});
-					} else if (
-						source.status === "PENDING_COUNSELOR" &&
-						source.activityEvidenceId !== activeEvidence.id
-					) {
-						await tx.recognitionSource.update({
-							where: { id: source.id },
-							data: {
-								activityEvidenceId: activeEvidence.id,
-								revision: { increment: 1 },
-								history: appendHistory(
-									source.history,
-									historyEntry(actorId, "EVIDENCE_REBOUND", {
-										before: source.status,
-										after: source.status,
-										reason: batch.reason ?? null,
-										batchId: batch.id,
-									}),
-								),
-							},
-						});
-					}
-				}
-				if (!willHavePending)
-					await tx.recognitionSource.create({
-						data: {
-							participationId: fact.id,
-							submitterId: actorId,
-							origin: "CORRECTION",
-							importBatchId: batch.id,
-							status: "PENDING_COUNSELOR",
-							activityEvidenceId: activeEvidence.id,
-							note: batch.note,
-							history: jsonValue([
-								historyEntry(actorId, "CORRECTION_RESUBMITTED", {
-									batchId: batch.id,
-									reason: batch.reason ?? null,
-								}),
-							]),
-						},
-					});
-				updated++;
+				submitted++;
 			}
 			const rosterRevision =
 				kind === "INITIAL"
 					? 1
-					: submitted + updated > 0
+					: submitted > 0
 						? freshActivity.rosterRevision + 1
 						: freshActivity.rosterRevision;
 			await tx.activity.update({
@@ -721,14 +496,14 @@ export async function commitParticipationImport(
 								rosterImportId: batch.id,
 								rosterRevision: 1,
 							}
-						: submitted + updated > 0
+						: submitted > 0
 							? { rosterRevision: { increment: 1 } }
 							: {}),
 				},
 			});
 			const result: ParticipationImportResult = {
 				submitted,
-				updated,
+				updated: 0,
 				unchanged,
 				skipped: 0,
 				kind,
@@ -741,14 +516,12 @@ export async function commitParticipationImport(
 					status: "COMMITTED",
 					result: jsonValue(result),
 					diff: jsonValue(preview.rows),
+					rowResults: jsonValue(preview.rows),
+					confirmations: jsonValue([]),
+					committedAt: new Date(),
 					baselineRevision: freshActivity.rosterRevision,
 				},
 			});
-			if (reopened)
-				await tx.term.update({
-					where: { id: termId },
-					data: { inputRevision: { increment: 1 } },
-				});
 			await tx.auditEvent.create({
 				data: {
 					actorId,
@@ -760,7 +533,9 @@ export async function commitParticipationImport(
 						activityId: batch.activityId,
 						reason: batch.reason ?? null,
 						activityEvidenceId: activeEvidence.id,
-						reopened,
+						fileHash: batch.fileHash,
+						templateVersion: batch.templateVersion,
+						requestId: batch.requestId,
 					},
 				},
 			});

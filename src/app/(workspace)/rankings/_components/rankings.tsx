@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { DataTableFeatures } from "@/lib/data-table-features";
 import { TemplateDirectory } from "@/components/dashboard/template-directory";
@@ -74,8 +74,11 @@ export function Rankings({ termId, filters }: { termId: string; filters: Filters
           data={remote.data.items}
           columns={columns}
           actions={
-            <a href={`/api/rankings/export?${query}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-              导出 CSV
+            <a
+              href={`/api/rankings/export?${new URLSearchParams({ termId, publicationId: remote.data.publication.id })}`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              导出全校成绩明细表
             </a>
           }
           filters={
@@ -129,19 +132,15 @@ export function Rankings({ termId, filters }: { termId: string; filters: Filters
               ].map((field) => (
                 <Field key={field.key} className="w-full sm:w-44">
                   <FieldLabel htmlFor={`rank-${field.key}`}>{field.label}</FieldLabel>
-                  <NativeSelect
+                  <SearchableSelect
                     id={`rank-${field.key}`}
                     name={field.key}
                     value={field.value}
-                    onChange={(e) => field.onChange(e.target.value)}
-                  >
-                    <NativeSelectOption value="">全部{field.label}</NativeSelectOption>
-                    {field.options.map((value) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {value}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
+                    onValueChange={field.onChange}
+                    placeholder={`全部${field.label}`}
+                    searchPlaceholder={`搜索${field.label}`}
+                    options={field.options.map((value) => ({ value, label: value }))}
+                  />
                 </Field>
               ))}
               <Button type="submit" variant="outline">搜索</Button>

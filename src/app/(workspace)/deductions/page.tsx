@@ -9,15 +9,15 @@ import { DeductionWorkspace } from "./_components/deduction-workspace";
 const copy = {
 	COUNSELOR: {
 		title: "扣分管理",
-		description: "为负责班级登记扣分事件或申请撤销，提交学院审核通过后计入总分。",
+		description: "为负责班级新增扣分记录或申请取消扣分，提交学院审核通过后计入总分。",
 	},
 	COLLEGE: {
 		title: "扣分审核",
-		description: "审核本院辅导员提交的扣分事件与撤销申请，退回必须填写理由。",
+		description: "审核本院辅导员提交的扣分记录与取消申请，退回必须填写原因。",
 	},
 	ADMIN: {
 		title: "扣分管理与审核",
-		description: "查看全校扣分事件与审核进度；组织或数据异常时可按留痕方式例外更正。",
+		description: "查看全校扣分记录与审核进度；组织或数据异常时可直接更正并记录原因。",
 	},
 } as const;
 

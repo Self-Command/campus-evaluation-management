@@ -26,7 +26,7 @@ export const statusLabels: Record<string, string> = {
 	REVOKED: "已撤销",
 	PENDING_COUNSELOR: "待辅导员处理",
 	PENDING_COLLEGE: "待学院审核",
-	RETURNED: "已退回",
+	RETURNED: "已退回待修改",
 	SUPERSEDED: "已替代",
 	REMOVED: "已移除",
 	RESCORING: "待重评",
@@ -44,4 +44,16 @@ export function dateText(value: string | Date) {
 		hour: "2-digit",
 		minute: "2-digit",
 	});
+}
+function pad(value: number) {
+	return String(value).padStart(2, "0");
+}
+/** Local calendar date used by export labels and file names, never the UTC date. */
+export function exportDateText(value: string | Date = new Date()) {
+	const date = new Date(value);
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+export function exportDateTimeText(value: string | Date = new Date()) {
+	const date = new Date(value);
+	return `${exportDateText(date)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }

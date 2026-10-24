@@ -148,7 +148,6 @@ export function Appeals({
 			<Feedback success={success} />
 			{remote.data && (
 				<TemplateDirectory
-					title={role === "ADMIN" ? "成绩异议处理" : "我的成绩异议"}
 					description={`共 ${remote.data.total} 条异议，保留提交时的发布版本和处理结果。`}
 					data={remote.data.items}
 					columns={columns}

@@ -11,6 +11,7 @@ let adminId: string;
 const student = { name: "档案学生", login: "00001234", role: "STUDENT", classId: "" };
 let firstOrg: Awaited<ReturnType<typeof organizationFixture>>, nextOrg: Awaited<ReturnType<typeof organizationFixture>>;
 beforeAll(async () => {
+  await db.duplicateIdentityException.deleteMany();
   await db.user.deleteMany(); await db.auditEvent.deleteMany();
   const admin = await db.user.create({ data: { login: "accounts-admin", name: "账号管理员", role: "ADMIN", passwordHash: "not-used", mustChangePassword: false } });
   adminId = admin.id;
@@ -31,6 +32,10 @@ test("四类身份建号只能选配置归属，学生保留前导零且拒绝�
   await expect(createAccount(adminSession, { ...student, login: "forged-text", college: "自由文本" })).rejects.toThrow();
   await expect(createAccount(adminSession, { login: "old-publisher", name: "旧角色", role: "PUBLISHER" })).rejects.toThrow();
   expect(await db.studentProfile.count({ where: { studentNumber: "00001234" } })).toBe(1);
+  await expect(createAccount(adminSession, { ...student, login: "duplicate-student" })).rejects.toThrow("同班同名");
+  const confirmed = await createAccount(adminSession, { ...student, login: "duplicate-student", duplicateReason: "辅导员核对两名学生同名但学号不同" });
+  expect(confirmed.user.studentProfile?.studentNumber).toBe("duplicate-student");
+  expect(await db.duplicateIdentityException.count()).toBe(1);
   for (const role of ["ADMIN", "COLLEGE", "COUNSELOR"]) expect((await createAccount(adminSession, { name: student.name, login: `created-${role}`, role, ...(role === "ADMIN" ? {} : { collegeId: firstOrg.college.id }) })).user.role).toBe(role);
   const audit = await db.auditEvent.findFirstOrThrow({ where: { action: "ACCOUNT_CREATED", targetId: result.user.id } });
   expect(JSON.stringify(audit)).not.toContain(result.initialPassword);
@@ -44,13 +49,13 @@ test("学生只能读本人；发布者和学生不能建号", async () => {
   await expect(createAccount(session.id, { ...student, login: "unauthorized" })).rejects.toThrow("没有管理权限");
 });
 test("编辑档案有修订冲突保护，角色和停用变化撤销会话", async () => {
-  const target = await createAccount(adminSession, { ...student, login: "edit-student" });
+  const target = await createAccount(adminSession, { ...student, name: "编辑学生", login: "edit-student" });
   await db.user.update({ where: { id: target.user.id }, data: { mustChangePassword: false } });
   const session = await db.authSession.create({ data: { userId: target.user.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } });
-  const edited = await updateAccount(adminSession, target.user.id, { revision: 0, reason: "更正学院", disabled: false, account: { ...student, login: "edit-student", classId: nextOrg.schoolClass.id } });
+  const edited = await updateAccount(adminSession, target.user.id, { revision: 0, reason: "更正学院", disabled: false, account: { ...student, name: "编辑学生", login: "edit-student", classId: nextOrg.schoolClass.id } });
   expect(edited.studentProfile?.college).toBe("信息学院");
-  await expect(updateAccount(adminSession, target.user.id, { revision: 0, reason: "过期修改", disabled: true, account: { ...student, login: "edit-student" } })).rejects.toThrow("账号已被修改");
-  const staff = { name: student.name, login: "edit-student", role: "COLLEGE", collegeId: nextOrg.college.id };
+  await expect(updateAccount(adminSession, target.user.id, { revision: 0, reason: "过期修改", disabled: true, account: { ...student, name: "编辑学生", login: "edit-student" } })).rejects.toThrow("账号已被修改");
+  const staff = { name: "编辑老师", login: "edit-student", role: "COLLEGE", collegeId: nextOrg.college.id };
   await updateAccount(adminSession, target.user.id, { revision: 1, reason: "调整职责", disabled: false, account: staff });
   expect(await getCurrentSession(session.id)).toBeNull();
   const next = await db.authSession.create({ data: { userId: target.user.id, version: 1, expiresAt: new Date(Date.now() + 600_000) } });
@@ -58,8 +63,34 @@ test("编辑档案有修订冲突保护，角色和停用变化撤销会话", as
   expect(await getCurrentSession(next.id)).toBeNull();
   await expect(updateAccount(adminSession, adminId, { revision: 0, reason: "停用自己", disabled: true, account: { name: "账号管理员", login: "accounts-admin", role: "ADMIN" } })).rejects.toThrow("不能停用自身");
 });
+test("编辑账号和学生资料修改也执行同班同名确认", async () => {
+  const target = await createAccount(adminSession, { ...student, name: "改名目标", login: "rename-target" });
+  await createAccount(adminSession, { ...student, name: "共用姓名", login: "rename-other" });
+  await expect(updateAccount(adminSession, target.user.id, {
+    revision: 0,
+    reason: "更正姓名",
+    disabled: false,
+    account: { ...student, name: "共用姓名", login: "rename-target" },
+  })).rejects.toThrow("同班同名");
+  const renamed = await updateAccount(adminSession, target.user.id, {
+    revision: 0,
+    reason: "更正姓名",
+    disabled: false,
+    account: { ...student, name: "共用姓名", login: "rename-target", duplicateReason: "学籍名单核对确认两名学生同名但学号不同" },
+  });
+  expect(renamed.name).toBe("共用姓名");
+  const profileTarget = await createAccount(adminSession, { ...student, name: "资料目标", login: "profile-target" });
+  const profileInput = { revision: 0, name: "共用姓名", classId: firstOrg.schoolClass.id, reason: "依据学籍档案更正姓名" };
+  await expect(updateStudentProfile(adminSession, profileTarget.user.id, profileInput)).rejects.toThrow("同班同名");
+  const profileUpdated = await updateStudentProfile(adminSession, profileTarget.user.id, {
+    ...profileInput,
+    duplicateReason: "学籍名单核对确认该生与同班学生同名但学号不同",
+  });
+  expect(profileUpdated.name).toBe("共用姓名");
+  expect(profileUpdated.studentProfile?.studentNumber).toBe("profile-target");
+});
 test("重置密码撤销会话、强制改密，日志不保存密码", async () => {
-  const target = await createAccount(adminSession, { ...student, login: "reset-student" });
+  const target = await createAccount(adminSession, { ...student, name: "重置学生", login: "reset-student" });
   const session = await db.authSession.create({ data: { userId: target.user.id, version: 0, expiresAt: new Date(Date.now() + 600_000) } });
   const reset = await resetAccountPassword(adminSession, target.user.id, { revision: 0, reason: "本人忘记密码" });
   const user = await db.user.findUniqueOrThrow({ where: { id: target.user.id } });

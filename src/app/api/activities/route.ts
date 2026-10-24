@@ -4,8 +4,8 @@ import {
 	pageActivities,
 	pageActivityFeed,
 	saveActivity,
-	confirmActivity,
 	publishActivity,
+	endActivity,
 	reassignActivity,
 } from "@/server/activities";
 import {
@@ -13,7 +13,6 @@ import {
 	reviewParticipation,
 	changeParticipation,
 } from "@/server/recognitions";
-import { saveActivityScore } from "@/server/activity-participants";
 import { saveActivityEvidence } from "@/server/activity-evidence";
 import { AccountError } from "@/server/accounts";
 
@@ -27,11 +26,11 @@ const reviewActions = [
 const changeActions = ["resubmit", "remove"] as const;
 const actionSchema = z.enum([
 	"save",
-	"confirm",
 	"reassign",
 	"publish",
 	"unpublish",
-	"score",
+	"end",
+	"reopen",
 	"evidence",
 	...reviewActions,
 	...changeActions,
@@ -82,14 +81,12 @@ export async function POST(request: Request) {
 			void _termId;
 			void _action;
 			if (action === "save") return saveActivity(sessionId, termId, payload);
-			if (action === "confirm")
-				return confirmActivity(sessionId, termId, payload);
 			if (action === "reassign")
 				return reassignActivity(sessionId, termId, payload);
 			if (action === "publish" || action === "unpublish")
 				return publishActivity(sessionId, termId, { ...payload, action });
-			if (action === "score")
-				return saveActivityScore(sessionId, termId, payload);
+			if (action === "end" || action === "reopen")
+				return endActivity(sessionId, termId, { ...payload, action });
 			if (action === "evidence")
 				return saveActivityEvidence(sessionId, termId, payload);
 			if ((reviewActions as readonly string[]).includes(action))

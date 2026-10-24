@@ -8,22 +8,14 @@ import type { DataTableFeatures } from "@/lib/data-table-features";
 import { TemplateDirectory } from "@/components/dashboard/template-directory";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { useRemote } from "@/components/dashboard/use-remote";
-import { Feedback, requestJson } from "@/components/dashboard/feedback";
-import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@/components/ui/native-select";
-import {
-	FieldGroup,
-	Field,
-	FieldLabel,
-	FieldDescription,
-} from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/ui/field";
 import {
 	Sheet,
 	SheetContent,
@@ -51,7 +43,6 @@ type Participant = {
 	className: string;
 	registeredAt: string;
 	registrationSnapshot: Record<string, unknown> | null;
-	score: string | null;
 	revision: number;
 	removedAt?: string | null;
 	removalReason?: string | null;
@@ -76,11 +67,6 @@ const historyLabels: Record<string, string> = {
 	REGISTERED: "登记参加",
 	IMPORT: "导入登记",
 	IMPORTED: "导入登记",
-	SCORE_REVIEW_REQUIRED: "分数更改，须重新审核",
-	SCORE: "录入活动分数",
-	SCORE_CHANGED: "更正活动分数",
-	SCORE_CORRECTED: "更正活动得分",
-	SCORE_SUPERSEDED: "得分更正，原认定已替代",
 	REVIEWED: "审核参与",
 	WITHDRAW: "撤回",
 	REVOKE: "撤销",
@@ -138,88 +124,188 @@ function HistoryList({ items }: { items?: History[] }) {
 		</div>
 	);
 }
+const ownStatusLabels: Record<string, { label: string; hint: string }> = {
+	APPROVED: {
+		label: "已通过",
+		hint: "审核已通过，活动得分已计入总评。",
+	},
+	PENDING: {
+		label: "等待审核",
+		hint: "学院已提交你的参与记录，审核结果会在这里更新。",
+	},
+	PENDING_COUNSELOR: {
+		label: "等待辅导员审核",
+		hint: "辅导员审核后进入学院审核，你无需操作。",
+	},
+	PENDING_COLLEGE: {
+		label: "等待学院审核",
+		hint: "学院审核通过后计分，你无需操作。",
+	},
+	RETURNED: {
+		label: "已退回重审",
+		hint: "学院正在核对这份名单，你无需操作；如有疑问请联系主办学院。",
+	},
+	SUPERSEDED: {
+		label: "已被新记录替代",
+		hint: "学院更新了你的参与记录，以最新一次认定为准。",
+	},
+	RESCORING: {
+		label: "等待重新评分",
+		hint: "学院正在重新核对这条参与记录，你无需操作。",
+	},
+	WITHDRAWN: {
+		label: "已撤回",
+		hint: "主办学院撤回了这条参与记录。",
+	},
+	REVOKED: {
+		label: "已撤销",
+		hint: "这条参与记录已撤销，不计分。",
+	},
+	REJECTED: {
+		label: "未通过",
+		hint: "审核未通过，这条参与不计分。",
+	},
+	REMOVED: {
+		label: "已移除",
+		hint: "学院已将你移出这份参与名单。",
+	},
+	NONE: {
+		label: "等待提交名单",
+		hint: "学院尚未提交这份参与名单，提交后可在这里查看审核进度。",
+	},
+};
+function snapshotText(snapshot: Record<string, unknown>, key: string) {
+	const value = snapshot[key];
+	return typeof value === "string" && value.trim() ? value : "";
+}
 export function OwnParticipation({
 	participation,
-	individual,
 	points,
 }: {
 	participation: NonNullable<
 		import("./activity-form").Activity["ownParticipation"]
 	>;
-	individual: boolean;
 	points: string;
 }) {
-	const snapshot = participation.registrationSnapshot;
+	const sources = [...participation.sources].sort((a, b) =>
+		(a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
+	);
+	const latest = sources.at(-1);
+	const status = participation.removedAt
+		? "REMOVED"
+		: (latest?.status ?? "NONE");
+	const meta = ownStatusLabels[status] ?? ownStatusLabels.NONE;
+	const approved = status === "APPROVED";
+	const scored = ["REMOVED", "WITHDRAWN", "REVOKED", "REJECTED"].includes(status);
+	const snapshot = participation.registrationSnapshot ?? {};
+	const facts = [
+		["学号", snapshotText(snapshot, "login") || snapshotText(snapshot, "studentNumber")],
+		["学院", snapshotText(snapshot, "college")],
+		["专业", snapshotText(snapshot, "major")],
+		["班级", snapshotText(snapshot, "className")],
+	].filter(([, value]) => value);
+	const reviewNote = latest?.reviewReason?.trim();
+	const evidence = [
+		...new Map(
+			sources
+				.flatMap((source) => source.evidence ?? [])
+				.map(({ evidence: file }) => [file.id, file]),
+		).values(),
+	];
+	const history = [
+		...new Map(
+			[...(participation.history ?? []), ...sources.flatMap((source) => source.history ?? [])]
+				.filter((event) => event.action)
+				.map((event) => [`${event.action}-${event.at}`, event]),
+		).values(),
+	].sort((a, b) => b.at.localeCompare(a.at));
 	return (
-		<section className="flex flex-col gap-4 py-4">
-			<h2 className="text-base font-medium">我的参与登记</h2>
-			<dl className="grid gap-5 sm:grid-cols-2">
-				<div>
-					<dt className="text-xs text-muted-foreground">登记时间</dt>
-					<dd className="mt-1 text-sm">
-						{dateText(participation.registeredAt)}
-					</dd>
+		<section className="flex flex-col gap-5 py-4">
+			<div className="rounded-lg border p-5">
+				<div className="flex flex-wrap items-start justify-between gap-4">
+					<div className="flex flex-col gap-1">
+						<p className="text-xs text-muted-foreground">审核状态</p>
+						<p className="text-lg font-semibold">{meta.label}</p>
+					</div>
+					<div className="text-right">
+						<p className="text-xs text-muted-foreground">
+							{approved
+								? "已获活动得分"
+								: scored
+									? "活动得分"
+									: "审核通过后获得"}
+						</p>
+						<p className="text-2xl font-semibold tabular-nums">
+							{scored ? "不计分" : `${points} 分`}
+						</p>
+					</div>
 				</div>
-				<div>
-					<dt className="text-xs text-muted-foreground">活动得分</dt>
-					<dd className="mt-1 text-sm">
-						{individual
-							? (participation.score ?? "未录分")
-							: `${points} 分（统一）`}
-					</dd>
-				</div>
-				{snapshot && (
-					<div className="sm:col-span-2">
-						<dt className="text-xs text-muted-foreground">登记时班级</dt>
-						<dd className="mt-1 text-sm">
-							{[
-								snapshot.name,
-								snapshot.login,
-								snapshot.college,
-								snapshot.major,
-								snapshot.className,
-							]
-								.filter(Boolean)
-								.map(String)
-								.join(" / ") || "未记录历史班级"}
-						</dd>
+				<p className="mt-3 text-sm text-muted-foreground">{meta.hint}</p>
+				{participation.removedAt && (
+					<div className="mt-3 rounded-md border border-dashed p-3">
+						<p className="text-sm font-medium">
+							{dateText(participation.removedAt)} 移出名单
+						</p>
+						<p className="mt-1 text-sm text-muted-foreground">
+							{participation.removalReason?.trim() || "未填写移除原因。"}
+						</p>
 					</div>
 				)}
-			</dl>
-			{participation.removedAt && (
-				<div className="rounded-lg border border-dashed p-3">
-					<p className="text-sm font-medium">该参与记录已被移除</p>
-					<p className="mt-1 text-sm text-muted-foreground">
-						{participation.removalReason || "如有疑问，请联系活动主办学院核对。"}
-					</p>
+				<dl className="mt-5 grid gap-4 border-t pt-4 sm:grid-cols-2">
+					<div>
+						<dt className="text-xs text-muted-foreground">登记时间</dt>
+						<dd className="mt-1 text-sm">
+							{dateText(participation.registeredAt)}
+						</dd>
+					</div>
+					{facts.map(([label, value]) => (
+						<div key={label}>
+							<dt className="text-xs text-muted-foreground">{label}</dt>
+							<dd className="mt-1 text-sm">{value}</dd>
+						</div>
+					))}
+				</dl>
+			</div>
+			{reviewNote && (
+				<div className="rounded-lg border p-4">
+					<p className="text-xs text-muted-foreground">审核说明</p>
+					<p className="mt-1 whitespace-pre-wrap text-sm">{reviewNote}</p>
 				</div>
 			)}
-			<p className="text-sm text-muted-foreground">
-				登记后需审核，通过才计分。登记时的班级只用于保留记录，不影响当前活动范围。
-			</p>
-			{participation.sources.map((source) => (
-				<div key={source.id} className="flex flex-col gap-2 border-l pl-3">
-					<Badge variant="outline" className="self-start">
-						{statusLabels[source.status] || source.status}
-					</Badge>
-					<p className="text-sm text-muted-foreground">{source.reviewReason}</p>
-					{source.evidence?.map(({ evidence }) => (
-						<EvidenceViewer key={evidence.id} evidence={evidence} />
+			{evidence.length > 0 && (
+				<div className="flex flex-col gap-2 rounded-lg border p-4">
+					<p className="text-xs text-muted-foreground">证明附件</p>
+					{evidence.map((file) => (
+						<EvidenceViewer key={file.id} evidence={file} />
 					))}
-					<HistoryList items={source.history} />
 				</div>
-			))}
-			<h3 className="text-sm font-medium">参与和得分记录</h3>
-			<HistoryList items={participation.history} />
+			)}
+			{history.length > 0 && (
+				<section className="flex flex-col gap-3">
+					<h3 className="text-sm font-medium">处理记录</h3>
+					{history.map((event, index) => (
+						<div
+							key={`${event.action}-${event.at}-${index}`}
+							className="flex flex-col gap-1 border-l pl-3"
+						>
+							<p className="text-sm">
+								{historyLabels[event.action] || "记录变更"} · {dateText(event.at)}
+							</p>
+							{event.reason?.trim() && (
+								<p className="whitespace-pre-wrap text-sm text-muted-foreground">
+									{event.reason}
+								</p>
+							)}
+						</div>
+					))}
+				</section>
+			)}
 		</section>
 	);
 }
 export function ActivityParticipants({
 	activityId,
 	termId,
-	canManage,
-	active,
-	individual,
 	points,
 	hostCollege,
 	rosterCommitted,
@@ -228,7 +314,6 @@ export function ActivityParticipants({
 	termId: string;
 	canManage: boolean;
 	active: boolean;
-	individual: boolean;
 	points: string;
 	hostCollege: string | null;
 	rosterCommitted: boolean;
@@ -258,10 +343,6 @@ export function ActivityParticipants({
 		`/api/activities/participants?${queryString.toString()}`,
 	);
 	const [selected, setSelected] = useState<Participant | null>(null);
-	const [busy, setBusy] = useState(false);
-	const [dirty, setDirty] = useState(false);
-	const [error, setError] = useState("");
-	useUnsavedChanges(dirty || busy);
 	const columns: ColumnDef<DataTableFeatures, Participant>[] = [
 		{
 			id: "student",
@@ -296,10 +377,7 @@ export function ActivityParticipants({
 		{
 			id: "score",
 			header: "活动得分",
-			cell: ({ row }) =>
-				individual
-					? (row.original.score ?? "未录分")
-					: `${points} 分（统一）`,
+			cell: () => `${points} 分`,
 		},
 		{
 			id: "sources",
@@ -332,15 +410,9 @@ export function ActivityParticipants({
 				<Button
 					variant="ghost"
 					size="sm"
-					onClick={() => {
-						setSelected(row.original);
-						setDirty(false);
-						setError("");
-					}}
+					onClick={() => setSelected(row.original)}
 				>
-					{canManage && active && individual && !row.original.removedAt
-						? "录入得分"
-						: "查看"}
+					查看
 				</Button>
 			),
 		},
@@ -435,10 +507,7 @@ export function ActivityParticipants({
 								{row.college} / {row.major} / {row.className}
 							</p>
 							<p className="text-sm">
-								{individual
-									? (row.score ?? "未录分")
-									: `${points} 分（统一）`}{" "}
-								·{" "}
+								{points} 分 ·{" "}
 								{row.sources
 									.map((source) => statusLabels[source.status] || source.status)
 									.join("、") || "暂无审核记录"}
@@ -455,11 +524,7 @@ export function ActivityParticipants({
 							<Button
 								variant="outline"
 								className="self-start"
-								onClick={() => {
-									setSelected(row);
-									setError("");
-									setDirty(false);
-								}}
+								onClick={() => setSelected(row)}
 							>
 								查看
 							</Button>
@@ -470,12 +535,7 @@ export function ActivityParticipants({
 			<Sheet
 				open={!!selected}
 				onOpenChange={(open) => {
-					if (
-						!open &&
-						!busy &&
-						(!dirty || window.confirm("放弃尚未保存的活动分数？"))
-					)
-						setSelected(null);
+					if (!open) setSelected(null);
 				}}
 			>
 				<SheetContent className="w-full overflow-y-auto sm:max-w-xl">
@@ -490,7 +550,6 @@ export function ActivityParticipants({
 					</SheetHeader>
 					{selected && (
 						<div className="flex flex-col gap-5 px-5 pb-6">
-							<Feedback error={error} />
 							{selected.removedAt && (
 								<div className="rounded-lg border border-dashed p-3">
 									<p className="text-sm font-medium">该参与记录已移除</p>
@@ -513,11 +572,7 @@ export function ActivityParticipants({
 								</div>
 								<div>
 									<dt className="text-xs text-muted-foreground">当前得分</dt>
-									<dd className="text-sm">
-										{individual
-											? (selected.score ?? "未录分")
-											: `${points} 分（统一）`}
-									</dd>
+									<dd className="text-sm">{points} 分</dd>
 								</div>
 								<div className="sm:col-span-2">
 									<dt className="text-xs text-muted-foreground">登记时班级</dt>
@@ -537,74 +592,8 @@ export function ActivityParticipants({
 									</dd>
 								</div>
 							</dl>
-							{canManage &&
-								active &&
-								individual &&
-								selected.registeredAt &&
-								!selected.removedAt && (
-								<form
-									className="flex flex-col gap-4"
-									onChange={() => setDirty(true)}
-									onSubmit={async (event) => {
-										event.preventDefault();
-										if (busy) return;
-										setBusy(true);
-										setError("");
-										const form = new FormData(event.currentTarget);
-										try {
-											await requestJson("/api/activities", {
-												action: "score",
-												termId,
-												participationId: selected.id,
-												revision: selected.revision,
-												value: form.get("value"),
-												reason: form.get("reason"),
-											});
-											setDirty(false);
-											setSelected(null);
-											remote.reload();
-										} catch (err) {
-											setError((err as Error).message);
-										} finally {
-											setBusy(false);
-										}
-									}}
-								>
-									<FieldGroup>
-										<Field>
-											<FieldLabel htmlFor="participation-score">
-												活动得分
-											</FieldLabel>
-											<Input
-												id="participation-score"
-												name="value"
-												inputMode="decimal"
-												defaultValue={selected.score ?? ""}
-												required
-											/>
-											<FieldDescription>
-												最高 {points}{" "}
-												分。未录分不会按 0 分计算；更改已通过的得分会重新进入审核。
-											</FieldDescription>
-										</Field>
-										<Field>
-											<FieldLabel htmlFor="participation-score-reason">
-												录入或更正原因
-											</FieldLabel>
-											<Textarea
-												id="participation-score-reason"
-												name="reason"
-												minLength={2}
-												maxLength={1000}
-												required
-											/>
-										</Field>
-									</FieldGroup>
-									<Button type="submit" disabled={busy}>保存得分</Button>
-								</form>
-							)}
 							<Separator />
-							<h3 className="text-sm font-medium">参与和得分记录</h3>
+							<h3 className="text-sm font-medium">参与和审核记录</h3>
 							<HistoryList items={selected.history} />
 							{selected.sources.map((source) => (
 								<section key={source.id} className="flex flex-col gap-3">

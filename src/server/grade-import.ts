@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Prisma, Term } from "@/generated/prisma/client";
 import { AccountError } from "@/server/accounts";
@@ -8,9 +8,17 @@ import { Rational } from "@/lib/scoring/rational";
 import { decimalSchema } from "@/lib/scoring/types";
 import { jsonValue } from "@/server/claims";
 import { inputHistoryEntry } from "@/server/input-review";
+import { duplicateIdentityMessage, loadIdentityIndex } from "@/server/student-identity";
 
-const rowsSchema = z.array(z.object({ login: z.string().trim().min(1).max(64), value: z.string().trim().max(200) })).min(1).max(100);
-export type GradePreviewRow = { line: number; login: string; name: string; before: string | null; value: string; state: "NEW" | "SAME" | "OVERWRITE" | "SKIP" | "ERROR"; message: string };
+const rowsSchema = z.array(z.object({
+  login: z.string().trim().max(64),
+  name: z.string().trim().max(80),
+  college: z.string().trim().max(80),
+  major: z.string().trim().max(80),
+  className: z.string().trim().max(80),
+  value: z.string().trim().max(200),
+})).min(1).max(100);
+export type GradePreviewRow = { line: number; login: string; name: string; college: string; major: string; className: string; before: string | null; value: string; state: "NEW" | "SAME" | "OVERWRITE" | "SKIP" | "ERROR"; message: string };
 type Actor = { id: string; role: string };
 
 // Counselors import into their own classes and every row becomes a pending college
@@ -29,6 +37,23 @@ async function inspect(tx: Prisma.TransactionClient, term: Term, nodeId: string,
       select: { id: true, login: true, name: true, role: true, disabled: true, revision: true, studentProfile: true }, orderBy: { id: "asc" },
     });
   const ids = students.map(student => student.id);
+  const liveProfiles = ids.length
+    ? await tx.studentProfile.findMany({
+      where: { userId: { in: ids } },
+      select: { userId: true, studentNumber: true, classId: true, college: true, major: true, className: true },
+      orderBy: { userId: "asc" },
+    })
+    : [];
+  const liveProfileByStudent = new Map(liveProfiles.map(profile => [profile.userId, profile]));
+  const identityIndex = await loadIdentityIndex(
+    tx,
+    liveProfiles.map(profile => ({
+      classId: profile.classId,
+      college: profile.college,
+      major: profile.major,
+      className: profile.className,
+    })),
+  );
   const [grades, pending] = await Promise.all([
     tx.gradeInput.findMany({ where: { termId: term.id, nodeId, studentId: { in: ids } }, orderBy: { id: "asc" } }),
     ids.length ? tx.gradeChange.findMany({ where: { termId: term.id, nodeId, studentId: { in: ids }, status: { in: ["PENDING_COLLEGE", "RETURNED"] } }, select: { studentId: true } }) : [],
@@ -39,8 +64,27 @@ async function inspect(tx: Prisma.TransactionClient, term: Term, nodeId: string,
   const seen = new Map<string, string>();
   const preview: GradePreviewRow[] = rows.map((row, index) => {
     const student = known.get(row.login), grade = student ? previous.get(student.id) : undefined;
-    const base = { line: index + 2, login: row.login, name: student?.name ?? "", before: grade?.value.toFixed() ?? null, value: row.value };
+    const base = { line: index + 2, login: row.login, name: row.name, college: row.college, major: row.major, className: row.className, before: grade?.value.toFixed() ?? null, value: row.value };
     if (!student || student.role !== "STUDENT" || student.disabled || !student.studentProfile) return { ...base, state: "ERROR", message: review ? "学号未匹配本人负责班级的有效学生档案" : "学号未匹配有效学生档案" };
+    const profile = student.studentProfile;
+    const mismatched = [
+      student.name !== row.name ? "姓名" : "",
+      profile.college !== row.college ? "学院" : "",
+      profile.major !== row.major ? "专业" : "",
+      profile.className !== row.className ? "班级" : "",
+    ].filter(Boolean);
+    if (mismatched.length) return { ...base, state: "ERROR", message: `文件中的${mismatched.join("、")}与当前档案不一致，请核对后重新导出模板` };
+    const identityProfile = liveProfileByStudent.get(student.id);
+    const duplicateCandidates = identityIndex.candidatesFor({
+      userId: student.id,
+      studentNumber: identityProfile?.studentNumber ?? row.login,
+      name: student.name,
+      classId: identityProfile?.classId ?? null,
+      college: identityProfile?.college ?? row.college,
+      major: identityProfile?.major ?? row.major,
+      className: identityProfile?.className ?? row.className,
+    });
+    if (duplicateCandidates.length) return { ...base, state: "ERROR", message: `${duplicateIdentityMessage(duplicateCandidates)} 成绩导入在重复账号处置前不可写入。` };
     if (waiting.has(student.id)) return { ...base, state: "ERROR", message: "该学生此成绩项已有待审或退回中的修订，请先在成绩页处理" };
     if (!decimalSchema.safeParse(row.value).success) return { ...base, state: "ERROR", message: "成绩必须为合法十进制数，最多12位小数" };
     const value = Rational.from(row.value);
@@ -52,15 +96,29 @@ async function inspect(tx: Prisma.TransactionClient, term: Term, nodeId: string,
     if (review) return { ...base, state: grade ? "OVERWRITE" : "NEW", message: grade ? `提交学院审核，通过后替换 ${grade.value.toFixed()}` : "提交学院审核，通过后成为有效成绩" };
     return { ...base, state: grade ? "OVERWRITE" : "NEW", message: grade ? "覆盖当前成绩并保留更正记录" : "新增成绩输入" };
   });
-  return { rows: preview, known, previous, waiting, snapshot: createHash("sha256").update(JSON.stringify({ revision: term.revision, node, students, grades, pending })).digest("hex") };
+  return { rows: preview, known, previous, waiting, snapshot: createHash("sha256").update(JSON.stringify({ revision: term.revision, node, students, grades, pending, identity: identityIndex.snapshot })).digest("hex") };
 }
-export async function previewGradeImport(sessionId: string, termId: string, input: unknown) {
+type PreviewMeta = { fileHash?: string; templateVersion?: string; requestId?: string };
+export async function previewGradeImport(sessionId: string, termId: string, input: unknown, meta: PreviewMeta = {}) {
   const data = z.object({ nodeId: z.string().min(1), rows: rowsSchema, reason: z.string().trim().min(2).max(1000) }).parse(input);
   return termTransaction(sessionId, termId, ["ADMIN", "COUNSELOR"], ["ACTIVE"], async (tx, term, actorId) => {
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, select: { id: true, role: true } });
     const preview = await inspect(tx, term, data.nodeId, data.rows, actor);
-    const batch = await tx.gradeImport.create({ data: { termId: term.id, actorId, nodeId: data.nodeId, rows: data.rows, reason: data.reason, snapshot: preview.snapshot, expiresAt: new Date(Date.now() + 15 * 60_000) } });
-    return { id: batch.id, rows: preview.rows, errors: preview.rows.filter(row => row.state === "ERROR").length, review: actor.role === "COUNSELOR", expiresAt: batch.expiresAt };
+    const requestId = meta.requestId ?? randomUUID();
+    const batch = await tx.gradeImport.create({ data: {
+      termId: term.id,
+      actorId,
+      nodeId: data.nodeId,
+      rows: data.rows,
+      reason: data.reason,
+      snapshot: preview.snapshot,
+      fileHash: meta.fileHash ?? null,
+      templateVersion: meta.templateVersion ?? "grades-v3",
+      scopeKey: `${term.id}:grades:${data.nodeId}`,
+      requestId,
+      expiresAt: new Date(Date.now() + 15 * 60_000),
+    } });
+    return { id: batch.id, requestId, templateVersion: batch.templateVersion, rows: preview.rows, errors: preview.rows.filter(row => row.state === "ERROR").length, review: actor.role === "COUNSELOR", expiresAt: batch.expiresAt };
   });
 }
 export async function commitGradeImport(sessionId: string, termId: string, id: string) {
@@ -90,8 +148,14 @@ export async function commitGradeImport(sessionId: string, termId: string, id: s
         submitted++;
       }
       const result = { written: 0, submitted, skipped: preview.rows.length - submitted, submittedForReview: true };
-      await tx.gradeImport.update({ where: { id }, data: { status: "COMMITTED", result } });
-      await tx.auditEvent.create({ data: { actorId, action: "GRADE_IMPORT_SUBMITTED", targetId: id, details: { termId, nodeId: batch.nodeId, submitted, skipped: result.skipped } } });
+      await tx.gradeImport.update({ where: { id }, data: {
+        status: "COMMITTED",
+        result,
+        rowResults: preview.rows,
+        confirmations: [],
+        committedAt: new Date(),
+      } });
+      await tx.auditEvent.create({ data: { actorId, action: "GRADE_IMPORT_SUBMITTED", targetId: id, details: { termId, nodeId: batch.nodeId, submitted, skipped: result.skipped, fileHash: batch.fileHash, templateVersion: batch.templateVersion, requestId: batch.requestId } } });
       return { ...result, replay: false };
     }
     let written = 0;
@@ -103,8 +167,14 @@ export async function commitGradeImport(sessionId: string, termId: string, id: s
     }
     const result = { written, skipped: preview.rows.length - written };
     if (written) await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-    await tx.gradeImport.update({ where: { id }, data: { status: "COMMITTED", result } });
-    await tx.auditEvent.create({ data: { actorId, action: "GRADE_IMPORT_COMMITTED", targetId: id, details: { ...result, termId } } });
+    await tx.gradeImport.update({ where: { id }, data: {
+      status: "COMMITTED",
+      result,
+      rowResults: preview.rows,
+      confirmations: [],
+      committedAt: new Date(),
+    } });
+    await tx.auditEvent.create({ data: { actorId, action: "GRADE_IMPORT_COMMITTED", targetId: id, details: { ...result, termId, fileHash: batch.fileHash, templateVersion: batch.templateVersion, requestId: batch.requestId } } });
     return { ...result, replay: false };
   });
 }

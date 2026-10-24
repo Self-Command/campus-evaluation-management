@@ -1,12 +1,13 @@
 openapi: 3.1.1
 info:
   title: 高校综合测评管理 — 现有业务接口
-  version: 0.1.1-audit-20261022
+  version: 0.1.1-audit-20261023
   description: |
     静态源码契约；非目标功能清单，未进行本轮HTTP运行验收。
     路由覆盖按各次审计日期的文件清单维护；2026-10-22 增补成绩与扣分两级审核接口。
+    2026-10-23 同步活动发布、Markdown正文与活动附件接口：发布即 confirmed，不再有 confirm 动作。
     NextAuth catch-all由认证库处理，见认证边界说明。
-    未覆盖发布、异议、排名、快照、设置、模板下载及结果HTTP接口。
+    未覆盖结果发布、异议、排名、快照、设置、模板下载及结果查询接口。
     POST/PATCH业务入口校验Origin与请求URL同源，或精确匹配NEXTAUTH_URL/APP_TRUSTED_ORIGINS；缺少也拒绝。
     首次改密会话除/api/password及认证库入口外不能访问业务接口。
     unknown error/损坏JSON在部分入口返回500，不能假定所有语法错误均为400。
@@ -308,28 +309,35 @@ paths:
   /api/activities:
     get:
       operationId: listActivitiesOrRecognitions
-      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      x-roles: [ADMIN, PUBLISHER, COLLEGE, COUNSELOR, STUDENT]
       parameters:
         - { $ref: '#/components/parameters/TermQuery' }
         - name: view
           in: query
-          description: reviews返回认定来源；其他任何值/缺省均返回活动。
-          schema: { type: string }
-      description: 两种列表均最多200，按时间倒序，没有完整分页。发布者活动限本人；来源学生限本人、发布者限本人负责活动。
+          description: reviews返回认定记录分页；feed返回学生最新活动分页（仅STUDENT）；其他值/缺省返回活动目录分页。
+          schema: { type: string, enum: [reviews, feed] }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100000, default: 1 }
+        - name: q
+          in: query
+          description: 活动按名称/主办单位匹配；认定记录按学生姓名/登录名/活动名称匹配；最多80字符。
+          schema: { type: string, maxLength: 80 }
+      description: 每页20项。feed仅返回 publishedAt 非空、confirmed、学期ACTIVE且NORMAL、未手动结束、当前时间处于起止时间内、命中学院/班级范围的活动；非ACTIVE学期返回空页。
       responses:
         '200':
-          description: 活动数组或认定来源数组
+          description: 活动目录/信息流分页，或认定记录分页
           content:
             application/json:
               schema:
-                anyOf:
-                  - { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Activity' } }
-                  - { type: array, maxItems: 200, items: { $ref: '#/components/schemas/RecognitionView' } }
+                oneOf:
+                  - { $ref: '#/components/schemas/ActivityPage' }
+                  - { $ref: '#/components/schemas/RecognitionPage' }
         default: { $ref: '#/components/responses/Error' }
     post:
       operationId: operateActivityOrRecognition
-      description: 所有写入仅ACTIVE；入口放行三角色，服务按action进一步限制。
-      x-roles: [ADMIN, PUBLISHER, STUDENT]
+      description: 所有写入仅学期ACTIVE；服务按action进一步限制角色与状态。publish在同一事务内校验参与范围并写 confirmed=true，不需要管理员预确认；unpublish必须填reason；end由主办方提前结束并从学生最新活动中移除，reopen撤销手动结束且要求计划结束时间未过。
+      x-roles: [ADMIN, PUBLISHER, COLLEGE, COUNSELOR]
       requestBody:
         required: true
         content:
@@ -344,41 +352,125 @@ paths:
                     id: { type: string }
                     revision: { $ref: '#/components/schemas/Revision' }
                     activity: { $ref: '#/components/schemas/ActivityInput' }
+                    attachmentIds: { type: array, maxItems: 20, items: { type: string } }
                 - type: object
                   required: [action, termId, id, revision]
                   properties:
-                    action: { const: confirm }
+                    action: { type: string, enum: [publish, unpublish] }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    id: { type: string }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                    reason: { type: string, minLength: 2, maxLength: 1000 }
+                - type: object
+                  required: [action, termId, id, revision]
+                  properties:
+                    action: { type: string, enum: [end, reopen] }
                     termId: { $ref: '#/components/schemas/Id' }
                     id: { type: string }
                     revision: { $ref: '#/components/schemas/Revision' }
                 - type: object
-                  required: [action, termId, activityId, note, evidenceIds]
+                  required: [action, termId, id, revision, collegeId, reason]
                   properties:
-                    action: { const: submit }
+                    action: { const: reassign }
+                    termId: { $ref: '#/components/schemas/Id' }
+                    id: { type: string }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                    collegeId: { type: string }
+                    reason: { type: string, minLength: 2, maxLength: 500 }
+                - type: object
+                  required: [action, termId, activityId, revision, evidenceId, note]
+                  properties:
+                    action: { const: evidence }
                     termId: { $ref: '#/components/schemas/Id' }
                     activityId: { type: string }
-                    studentId: { type: string }
-                    studentLogin: { type: string, maxLength: 64 }
-                    note: { type: string, minLength: 1, maxLength: 2000 }
-                    evidenceIds: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
+                    revision: { $ref: '#/components/schemas/Revision' }
+                    evidenceId: { type: string }
+                    note: { type: string, minLength: 1, maxLength: 500 }
+                    reason: { type: string, minLength: 2, maxLength: 1000 }
                 - type: object
-                  required: [action, termId, id, revision, status, reason]
+                  required: [action, termId, id, revision]
                   properties:
-                    action: { const: review }
+                    action:
+                      type: string
+                      enum: [counselorApprove, counselorReturn, collegeApprove, collegeReturn, revoke, resubmit, remove]
                     termId: { $ref: '#/components/schemas/Id' }
                     id: { type: string }
                     revision: { $ref: '#/components/schemas/Revision' }
-                    status: { type: string, enum: [APPROVED, REJECTED] }
                     reason: { type: string, minLength: 2, maxLength: 1000 }
+                    note: { type: string, minLength: 2, maxLength: 2000 }
       responses:
         '200':
-          description: save/confirm返回Activity；submit/review返回RecognitionSource。review当前没有必须PENDING的前置检查。
+          description: save/publish/unpublish/reassign返回Activity；evidence返回ActivityEvidence；审核/参与变更返回RecognitionSource。
           content:
             application/json:
               schema:
                 oneOf:
                   - { $ref: '#/components/schemas/Activity' }
+                  - { $ref: '#/components/schemas/ActivityEvidence' }
                   - { $ref: '#/components/schemas/RecognitionSource' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/activity-attachments:
+    post:
+      operationId: uploadActivityAttachment
+      description: 原始二进制请求体，文件名放在 x-file-name（URL编码），可选 x-activity-id 绑定到可管理的活动；上线前上传要求同源。扩展名白名单与真实签名必须一致。
+      x-roles: [ADMIN, COLLEGE, PUBLISHER]
+      parameters:
+        - name: x-file-name
+          in: header
+          required: true
+          schema: { type: string, maxLength: 120 }
+        - name: x-activity-id
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: 已保存附件元数据；未绑定 activityId 的附件保留24小时
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityAttachment' }
+        default: { $ref: '#/components/responses/Error' }
+  /api/activity-attachments/{id}:
+    get:
+      operationId: downloadActivityAttachment
+      description: 已绑定附件按活动可见性鉴权；未绑定附件仅上传者或ADMIN可读。图片/PDF内联，其余作为附件下载；响应带 nosniff 与 no-store。
+      x-roles: [ADMIN, COLLEGE, PUBLISHER, COUNSELOR, STUDENT]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 文件字节流
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteActivityAttachment
+      description: 允许上传者本人、ADMIN，或该活动的管理者；同时删除文件与数据库记录。要求同源。
+      x-roles: [ADMIN, COLLEGE, PUBLISHER]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 删除结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { const: true }
         default: { $ref: '#/components/responses/Error' }
   /api/grades:
     get:
@@ -1041,37 +1133,127 @@ components:
         inputRevision: { $ref: '#/components/schemas/Revision' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ActivityAudience:
+      type: object
+      description: 单一范围方式；同一方式内多选为并集。ALL 忽略两个数组，COLLEGE 只用 colleges，CLASS 只用 classes。保存草稿允许空选择，发布时至少选择一项。
+      required: [scope, colleges, classes]
+      properties:
+        scope: { type: string, enum: [ALL, COLLEGE, CLASS] }
+        colleges: { type: array, maxItems: 500, items: { type: string, maxLength: 80 } }
+        classes:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            required: [college, major, className]
+            properties:
+              college: { type: string, maxLength: 80 }
+              major: { type: string, maxLength: 80 }
+              className: { type: string, maxLength: 80 }
     ActivityInput:
       type: object
-      required: [name, organizer, content, requirements, startsAt, endsAt, nodeId, points]
+      required: [name, organizer, content, startsAt, endsAt, nodeId, points]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         organizer: { type: string, minLength: 1, maxLength: 120 }
-        content: { type: string, minLength: 1, maxLength: 5000 }
-        requirements: { type: string, maxLength: 2000 }
+        content: { type: string, minLength: 1, maxLength: 20000, description: Markdown正文；渲染端禁用原始HTML }
         startsAt: { type: string, format: date-time, description: Zod默认ISO UTC datetime，不接受任意本地时间文本 }
         endsAt: { type: string, format: date-time }
         nodeId: { $ref: '#/components/schemas/Id' }
         points: { $ref: '#/components/schemas/DecimalInput' }
+        audience: { $ref: '#/components/schemas/ActivityAudience' }
+        collegeId: { type: string, description: ADMIN可指定主办学院；COLLEGE固定为本院 }
     Activity:
       type: object
-      required: [id, termId, ownerId, name, organizer, content, requirements, startsAt, endsAt, nodeId, points, confirmed, revision, createdAt, updatedAt]
+      required: [id, termId, ownerId, name, organizer, content, contentText, startsAt, endsAt, nodeId, points, confirmed, publishedAt, publishRevision, revision, createdAt, updatedAt]
       properties:
         id: { type: string }
         termId: { type: string }
         ownerId: { type: string }
         name: { type: string }
         organizer: { type: string }
-        content: { type: string }
-        requirements: { type: string }
+        content: { type: string, description: Markdown原文 }
+        contentText: { type: string, description: 去标记摘要，最多160字 }
         startsAt: { type: string, format: date-time }
         endsAt: { type: string, format: date-time }
         nodeId: { type: string }
         points: { $ref: '#/components/schemas/DecimalOutput' }
-        confirmed: { type: boolean }
+        confirmed: { type: boolean, description: 发布时自动为true，保留用于兼容存量 }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        endedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 主办方手动结束时间；为空表示未手动结束
+        publishRevision: { type: integer, minimum: 0 }
+        audience:
+          anyOf:
+            - { $ref: '#/components/schemas/ActivityAudience' }
+            - { type: 'null' }
+          description: 仅管理者可见；其他角色为null
+        college:
+          anyOf:
+            - type: object
+              required: [id, name, code]
+              properties:
+                id: { type: string }
+                name: { type: string }
+                code: { type: string }
+            - { type: 'null' }
+        canManage: { type: boolean }
+        canReview: { type: boolean }
+        rosterCommitted: { type: boolean }
+        attachments:
+          type: array
+          description: 仅活动详情返回；列表缺省为空数组
+          items: { $ref: '#/components/schemas/ActivityAttachment' }
         revision: { $ref: '#/components/schemas/Revision' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ActivityPage:
+      type: object
+      required: [items, total, page]
+      properties:
+        items: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/Activity' } }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+    ActivityAttachment:
+      type: object
+      required: [id, name, mime, size, kind, createdAt, url]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mime: { type: string }
+        size: { type: integer, minimum: 0 }
+        kind: { type: string, enum: [IMAGE, FILE] }
+        createdAt: { type: string, format: date-time }
+        url: { type: string, description: '鉴权读取路径：/api/activity-attachments/{id}' }
+    ActivityEvidence:
+      type: object
+      required: [id, activityId, evidenceId, version, active, uploadedBy, note, createdAt, evidence]
+      properties:
+        id: { type: string }
+        activityId: { type: string }
+        evidenceId: { type: string }
+        version: { type: integer, minimum: 1 }
+        active: { type: boolean }
+        uploadedBy: { type: string }
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+        evidence:
+          type: object
+          required: [id, name, mime, size]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            mime: { type: string }
+            size: { type: integer }
+    RecognitionPage:
+      type: object
+      required: [items, total, page]
+      properties:
+        items: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/RecognitionView' } }
+        total: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 1 }
     RecognitionSource:
       type: object
       required: [id, participationId, submitterId, status, reviewReason, reviewerId, reviewedAt, note, revision, createdAt, updatedAt]

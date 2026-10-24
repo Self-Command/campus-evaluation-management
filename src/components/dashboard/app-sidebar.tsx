@@ -23,6 +23,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { navigation } from "@/navigation/sidebar/sidebar-items";
@@ -93,10 +94,10 @@ export function AppSidebar({
               </DropdownMenuTrigger>
               <DropdownMenuContent side={isMobile ? "top" : "right"} align="end" className="min-w-56">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem render={<Link href="/account" />}>
+                  <DropdownMenuLinkItem render={<Link href="/account" />}>
                     <ShieldCheck />
                     个人资料与安全
-                  </DropdownMenuItem>
+                  </DropdownMenuLinkItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>

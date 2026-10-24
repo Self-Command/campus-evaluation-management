@@ -17,12 +17,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import {
 	Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
 import {
 	Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { dateText, statusLabels } from "@/lib/business-labels";
 
 type Profile = { studentNumber: string; college: string; major: string; className: string };
@@ -45,7 +47,7 @@ type QueueItem = {
 	reason: string; status: string; submitter: string | null; submittedAt: string; reviewer: string | null;
 	reviewedAt: string | null; reviewReason: string | null; revision: number; canDecide: boolean; canRevise: boolean;
 };
-type Queue = { items: QueueItem[]; total: number; page: number; status: string; stats: { pending: number; returned: number; mine: number }; role: string };
+type Queue = { items: QueueItem[]; total: number; page: number; status: string; stats: { pending: number; returned: number }; role: string };
 type Event = {
 	id: string; projectId: string; projectName: string; nodeName: string; coefficient: string;
 	occurrence: number; amount: string; revoked: boolean; reason: string; revision: number; updatedAt: string; pendingRevoke: boolean;
@@ -64,13 +66,13 @@ type Detail = {
 };
 
 const queueStatuses = [
-	["PENDING", "待处理与退回"],
+	["PENDING", "待处理（含已退回）"],
 	["PENDING_COLLEGE", "待学院审核"],
-	["RETURNED", "已退回"],
+	["RETURNED", "已退回待修改"],
 	["APPROVED", "已通过"],
-	["ABANDONED", "已放弃"],
+	["ABANDONED", "已撤回本次申请"],
 ] as const;
-const actionLabels = { CREATE: "新增扣分", REVOKE: "撤销事件" } as const;
+const actionLabels = { CREATE: "新增扣分", REVOKE: "撤销扣分" } as const;
 
 export function DeductionWorkspace({ term, role }: { term: { id: string; name: string; phase: string; disposition: string }; role: "ADMIN" | "COLLEGE" | "COUNSELOR" }) {
 	const readOnly = term.phase !== "ACTIVE" || term.disposition !== "NORMAL";
@@ -86,6 +88,10 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 	const [error, setError] = useState("");
 	const [success, setSuccess] = useState("");
 	const [dirty, setDirty] = useState(false);
+	const [view, setView] = useState<"queue" | "roster">(
+		role === "COUNSELOR" ? "roster" : "queue",
+	);
+	const [projectFormKey, setProjectFormKey] = useState(0);
 	const [sendingBack, setSendingBack] = useState<{ id: string; revision: number; label: string } | null>(null);
 	const [revoking, setRevoking] = useState<Event | null>(null);
 	useUnsavedChanges(dirty);
@@ -103,15 +109,17 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 		detail.reload();
 	}
 	async function submit(input: Record<string, unknown>, message: string) {
-		if (busy || !detail.data) return;
+		if (busy || !detail.data) return false;
 		setBusy(true);
 		setError("");
 		setSuccess("");
 		try {
 			await requestJson("/api/deduction-changes", { termId: term.id, studentId: detail.data.student.id, requestId: crypto.randomUUID(), ...input });
 			refresh(message);
+			return true;
 		} catch (err) {
 			setError((err as Error).message);
+			return false;
 		} finally {
 			setBusy(false);
 		}
@@ -122,7 +130,7 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 		setError("");
 		try {
 			await requestJson(`/api/deduction-changes/${id}`, { termId: term.id, revision, action, ...extra }, "PATCH");
-			refresh(action === "approve" ? "扣分已审核通过并生效。" : action === "return" ? "已退回原辅导员修正。" : action === "resubmit" ? "已重新提交学院审核。" : "已放弃本次修订。");
+			refresh(action === "approve" ? "扣分已审核通过并生效。" : action === "return" ? "已退回原辅导员修改。" : action === "resubmit" ? "已重新提交学院审核。" : "已撤回本次申请。");
 		} catch (err) {
 			setError((err as Error).message);
 		} finally {
@@ -144,18 +152,18 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 		{ id: "project", header: "扣分项目", cell: ({ row }) => (
 			<div>
 				<p>{row.original.projectName}</p>
-				<p className="text-xs text-muted-foreground">{row.original.nodeName} · 系数 {row.original.coefficient}</p>
+				<p className="text-xs text-muted-foreground">{row.original.nodeName} · 扣分系数 {row.original.coefficient}</p>
 			</div>
 		) },
 		{ id: "action", header: "类型", cell: ({ row }) => (
 			<div>
-				<Badge variant={row.original.action === "REVOKE" ? "destructive" : "outline"}>{actionLabels[row.original.action]}</Badge>
+				<Badge variant={row.original.action === "REVOKE" ? "secondary" : "outline"}>{actionLabels[row.original.action]}</Badge>
 				{row.original.action === "REVOKE" && row.original.targetOccurrence !== null && (
-					<p className="text-xs text-muted-foreground">第 {row.original.targetOccurrence + 1} 条事件 · 原扣 {row.original.targetAmount ?? "—"}</p>
+					<p className="text-xs text-muted-foreground">第 {row.original.targetOccurrence + 1} 次扣分 · 原扣分 {row.original.targetAmount ?? "—"}</p>
 				)}
 			</div>
 		) },
-		{ id: "amount", header: "扣分额", cell: ({ row }) => <span className="tabular-nums">{row.original.amount ?? "—"}</span> },
+		{ id: "amount", header: "扣分", cell: ({ row }) => <span className="tabular-nums">{row.original.amount ?? "—"}</span> },
 		{ id: "reason", header: "事由", cell: ({ row }) => <span className="line-clamp-2 max-w-48 text-sm">{row.original.reason}</span> },
 		{ id: "submitter", header: "提交", cell: ({ row }) => (
 			<div>
@@ -165,7 +173,7 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 		) },
 		{ id: "status", header: "状态", cell: ({ row }) => (
 			<div className="flex flex-col items-start gap-1">
-				<Badge variant={row.original.status === "RETURNED" ? "destructive" : row.original.status === "APPROVED" ? "secondary" : "outline"}>{statusLabels[row.original.status] || row.original.status}</Badge>
+				<Badge variant={row.original.status === "APPROVED" ? "outline" : "secondary"}>{statusLabels[row.original.status] || row.original.status}</Badge>
 				{row.original.reviewReason && <span className="max-w-40 text-xs text-muted-foreground">{row.original.reviewReason}</span>}
 			</div>
 		) },
@@ -173,11 +181,11 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 			<div className="flex flex-wrap gap-2">
 				{row.original.canDecide && (
 					<>
-						<Button size="sm" disabled={busy} onClick={() => act(row.original.id, row.original.revision, "approve", { reason: "学院审核通过" })}>通过</Button>
-						<Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.original.id, revision: row.original.revision, label: `${row.original.studentName} · ${row.original.projectName}` })}>退回</Button>
+						<Button size="sm" disabled={busy} onClick={() => act(row.original.id, row.original.revision, "approve", { reason: "学院审核通过" })}>审核通过</Button>
+						<Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.original.id, revision: row.original.revision, label: `${row.original.studentName} · ${row.original.projectName}` })}>退回辅导员修改</Button>
 					</>
 				)}
-				{row.original.canRevise && <Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.original.studentId)}>修正并重提</Button>}
+				{row.original.canRevise && <Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.original.studentId)}>修改后重新提交</Button>}
 			</div>
 		) },
 	];
@@ -194,38 +202,80 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 				<p className="text-xs text-muted-foreground">{row.original.studentProfile.college} · {row.original.studentProfile.major}</p>
 			</div>
 		) },
-		{ id: "events", header: "有效扣分事件", cell: ({ row }) => <span className="tabular-nums">{row.original.events}</span> },
-		{ id: "pending", header: "待审", cell: ({ row }) => row.original.pending ? <Badge variant="outline">{row.original.pending}</Badge> : <span className="text-muted-foreground">0</span> },
-		{ id: "returned", header: "退回", cell: ({ row }) => row.original.returned ? <Badge variant="destructive">{row.original.returned}</Badge> : <span className="text-muted-foreground">0</span> },
+		{ id: "events", header: "当前有效扣分", cell: ({ row }) => <span className="tabular-nums">{row.original.events}</span> },
+		{ id: "pending", header: "待审核", cell: ({ row }) => row.original.pending ? <Badge variant="outline">{row.original.pending}</Badge> : <span className="text-muted-foreground">0</span> },
+		{ id: "returned", header: "退回待修改", cell: ({ row }) => row.original.returned ? <Badge variant="secondary">{row.original.returned}</Badge> : <span className="text-muted-foreground">0</span> },
 		{ id: "actions", header: "操作", cell: ({ row }) => (
 			<Button size="sm" variant="ghost" onClick={() => openStudent(row.original.id)}>{role === "COLLEGE" ? "查看与审核" : role === "ADMIN" ? "查看扣分" : "登记扣分"}</Button>
 		) },
 	];
 	return (
 		<>
-			<div className="grid gap-4 sm:grid-cols-3">
+			<div className="grid grid-cols-3 gap-2 sm:gap-4">
 				{(role === "COLLEGE"
-					? [["待学院审核", queue.data?.stats.pending ?? 0], ["已退回待修正", queue.data?.stats.returned ?? 0], ["本院有效扣分事件", roster.data?.stats.events ?? 0]]
+					? [["待学院审核", queue.data?.stats.pending ?? 0], ["退回待辅导员修改", queue.data?.stats.returned ?? 0], ["本院当前有效扣分", roster.data?.stats.events ?? 0]]
 					: role === "COUNSELOR"
-						? [["待学院审核", queue.data?.stats.pending ?? 0], ["退回本人修正", queue.data?.stats.returned ?? 0], ["负责班级有效事件", roster.data?.stats.events ?? 0]]
-						: [["全校待学院审核", queue.data?.stats.pending ?? 0], ["已退回待修正", queue.data?.stats.returned ?? 0], ["全校有效扣分事件", roster.data?.stats.events ?? 0]]
+						? [["本人待学院审核", queue.data?.stats.pending ?? 0], ["退回本人修改", queue.data?.stats.returned ?? 0], ["负责班级有效扣分", roster.data?.stats.events ?? 0]]
+						: [["全校待学院审核", queue.data?.stats.pending ?? 0], ["已退回待修改", queue.data?.stats.returned ?? 0], ["全校当前有效扣分", roster.data?.stats.events ?? 0]]
 				).map(([label, value]) => (
 					<Card key={String(label)}>
 						<CardHeader className="pb-2">
-							<CardDescription>{label}</CardDescription>
-							<CardTitle className="text-2xl tabular-nums">{String(value)}</CardTitle>
+							<CardDescription className="text-xs leading-tight">{label}</CardDescription>
+							<CardTitle className="text-xl tabular-nums sm:text-2xl">{String(value)}</CardTitle>
 						</CardHeader>
 					</Card>
 				))}
 			</div>
 			<Feedback error={error} success={success} />
+			<Tabs
+				value={view}
+				onValueChange={(next) => setView(next as "queue" | "roster")}
+				className="min-w-0"
+			>
+				<TabsList>
+					<TabsTrigger value="queue">
+						{role === "COLLEGE"
+							? "待我审核"
+							: role === "COUNSELOR"
+								? "我的扣分申请"
+								: "扣分记录审核"}
+						{queue.data ? ` ${queue.data.stats.pending + queue.data.stats.returned}` : ""}
+					</TabsTrigger>
+					<TabsTrigger value="roster">
+						{role === "COUNSELOR"
+							? "负责班级学生"
+							: role === "COLLEGE"
+								? "本院学生"
+								: "全校学生"}
+						{roster.data ? ` ${roster.data.total}` : ""}
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="queue" className="min-w-0">
 			<RemoteState {...queue} />
 			{queue.data && (
 				<TemplateDirectory
-					title={role === "COUNSELOR" ? "我的扣分提交" : "扣分审核队列"}
-					description={role === "COLLEGE" ? "本院辅导员提交的扣分事件与撤销申请；通过后计入当期扣分，退回必须填写理由。" : "按提交时间排列的扣分事件与处理状态。"}
+					description={`共 ${queue.data.total} 条扣分记录`}
 					data={queue.data.items}
 					columns={queueColumns}
+					empty={
+						role === "COUNSELOR"
+							? {
+									title: "暂无扣分申请",
+									description:
+										"在下方学生名单中登记扣分或申请取消，提交后由学院审核。",
+								}
+							: role === "COLLEGE"
+								? {
+										title: "暂无待审核的扣分申请",
+										description:
+											"辅导员提交后会显示在这里；可切换状态查看历史。",
+									}
+								: {
+										title: "暂无扣分申请记录",
+										description:
+											"辅导员提交或管理员直接更正后，会在这里显示；可切换状态查看历史。",
+									}
+					}
 					filters={
 						<Field className="w-full sm:w-56">
 							<FieldLabel htmlFor="deduction-queue-status">处理状态</FieldLabel>
@@ -242,19 +292,20 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 							<p className="text-xs text-muted-foreground">{row.reason}</p>
 							<Badge variant="outline" className="self-start">{statusLabels[row.status] || row.status}</Badge>
 							<div className="flex flex-wrap gap-2">
-								{row.canDecide && <Button size="sm" disabled={busy} onClick={() => act(row.id, row.revision, "approve", { reason: "学院审核通过" })}>通过</Button>}
-								{row.canDecide && <Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.id, revision: row.revision, label: `${row.studentName} · ${row.projectName}` })}>退回</Button>}
-								{row.canRevise && <Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.studentId)}>修正并重提</Button>}
+								{row.canDecide && <Button size="sm" disabled={busy} onClick={() => act(row.id, row.revision, "approve", { reason: "学院审核通过" })}>审核通过</Button>}
+								{row.canDecide && <Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.id, revision: row.revision, label: `${row.studentName} · ${row.projectName}` })}>退回辅导员修改</Button>}
+								{row.canRevise && <Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.studentId)}>修改后重新提交</Button>}
 							</div>
 						</div>
 					)}
 				/>
 			)}
+				</TabsContent>
+				<TabsContent value="roster" className="min-w-0">
 			<RemoteState {...roster} />
 			{roster.data && (
 				<TemplateDirectory
-					title={role === "COUNSELOR" ? "负责班级扣分" : role === "COLLEGE" ? "本院学生扣分" : "全校学生扣分"}
-					description={`共 ${roster.data.total} 位学生。待审扣分在学院通过前不计入总分。`}
+					description={`共 ${roster.data.total} 位学生；待审扣分在学院通过前不计入总分。`}
 					data={roster.data.items}
 					columns={rosterColumns}
 					filters={
@@ -263,16 +314,13 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 								<FieldLabel htmlFor="deduction-query">姓名或学号</FieldLabel>
 								<Input id="deduction-query" value={draft} maxLength={80} onChange={(event) => setDraft(event.target.value)} placeholder="输入姓名或学号" />
 							</Field>
-							{([["college", "学院", "colleges"], ["major", "专业", "majors"], ["className", "班级", "classes"]] as const).map(([key, label, options]) => (
+							{([["college", "学院", "colleges"], ["major", "专业", "majors"], ["className", "班级", "classes"]] as const).filter(([key]) => role === "ADMIN" || key !== "college").map(([key, label, options]) => (
 								<Field className="w-full sm:w-40" key={key}>
 									<FieldLabel htmlFor={`deduction-scope-${key}`}>{label}</FieldLabel>
-									<NativeSelect id={`deduction-scope-${key}`} value={draftScope[key]} onChange={(event) => {
-										const next = { ...draftScope, [key]: event.target.value, ...(key === "college" ? { major: "", className: "" } : key === "major" ? { className: "" } : {}) };
+									<SearchableSelect id={`deduction-scope-${key}`} value={draftScope[key]} onValueChange={(value) => {
+										const next = { ...draftScope, [key]: value, ...(key === "college" ? { major: "", className: "" } : key === "major" ? { className: "" } : {}) };
 										setDraftScope(next); setScope(next); setQuery(draft.trim()); setRosterPage(1);
-									}}>
-										<NativeSelectOption value="">全部{label}</NativeSelectOption>
-										{roster.data!.scopeOptions[options].map(value => <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>)}
-									</NativeSelect>
+									}} placeholder={`全部${label}`} searchPlaceholder={`搜索${label}`} options={roster.data!.scopeOptions[options].map(value => ({ value, label: value }))} />
 								</Field>
 							))}
 							<Button type="submit" variant="outline">搜索</Button>
@@ -282,12 +330,14 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 					mobile={(row) => (
 						<div className="flex flex-col gap-2">
 							<p className="font-medium">{row.name} · {row.studentProfile.className}</p>
-							<p className="text-sm tabular-nums">有效事件 {row.events} · 待审 {row.pending} · 退回 {row.returned}</p>
+							<p className="text-sm tabular-nums">当前有效扣分 {row.events} · 待审核 {row.pending} · 退回待修改 {row.returned}</p>
 							<Button size="sm" variant="outline" className="self-start" onClick={() => openStudent(row.id)}>查看扣分</Button>
 						</div>
 					)}
 				/>
 			)}
+				</TabsContent>
+			</Tabs>
 			<Sheet open={!!selectedId} onOpenChange={(open) => { if (!open && (!dirty || window.confirm("放弃尚未提交的输入？"))) { setSelectedId(""); setDirty(false); } }}>
 				<SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
 					<SheetHeader>
@@ -304,23 +354,23 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 							<>
 								<Card>
 									<CardHeader>
-										<CardTitle className="text-base">有效扣分事件</CardTitle>
-										<CardDescription>每个事件独立计算；同一项目的多个事件累计后按项目系数折算。</CardDescription>
+										<CardTitle className="text-base">当前有效扣分</CardTitle>
+										<CardDescription>每条扣分独立记录；同一项目的多次扣分累计后，按该项目的扣分系数计算。</CardDescription>
 									</CardHeader>
 									<CardContent className="flex flex-col gap-3">
-										{detail.data.events.length === 0 && <p className="text-sm text-muted-foreground">暂无扣分事件。</p>}
+										{detail.data.events.length === 0 && <p className="text-sm text-muted-foreground">暂无扣分记录。</p>}
 										{detail.data.events.map(item => (
 											<div key={item.id} className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 last:border-b-0 last:pb-0">
 												<div className="min-w-0">
-													<p className="font-medium">{item.projectName} · 第 {item.occurrence + 1} 条</p>
-													<p className="text-sm tabular-nums">扣分 {item.amount} · 系数 {item.coefficient} · 折算 {item.nodeName}</p>
+													<p className="font-medium">{item.projectName} · 第 {item.occurrence + 1} 次扣分</p>
+													<p className="text-sm tabular-nums">扣分 {item.amount} · 扣分系数 {item.coefficient} · 计入 {item.nodeName}</p>
 													<p className="text-xs text-muted-foreground">{item.reason} · 第 {item.revision} 版 · {dateText(item.updatedAt)}</p>
 													{item.pendingRevoke && <p className="text-xs text-muted-foreground">撤销申请待学院审核</p>}
 												</div>
 												<div className="flex flex-wrap items-center gap-2">
-													<Badge variant={item.revoked ? "destructive" : "secondary"}>{item.revoked ? "已撤销" : "生效中"}</Badge>
+													<Badge variant={item.revoked ? "outline" : "secondary"}>{item.revoked ? "已撤销" : "生效中"}</Badge>
 													{detail.data!.canSubmit && !item.revoked && !item.pendingRevoke && (
-														<Button size="sm" variant="outline" disabled={busy} onClick={() => setRevoking(item)}>申请撤销</Button>
+														<Button size="sm" variant="outline" disabled={busy} onClick={() => setRevoking(item)}>申请取消这条扣分</Button>
 													)}
 												</div>
 											</div>
@@ -330,22 +380,33 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 								{detail.data.canSubmit && (
 									<Card>
 										<CardHeader>
-											<CardTitle className="text-base">登记扣分事件</CardTitle>
+											<CardTitle className="text-base">新增扣分记录</CardTitle>
 											<CardDescription>提交后进入待学院审核；通过前不计入总分。</CardDescription>
 										</CardHeader>
 										<CardContent>
 											<form className="flex flex-col gap-4" onChange={() => setDirty(true)} onSubmit={async (event) => {
 												event.preventDefault();
-												const data = new FormData(event.currentTarget);
-												await submit({ projectId: data.get("projectId"), action: "CREATE", amount: data.get("amount"), reason: data.get("reason") }, "扣分事件已提交学院审核。");
-												event.currentTarget.reset();
+												const form = event.currentTarget;
+												const data = new FormData(form);
+												const submitted = await submit({ projectId: data.get("projectId"), action: "CREATE", amount: data.get("amount"), reason: data.get("reason") }, "扣分记录已提交学院审核。");
+												if (!submitted) return;
+												form.reset();
+												setProjectFormKey((key) => key + 1);
 											}}>
 												<FieldGroup>
 													<Field>
 														<FieldLabel htmlFor="deduction-project">扣分项目</FieldLabel>
-														<NativeSelect id="deduction-project" name="projectId" required defaultValue={detail.data.projects[0]?.id ?? ""}>
-															{detail.data.projects.map(item => <NativeSelectOption key={item.id} value={item.id}>{item.name}（{item.nodeName} · 系数 {item.coefficient}）</NativeSelectOption>)}
-														</NativeSelect>
+														<SearchableSelect
+															key={projectFormKey}
+															id="deduction-project"
+															name="projectId"
+															required
+															defaultValue={detail.data.projects[0]?.id ?? ""}
+															placeholder="选择扣分项目"
+															searchPlaceholder="搜索扣分项目"
+															onValueChange={() => setDirty(true)}
+															options={detail.data.projects.map(item => ({ value: item.id, label: item.name, description: `${item.nodeName} · 扣分系数 ${item.coefficient}` }))}
+														/>
 														<FieldDescription>{detail.data.projects.length ? "扣分项目来自本周期生效评分制度。" : "本周期评分制度没有扣分项目。"}</FieldDescription>
 													</Field>
 													<Field>
@@ -365,8 +426,8 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 								{detail.data.canCorrect && (
 									<Card>
 										<CardHeader>
-											<CardTitle className="text-base">例外更正（直接生效）</CardTitle>
-											<CardDescription>管理员直接写入或撤销某条扣分事件并留痕，仅用于组织或数据异常。</CardDescription>
+											<CardTitle className="text-base">管理员直接更正（会记录原因）</CardTitle>
+											<CardDescription>直接写入或撤销扣分记录，并保留修改前后值和原因；仅用于组织或数据异常。</CardDescription>
 										</CardHeader>
 										<CardContent>
 											<form className="flex flex-col gap-4" onSubmit={async (event) => {
@@ -384,33 +445,39 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 														occurrence, amount: data.get("amount"), reason: data.get("reason"),
 														revision: existing?.revision ?? null, revoked: submitter?.value === "revoke",
 													});
-													refresh(submitter?.value === "revoke" ? "该扣分事件已直接撤销并留痕。" : "扣分事件已直接写入并留痕。");
+													refresh(submitter?.value === "revoke" ? "该条扣分已直接撤销并记录原因。" : "扣分记录已直接写入并记录原因。");
 												} catch (err) { setError((err as Error).message); } finally { setBusy(false); }
 											}}>
 												<FieldGroup>
 													<Field>
 														<FieldLabel htmlFor="deduction-admin-project">扣分项目</FieldLabel>
-														<NativeSelect id="deduction-admin-project" name="projectId" required defaultValue={detail.data.projects[0]?.id ?? ""}>
-															{detail.data.projects.map(item => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
-														</NativeSelect>
+														<SearchableSelect
+															id="deduction-admin-project"
+															name="projectId"
+															required
+															defaultValue={detail.data.projects[0]?.id ?? ""}
+															placeholder="选择扣分项目"
+															searchPlaceholder="搜索扣分项目"
+															options={detail.data.projects.map(item => ({ value: item.id, label: item.name }))}
+														/>
 													</Field>
 													<Field>
-														<FieldLabel htmlFor="deduction-admin-occurrence">事件序号</FieldLabel>
+														<FieldLabel htmlFor="deduction-admin-occurrence">扣分序号</FieldLabel>
 														<Input id="deduction-admin-occurrence" name="occurrence" type="number" min={1} defaultValue={Math.max(1, (detail.data.events.filter(item => item.projectId === detail.data!.projects[0]?.id).reduce((max, item) => Math.max(max, item.occurrence), -1)) + 2)} />
-														<FieldDescription>序号从 1 开始；修改已有事件时请填写其序号与现有扣分额。</FieldDescription>
+														<FieldDescription>序号从 1 开始；修改已有扣分时请填写它的序号与现有扣分额。</FieldDescription>
 													</Field>
 													<Field>
 														<FieldLabel htmlFor="deduction-admin-amount">扣分额</FieldLabel>
 														<Input id="deduction-admin-amount" name="amount" inputMode="decimal" required />
 													</Field>
 													<Field>
-														<FieldLabel htmlFor="deduction-admin-reason">更正理由</FieldLabel>
+														<FieldLabel htmlFor="deduction-admin-reason">更正原因</FieldLabel>
 														<Textarea id="deduction-admin-reason" name="reason" required minLength={2} maxLength={1000} rows={2} />
 													</Field>
 												</FieldGroup>
 												<div className="flex flex-wrap gap-3">
-													<Button type="submit" value="save" disabled={busy || readOnly}>保存例外更正</Button>
-													<Button type="submit" value="revoke" variant="outline" disabled={busy || readOnly}>直接撤销该事件</Button>
+													<Button type="submit" value="save" disabled={busy || readOnly}>保存更正</Button>
+													<Button type="submit" value="revoke" variant="outline" disabled={busy || readOnly}>直接撤销这条扣分</Button>
 												</div>
 											</form>
 										</CardContent>
@@ -418,15 +485,15 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 								)}
 								<section className="flex flex-col gap-3">
 									<h2 className="font-medium text-base">提交与审核记录</h2>
-									<p className="text-xs text-muted-foreground">最近 60 条；退回理由、审核人与处理结果全部保留。</p>
+									<p className="text-xs text-muted-foreground">最近 60 条；退回原因、审核人与处理结果全部保留。</p>
 									{detail.data.changes.length === 0 && <p className="text-sm text-muted-foreground">暂无扣分提交记录。</p>}
 									{detail.data.changes.map(change => (
 										<div key={change.id} className="flex flex-col gap-2 border-b pb-3 last:border-b-0">
 											<div className="flex flex-wrap items-center gap-2">
 												<span className="font-medium">{change.projectName}</span>
-												<Badge variant={change.action === "REVOKE" ? "destructive" : "outline"}>{actionLabels[change.action]}</Badge>
+												<Badge variant={change.action === "REVOKE" ? "secondary" : "outline"}>{actionLabels[change.action]}</Badge>
 												{change.amount && <span className="tabular-nums text-sm">{change.amount}</span>}
-												<Badge variant={change.status === "RETURNED" ? "destructive" : change.status === "APPROVED" ? "secondary" : "outline"}>{statusLabels[change.status] || change.status}</Badge>
+												<Badge variant={change.status === "APPROVED" ? "outline" : "secondary"}>{statusLabels[change.status] || change.status}</Badge>
 											</div>
 											<p className="text-sm text-muted-foreground">{change.reason}</p>
 											<p className="text-xs text-muted-foreground">
@@ -442,16 +509,16 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 												}}>
 													{change.action === "CREATE" && (
 														<Field className="w-32">
-															<FieldLabel htmlFor={`resubmit-amount-${change.id}`}>修正扣分额</FieldLabel>
+															<FieldLabel htmlFor={`resubmit-amount-${change.id}`}>修改后扣分额</FieldLabel>
 															<Input id={`resubmit-amount-${change.id}`} name="amount" inputMode="decimal" required defaultValue={change.amount ?? ""} />
 														</Field>
 													)}
 													<Field className="w-full sm:w-64">
-														<FieldLabel htmlFor={`resubmit-reason-${change.id}`}>修正说明</FieldLabel>
+														<FieldLabel htmlFor={`resubmit-reason-${change.id}`}>修改说明</FieldLabel>
 														<Input id={`resubmit-reason-${change.id}`} name="reason" required minLength={2} maxLength={1000} defaultValue={change.reason} />
 													</Field>
 													<Button type="submit" size="sm" disabled={busy}>重新提交</Button>
-													<Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(change.id, change.revision, "abandon", { reason: "辅导员放弃本次扣分提交" })}>放弃</Button>
+													<Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(change.id, change.revision, "abandon", { reason: "辅导员撤回本次扣分申请" })}>撤回</Button>
 												</form>
 											)}
 										</div>
@@ -465,9 +532,9 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 			<Dialog open={!!revoking} onOpenChange={(open) => { if (!open) setRevoking(null); }}>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>申请撤销扣分事件</DialogTitle>
+						<DialogTitle>申请取消这条扣分</DialogTitle>
 						<DialogDescription>
-							{revoking ? `${revoking.projectName} · 第 ${revoking.occurrence + 1} 条 · 扣分 ${revoking.amount}。撤销需学院审核，通过前仍计入扣分。` : ""}
+							{revoking ? `${revoking.projectName} · 第 ${revoking.occurrence + 1} 次 · 扣分 ${revoking.amount}。取消需学院审核，通过前仍计入扣分。` : ""}
 						</DialogDescription>
 					</DialogHeader>
 					<form className="flex flex-col gap-4" onSubmit={async (event) => {
@@ -478,9 +545,9 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 						setRevoking(null);
 					}}>
 						<Field>
-							<FieldLabel htmlFor="deduction-revoke-reason">撤销理由</FieldLabel>
+							<FieldLabel htmlFor="deduction-revoke-reason">申请原因</FieldLabel>
 							<Textarea id="deduction-revoke-reason" name="reason" required minLength={2} maxLength={1000} rows={3} />
-							<FieldDescription>理由会随审核记录保留，并展示给学院审核人。</FieldDescription>
+							<FieldDescription>原因会随审核记录保留，并展示给学院审核人。</FieldDescription>
 						</Field>
 						<DialogFooter>
 							<Button type="button" variant="outline" onClick={() => setRevoking(null)}>取消</Button>
@@ -492,8 +559,8 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 			<Dialog open={!!sendingBack} onOpenChange={(open) => { if (!open) setSendingBack(null); }}>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>退回扣分修订</DialogTitle>
-						<DialogDescription>{sendingBack?.label} · 退回后由原辅导员修正并重新提交学院审核。</DialogDescription>
+						<DialogTitle>退回扣分申请</DialogTitle>
+						<DialogDescription>{sendingBack?.label} · 退回后由原辅导员修改并重新提交学院审核。</DialogDescription>
 					</DialogHeader>
 					<form className="flex flex-col gap-4" onSubmit={async (event) => {
 						event.preventDefault();
@@ -503,9 +570,9 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 						setSendingBack(null);
 					}}>
 						<Field>
-							<FieldLabel htmlFor="deduction-return-reason">退回理由</FieldLabel>
+							<FieldLabel htmlFor="deduction-return-reason">退回原因</FieldLabel>
 							<Textarea id="deduction-return-reason" name="reason" required minLength={2} maxLength={1000} rows={3} />
-							<FieldDescription>理由会展示给提交辅导员，并保留在审核记录中。</FieldDescription>
+							<FieldDescription>原因会展示给提交辅导员，并保留在审核记录中。</FieldDescription>
 						</Field>
 						<DialogFooter>
 							<Button type="button" variant="outline" onClick={() => setSendingBack(null)}>取消</Button>

@@ -2,14 +2,9 @@ import { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { AccountError } from "@/server/accounts";
 import { termTransaction } from "@/server/terms";
-import {
-	assertActivityManager,
-	canManageActivity,
-} from "@/server/activity-policy";
+import { canManageActivity } from "@/server/activity-policy";
 import { scopedStudentWhere } from "@/server/access-scope";
 import { appendHistory, historyEntry, jsonValue } from "@/server/claims";
-import { decimalSchema } from "@/lib/scoring/types";
-import { Rational } from "@/lib/scoring/rational";
 
 export const registrationData = (
 	student: {
@@ -20,7 +15,6 @@ export const registrationData = (
 	},
 	actorId: string,
 	batchId?: string,
-	score?: string,
 ) => {
 	return {
 		registeredAt: new Date(),
@@ -34,7 +28,6 @@ export const registrationData = (
 			className: student.studentProfile?.className ?? "",
 		}),
 		importBatchId: batchId ?? null,
-		...(score === undefined ? {} : { score }),
 	};
 };
 
@@ -44,17 +37,11 @@ export async function registerFact(
 	student: Parameters<typeof registrationData>[0],
 	actorId: string,
 	batchId?: string,
-	options: { score?: string } = {},
 ) {
 	const old = await tx.participation.findUnique({
 		where: { activityId_studentId: { activityId, studentId: student.id } },
 	});
-	const registration = registrationData(
-		student,
-		actorId,
-		batchId,
-		options.score,
-	);
+	const registration = registrationData(student, actorId, batchId);
 	if (old?.registeredAt && !old.removedAt) return old;
 	const entry = historyEntry(
 		actorId,
@@ -279,7 +266,6 @@ export async function pageActivityParticipants(
 					college: item.student.studentProfile?.college ?? "",
 					major: item.student.studentProfile?.major ?? "",
 					className: item.student.studentProfile?.className ?? "",
-					score: item.score?.toFixed() ?? null,
 					sources: item.sources.map((source) => ({
 						...source,
 						reviewerName: source.reviewerId
@@ -302,172 +288,5 @@ export async function pageActivityParticipants(
 			};
 		},
 		"read",
-	);
-}
-
-export async function saveActivityScore(
-	sessionId: string,
-	termId: string,
-	input: unknown,
-) {
-	const data = z
-		.object({
-			participationId: z.string().min(1).max(100),
-			revision: z.number().int().nonnegative(),
-			value: decimalSchema,
-			reason: z.string().trim().min(2).max(1000),
-		})
-		.strict()
-		.parse(input);
-	return termTransaction(
-		sessionId,
-		termId,
-		["ADMIN", "COLLEGE", "PUBLISHER"],
-		["ACTIVE"],
-		async (tx, _term, actorId) => {
-			const fact = await tx.participation.findUnique({
-				where: { id: data.participationId },
-				include: { activity: true, sources: true },
-			});
-			if (
-				!fact ||
-				fact.activity.termId !== termId ||
-				!fact.registeredAt ||
-				fact.removedAt
-			)
-				throw new AccountError("后台参与登记不存在", 404);
-			const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
-			assertActivityManager(fact.activity, actor);
-			if (!fact.activity.confirmed || fact.activity.scoreMode !== "INDIVIDUAL")
-				throw new AccountError("该活动未确认或采用固定分，无需逐人录分", 409);
-			if (fact.revision !== data.revision)
-				throw new AccountError("参与或审核记录已变化，请刷新", 409);
-			const value = Rational.from(data.value);
-			if (
-				value.compare(Rational.from("0")) < 0 ||
-				value.compare(Rational.from(fact.activity.points.toFixed())) > 0
-			)
-				throw new AccountError("个人分数须在0与活动分值上限之间");
-			if (fact.score && fact.score.equals(data.value))
-				return { ...fact, score: fact.score.toFixed() };
-			const entry = historyEntry(actorId, "SCORE_CHANGED", {
-				before: fact.score?.toFixed() ?? null,
-				after: data.value,
-				reason: data.reason,
-			});
-			const saved = await tx.participation.update({
-				where: { id: fact.id },
-				data: {
-					score: data.value,
-					revision: { increment: 1 },
-					history: appendHistory(fact.history, entry),
-				},
-			});
-			const approved = fact.sources.filter(
-				(source) => source.status === "APPROVED",
-			);
-			const pendingCollege = fact.sources.filter(
-				(source) => source.status === "PENDING_COLLEGE",
-			);
-			const evidence =
-				approved.length || pendingCollege.length
-					? await tx.activityEvidence.findFirst({
-							where: { activityId: fact.activityId, active: true },
-							orderBy: [{ version: "desc" }, { id: "desc" }],
-						})
-					: null;
-			if ((approved.length || pendingCollege.length) && !evidence)
-				throw new AccountError(
-					"请先在活动详情上传当前有效的活动证明，再更正原始分",
-					409,
-				);
-			for (const source of pendingCollege) {
-				await tx.recognitionSource.update({
-					where: { id: source.id },
-					data: {
-						status: "PENDING_COUNSELOR",
-						activityEvidenceId: evidence!.id,
-						reviewReason: null,
-						reviewerId: null,
-						reviewedAt: null,
-						returnedByRole: null,
-						counselorId: null,
-						counseledAt: null,
-						collegeReviewerId: null,
-						collegeReviewedAt: null,
-						revision: { increment: 1 },
-						history: appendHistory(
-							source.history,
-							historyEntry(actorId, "SCORE_REOPENED", {
-								before: "PENDING_COLLEGE",
-								after: "PENDING_COUNSELOR",
-								reason: data.reason,
-								beforeScore: fact.score?.toFixed() ?? null,
-								afterScore: data.value,
-							}),
-						),
-					},
-				});
-			}
-			if (approved.length) {
-				for (const source of approved) {
-					await tx.recognitionSource.update({
-						where: { id: source.id },
-						data: {
-							status: "SUPERSEDED",
-							revision: { increment: 1 },
-							history: appendHistory(
-								source.history,
-								historyEntry(actorId, "SCORE_SUPERSEDED", {
-									reason: data.reason,
-									before: "APPROVED",
-									after: "SUPERSEDED",
-									beforeScore: fact.score?.toFixed() ?? null,
-									afterScore: data.value,
-								}),
-							),
-						},
-					});
-					await tx.recognitionSource.create({
-						data: {
-							participationId: fact.id,
-							submitterId: actorId,
-							origin: "SCORE_CORRECTION",
-							status: "PENDING_COUNSELOR",
-							activityEvidenceId: evidence!.id,
-							note: `活动原始分更正为 ${data.value} 分，需重新核验。`,
-							history: jsonValue([
-								historyEntry(actorId, "SCORE_REOPENED", {
-									reason: data.reason,
-									beforeScore: fact.score?.toFixed() ?? null,
-									afterScore: data.value,
-								}),
-							]),
-						},
-					});
-				}
-				await tx.term.update({
-					where: { id: termId },
-					data: { inputRevision: { increment: 1 } },
-				});
-			}
-			await tx.auditEvent.create({
-				data: {
-					actorId,
-					action: "ACTIVITY_SCORE_SAVED",
-					targetId: fact.id,
-					details: {
-						termId,
-						activityId: fact.activityId,
-						before: fact.score?.toFixed() ?? null,
-						after: data.value,
-						reason: data.reason,
-						reopened: approved.length,
-						scoreReopened: pendingCollege.length,
-					},
-				},
-			});
-			return { ...saved, score: saved.score?.toFixed() ?? null };
-		},
 	);
 }

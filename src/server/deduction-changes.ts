@@ -43,8 +43,16 @@ const submitSchema = z.object({
   requestId: z.string().min(8).max(100),
 }).strict();
 
+// The HTTP envelope carries termId for routing; strict schemas below must keep
+// rejecting forged fields on the payload itself.
+function payloadWithoutTermId(input: unknown) {
+  const parsed = z.record(z.string(), z.unknown()).parse(input);
+  delete parsed.termId;
+  return parsed;
+}
+
 export async function submitDeductionChange(sessionId: string, termId: string, input: unknown) {
-  const data = submitSchema.parse(input);
+  const data = submitSchema.parse(payloadWithoutTermId(input));
   return termTransaction(sessionId, termId, ["COUNSELOR"], ["ACTIVE"], async (tx, term, actorId) => {
     const actor = await actorOf(tx, actorId);
     await inputStudentScope(tx, actor, data.studentId);
@@ -85,7 +93,7 @@ const changeSchema = z.object({
 }).strict();
 
 export async function changeDeductionChange(sessionId: string, termId: string, id: string, input: unknown) {
-  const data = changeSchema.parse(input);
+  const data = changeSchema.parse(payloadWithoutTermId(input));
   return termTransaction(sessionId, termId, ["COUNSELOR", "COLLEGE"], ["ACTIVE"], async (tx, term, actorId) => {
     const actor = await actorOf(tx, actorId);
     const change = await tx.deductionChange.findUnique({ where: { id } });
@@ -231,18 +239,21 @@ export async function readDeductionQueue(sessionId: string, termId: string, inpu
   const query = z.object({ status: inputChangeFilter.default("PENDING"), page: z.coerce.number().int().min(1).max(100000).default(1) }).parse(input);
   return termTransaction(sessionId, termId, ["ADMIN", "COLLEGE", "COUNSELOR"], allPhases, async (tx, term, actorId) => {
     const actor = await actorOf(tx, actorId);
-    const collegeScope: Prisma.DeductionChangeWhereInput = actor.role === "COLLEGE" ? { studentId: { in: await scopedStudentIds(tx, actor) } } : {};
+    const scope: Prisma.DeductionChangeWhereInput =
+      actor.role === "COLLEGE"
+        ? { studentId: { in: await scopedStudentIds(tx, actor) } }
+        : actor.role === "COUNSELOR"
+          ? { submittedBy: actorId }
+          : {};
     const where: Prisma.DeductionChangeWhereInput = {
-      termId, ...collegeScope,
+      termId, ...scope,
       ...(query.status === "PENDING" ? { status: { in: [...inputPendingStatuses] } } : { status: query.status }),
-      ...(actor.role === "COUNSELOR" ? { submittedBy: actorId } : {}),
     };
-    const [rows, total, pending, returned, mine] = await Promise.all([
+    const [rows, total, pending, returned] = await Promise.all([
       tx.deductionChange.findMany({ where, orderBy: [{ submittedAt: "asc" }, { id: "asc" }], take: 20, skip: (query.page - 1) * 20 }),
       tx.deductionChange.count({ where }),
-      tx.deductionChange.count({ where: { termId, ...collegeScope, status: "PENDING_COLLEGE" } }),
-      tx.deductionChange.count({ where: { termId, status: "RETURNED", ...(actor.role === "COUNSELOR" ? { submittedBy: actorId } : {}) } }),
-      tx.deductionChange.count({ where: { termId, submittedBy: actorId, status: { in: [...inputPendingStatuses] } } }),
+      tx.deductionChange.count({ where: { termId, ...scope, status: "PENDING_COLLEGE" } }),
+      tx.deductionChange.count({ where: { termId, ...scope, status: "RETURNED" } }),
     ]);
     const catalog = projects(term);
     const [students, names, targets] = await Promise.all([
@@ -266,7 +277,7 @@ export async function readDeductionQueue(sessionId: string, termId: string, inpu
           canRevise: row.status === "RETURNED" && actor.role === "COUNSELOR" && row.submittedBy === actorId,
         };
       }),
-      total, page: query.page, status: query.status, stats: { pending, returned, mine }, role: actor.role,
+      total, page: query.page, status: query.status, stats: { pending, returned }, role: actor.role,
     };
   }, "read");
 }

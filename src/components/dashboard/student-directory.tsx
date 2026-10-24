@@ -10,9 +10,9 @@ import { useRemote } from "./use-remote";
 import { RemoteState } from "./remote-state";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
+import { SearchableSelect } from "./searchable-select";
 import { dateText } from "@/lib/business-labels";
 type Student = {
   id: string;
@@ -31,14 +31,12 @@ export function StudentDirectory({
   busy = false,
   actions,
   selectLabel = "读取成绩",
-  title,
 }: {
   termId: string;
   onSelect?: (login: string) => void;
   busy?: boolean;
   actions?: ReactNode;
   selectLabel?: string;
-  title?: string;
 }) {
   const params = useSearchParams();
   const [query, setQuery] = useState(params.get("q") || "");
@@ -119,7 +117,6 @@ export function StudentDirectory({
       <RemoteState {...remote} />
       {remote.data && (
         <TemplateDirectory
-          title={title || (onSelect ? "学生名单" : "成绩名单")}
           description={`共 ${remote.data.total} 位学生。${remote.data.publication ? `已发布第 ${remote.data.publication.sequence} 版，显示发布时的成绩。` : remote.data.phase === "CONFIGURATION" ? "评分方案配置中，暂时没有成绩。" : "显示本周期当前成绩，未录入和零分分开记录。"}`}
           data={remote.data.items}
           columns={columns}
@@ -153,13 +150,13 @@ export function StudentDirectory({
               ).map(([key, label, options]) => (
                 <Field key={key} className="w-full sm:w-44">
                   <FieldLabel htmlFor={`student-scope-${key}`}>{label}</FieldLabel>
-                  <NativeSelect
+                  <SearchableSelect
                     id={`student-scope-${key}`}
                     value={draftScope[key]}
-                    onChange={(event) => {
+                    onValueChange={(value) => {
                       const next = {
                         ...draftScope,
-                        [key]: event.target.value,
+                        [key]: value,
                         ...(key === "college"
                           ? { major: "", className: "" }
                           : key === "major"
@@ -171,14 +168,13 @@ export function StudentDirectory({
                       setQuery(draft.trim());
                       setPage(1);
                     }}
-                  >
-                    <NativeSelectOption value="">全部{label}</NativeSelectOption>
-                    {remote.data!.scopeOptions[options].map((value) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {value}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
+                    placeholder={`全部${label}`}
+                    searchPlaceholder={`搜索${label}`}
+                    options={remote.data!.scopeOptions[options].map((value) => ({
+                      value,
+                      label: value,
+                    }))}
+                  />
                 </Field>
               ))}
               <Button type="submit" variant="outline" disabled={busy}>
@@ -196,7 +192,7 @@ export function StudentDirectory({
                   setPage(1);
                 }}
               >
-                全部学生
+                重置筛选
               </Button>
             </form>
           }

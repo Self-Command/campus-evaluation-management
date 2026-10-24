@@ -31,6 +31,7 @@ import {
 	DialogDescription,
 } from "@/components/ui/dialog";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
+import { DeleteUsageDialog } from "@/components/dashboard/delete-usage-dialog";
 import { roleLabels, type AppRole } from "@/lib/business-labels";
 export type Account = {
 	id: string;
@@ -64,6 +65,8 @@ export function Accounts({
 	const [error, setError] = useState("");
 	const [secret, setSecret] = useState("");
 	const [reset, setReset] = useState<Account | null>(null);
+	const [deleting, setDeleting] = useState<Account | null>(null);
+	const [success, setSuccess] = useState("");
 	const organizations = useRemote<OrganizationData>(
 		edit ? "/api/organizations" : null,
 	);
@@ -142,16 +145,26 @@ export function Accounts({
 						编辑
 					</Button>
 					{row.original.id !== selfId && (
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => {
-								setReset(row.original);
-								setError("");
-							}}
-						>
-							重置密码
-						</Button>
+						<>
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={() => {
+									setReset(row.original);
+									setError("");
+								}}
+							>
+								重置密码
+							</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="text-destructive hover:text-destructive"
+								onClick={() => setDeleting(row.original)}
+							>
+								删除
+							</Button>
+						</>
 					)}
 				</div>
 			),
@@ -162,9 +175,9 @@ export function Accounts({
 		current?.role === "STUDENT" ? current.studentProfile : null;
 	return (
 		<>
+			<Feedback success={success} />
 			<TemplateDirectory
-				title="账号管理"
-				description={`共 ${data.total} 个账号。可以调整角色、启用或停用，并重置密码。`}
+				description={`共 ${data.total} 个账号。可以调整角色、启用或停用、重置密码；没有业务记录的账号可以删除。`}
 				data={data.items}
 				columns={columns}
 				search={{
@@ -185,6 +198,7 @@ export function Accounts({
 								id="accounts-filter-role"
 								name="role"
 								defaultValue={filters.role}
+								onChange={(event) => event.currentTarget.form?.requestSubmit()}
 							>
 								<NativeSelectOption value="">全部角色</NativeSelectOption>
 								{Object.entries(roleLabels).map(([value, label]) => (
@@ -202,13 +216,13 @@ export function Accounts({
 								id="accounts-filter-disabled"
 								name="disabled"
 								defaultValue={filters.disabled}
+								onChange={(event) => event.currentTarget.form?.requestSubmit()}
 							>
 								<NativeSelectOption value="">全部状态</NativeSelectOption>
 								<NativeSelectOption value="false">启用</NativeSelectOption>
 								<NativeSelectOption value="true">停用</NativeSelectOption>
 							</NativeSelect>
 						</Field>
-						<Button type="submit" variant="outline">搜索</Button>
 					</form>
 				}
 				actions={
@@ -217,7 +231,7 @@ export function Accounts({
 							href="/imports?kind=accounts"
 							className={buttonVariants({ variant: "outline", size: "sm" })}
 						>
-							导入学生
+							导入账号
 						</Link>
 						<Button size="sm" onClick={() => start("new")}>
 							<Plus data-icon="inline-start" />
@@ -259,13 +273,23 @@ export function Accounts({
 									编辑账号
 								</Button>
 								{row.id !== selfId && (
-									<Button
-										variant="outline"
-										size="sm"
-										onClick={() => setReset(row)}
-									>
-										重置密码
-									</Button>
+									<>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setReset(row)}
+										>
+											重置密码
+										</Button>
+										<Button
+											variant="outline"
+											size="sm"
+											className="text-destructive"
+											onClick={() => setDeleting(row)}
+										>
+											删除
+										</Button>
+									</>
 								)}
 							</div>
 						</div>
@@ -548,6 +572,36 @@ export function Accounts({
 					</form>
 				</DialogContent>
 			</Dialog>
+			<DeleteUsageDialog
+				open={!!deleting}
+				onOpenChange={(open) => {
+					if (!open) setDeleting(null);
+				}}
+				title={deleting ? `删除账号「${deleting.name}」？` : "删除账号？"}
+				description="系统会检查该账号的成绩、申报、参与、审核和导入等业务记录。存在业务记录时只能停用。"
+				usageUrl={
+					deleting
+						? `/api/admin/accounts/${encodeURIComponent(deleting.id)}`
+						: null
+				}
+				deleteUrl={
+					deleting
+						? `/api/admin/accounts/${encodeURIComponent(deleting.id)}`
+						: null
+				}
+				confirmLabel="登录账号"
+				buildBody={(usage, reason, confirm) => ({
+					revision: usage.revision,
+					reason,
+					confirmLogin: confirm,
+				})}
+				onDeleted={() => {
+					const name = deleting?.name;
+					setDeleting(null);
+					setSuccess(`账号“${name}”已删除。`);
+					router.refresh();
+				}}
+			/>
 		</>
 	);
 }

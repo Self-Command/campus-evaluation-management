@@ -8,6 +8,10 @@ import { settingsSchema, storedSettingsSchema, defaultSettings } from "@/lib/set
 
 export { settingsSchema, defaultSettings } from "@/lib/settings-schema";
 export async function publicSettings() {
+  // CI and container builds have no database; every business page renders at request time.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return { ...defaultSettings, revision: 0, updatedAt: null };
+  }
   const saved = await db.siteSettings.findUnique({ where: { id: "site" } });
   return { ...(saved ? storedSettingsSchema.parse(saved.content) : defaultSettings), revision: saved?.revision ?? 0, updatedAt: saved?.updatedAt ?? null };
 }

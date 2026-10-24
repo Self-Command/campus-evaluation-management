@@ -8,7 +8,6 @@ import { createTerm, saveScheme, activateTerm } from "@/server/terms";
 import { nodeSchema } from "@/lib/scoring/types";
 import {
 	saveActivity,
-	confirmActivity,
 	publishActivity,
 	pageActivities,
 	pageActivityFeed,
@@ -25,10 +24,7 @@ import {
 	previewParticipationImport,
 	commitParticipationImport,
 } from "@/server/participation-import";
-import {
-	pageActivityParticipants,
-	saveActivityScore,
-} from "@/server/activity-participants";
+import { pageActivityParticipants } from "@/server/activity-participants";
 import {
 	reviewParticipation,
 	changeParticipation,
@@ -84,34 +80,34 @@ const png = Buffer.from(
 	"base64",
 );
 const scope = () => ({
-	colleges: [profile.college],
+	scope: "CLASS",
+	colleges: [],
 	classes: [profile],
-	studentIds: [users.student.id, users.other.id],
 });
-const activityData = (name: string, scoreMode = "INDIVIDUAL") => ({
+const activityData = (name: string) => ({
 	name,
 	organizer: "活动组织",
 	content: "活动内容与安排",
-	requirements: "完成参与要求",
-	startsAt: "2026-10-20T08:00:00.000Z",
-	endsAt: "2026-10-21T08:00:00.000Z",
+	startsAt: new Date(Date.now() - 3_600_000).toISOString(),
+	endsAt: new Date(Date.now() + 86_400_000).toISOString(),
 	nodeId: "activity",
 	points: "10",
-	scoreMode,
 	audience: scope(),
 });
-const rowFor = (key: string, score?: string) => ({
+const rowFor = (key: string) => ({
 	login: users[key].login,
 	name: users[key].login.replace(`${marker}-`, ""),
 	college: users[key].login === `${marker}-wrongCollege` ? "另一学院" : profile.college,
 	major: users[key].login === `${marker}-wrongClass` ? "另一专业" : profile.major,
 	className: profile.className,
-	...(score === undefined ? {} : { score }),
 });
 const seedActivity = async (
 	ownerId: string,
 	targetTermId: string,
-	overrides: Partial<ReturnType<typeof activityData>> = {},
+	overrides: Partial<ReturnType<typeof activityData>> & {
+		confirmed?: boolean;
+		publishedAt?: Date | null;
+	} = {},
 ) => {
 	const data = { ...activityData("历史既有活动"), ...overrides };
 	return db.activity.create({
@@ -122,12 +118,12 @@ const seedActivity = async (
 			name: data.name,
 			organizer: data.organizer,
 			content: data.content,
-			requirements: data.requirements,
 			startsAt: new Date(data.startsAt),
 			endsAt: new Date(data.endsAt),
 			nodeId: data.nodeId,
 			points: data.points,
-			scoreMode: data.scoreMode,
+			confirmed: data.confirmed ?? false,
+			publishedAt: data.publishedAt ?? null,
 			...audienceFields(normalizeAudience(data.audience)),
 		},
 	});
@@ -204,6 +200,7 @@ beforeAll(async () => {
 			...profile,
 			...(key === "wrongClass" ? { major: "另一专业" } : {}),
 			...(key === "wrongCollege" ? { college: "另一学院" } : {}),
+			...(key === "notSelected" ? { className: "未选班级" } : {}),
 		};
 		const user = await db.user.create({
 			data: {
@@ -355,7 +352,7 @@ afterAll(async () => {
 	await db.$disconnect();
 });
 
-test("FL01-04：草稿不可见，发布范围按学院/完整班级/学生三组 AND，预览身份变化拒绝", async () => {
+test("FL01-04：草稿不可见，班级范围按并集匹配，发布时重新校验范围", async () => {
 	await expect(
 		saveActivity(users.publisher.session, termId, {
 			activity: activityData("新建活动应被阻断"),
@@ -363,43 +360,50 @@ test("FL01-04：草稿不可见，发布范围按学院/完整班级/学生三�
 	).rejects.toThrow("新活动");
 	activityId = (
 		await seedActivity(users.publisher.id, termId, {
-			name: "逐人评分活动",
+			name: "活动分值测试",
 		})
 	).id;
-	await confirmActivity(users.admin.session, termId, {
-		id: activityId,
-		revision: 0,
-	});
 	expect((await pageActivityFeed(users.student.session, termId)).total).toBe(0);
 	const invalidScope = {
-		...scope(),
-		studentIds: [users.wrongClass.id, users.wrongCollege.id],
+		scope: "CLASS",
+		colleges: [],
+		classes: [{ ...profile, className: "不存在班级" }],
 	};
 	const invalid = await audienceAction(users.publisher.session, {
 		action: "preview",
 		termId,
 		audience: invalidScope,
 	});
-	expect("errors" in invalid && invalid.errors.length).toBeGreaterThan(0);
+	expect(invalid).toMatchObject({
+		errors: expect.arrayContaining([expect.any(String)]),
+	});
 	const preview = await audienceAction(users.publisher.session, {
 		action: "preview",
 		termId,
 		audience: scope(),
 	});
-	await db.studentProfile.update({
-		where: { userId: users.student.id },
+	expect(preview).toMatchObject({
+		count: 2,
+		collegeCount: 1,
+		majorCount: 1,
+		classCount: 1,
+		errors: [],
+	});
+	expect(preview).not.toHaveProperty("students");
+	expect(preview).not.toHaveProperty("token");
+	await db.studentProfile.updateMany({
+		where: { userId: { in: [users.student.id, users.other.id] } },
 		data: { className: "转班" },
 	});
 	await expect(
 		publishActivity(users.publisher.session, termId, {
 			id: activityId,
-			revision: 1,
+			revision: 0,
 			action: "publish",
-			token: "token" in preview ? preview.token : "",
 		}),
-	).rejects.toThrow();
-	await db.studentProfile.update({
-		where: { userId: users.student.id },
+	).rejects.toThrow("所选班级已无有效学生");
+	await db.studentProfile.updateMany({
+		where: { userId: { in: [users.student.id, users.other.id] } },
 		data: { className: profile.className },
 	});
 	const valid = await audienceAction(users.publisher.session, {
@@ -407,12 +411,16 @@ test("FL01-04：草稿不可见，发布范围按学院/完整班级/学生三�
 		termId,
 		audience: scope(),
 	});
+	expect(valid).toMatchObject({ count: 2, errors: [] });
 	await publishActivity(users.publisher.session, termId, {
 		id: activityId,
-		revision: 1,
+		revision: 0,
 		action: "publish",
-		token: "token" in valid ? valid.token : "",
 	});
+	expect(
+		(await db.activity.findUniqueOrThrow({ where: { id: activityId } }))
+			.confirmed,
+	).toBe(true);
 	expect((await pageActivityFeed(users.student.session, termId)).total).toBe(1);
 	for (const key of ["wrongClass", "wrongCollege", "notSelected"])
 		expect((await pageActivityFeed(users[key].session, termId)).total).toBe(0);
@@ -424,7 +432,6 @@ test("FL01-04：草稿不可见，发布范围按学院/完整班级/学生三�
 			name: "历史来源未发布",
 			organizer: "组织",
 			content: "内容",
-			requirements: "要求",
 			startsAt: new Date(),
 			endsAt: new Date(),
 			nodeId: "activity",
@@ -451,12 +458,13 @@ test("FL01-04：草稿不可见，发布范围按学院/完整班级/学生三�
 	).rejects.toThrow("无权");
 	const changed = await saveActivity(users.publisher.session, termId, {
 		id: activityId,
-		revision: 2,
+		revision: 1,
 		activity: {
-			...activityData("逐人评分活动"),
+			...activityData("活动分值测试"),
 			audience: {
-				...scope(),
-				studentIds: [...scope().studentIds, users.notSelected.id],
+				scope: "CLASS",
+				colleges: [],
+				classes: [{ ...profile, className: "未选班级" }],
 			},
 		},
 	});
@@ -465,23 +473,23 @@ test("FL01-04：草稿不可见，发布范围按学院/完整班级/学生三�
 	expect((await pageActivityFeed(users.student.session, termId)).total).toBe(0);
 	await saveActivity(users.publisher.session, termId, {
 		id: activityId,
-		revision: 3,
-		activity: activityData("逐人评分活动"),
+		revision: 2,
+		activity: activityData("活动分值测试"),
 	});
 	const republish = await audienceAction(users.publisher.session, {
 		action: "preview",
 		termId,
 		audience: scope(),
 	});
+	expect(republish).toMatchObject({ errors: [] });
 	await publishActivity(users.publisher.session, termId, {
 		id: activityId,
-		revision: 4,
+		revision: 3,
 		action: "publish",
-		token: "token" in republish ? republish.token : "",
 	});
 });
 
-test("FL05-07：完整名单导入与录分、归属学院两级审核、改分替代重审", async () => {
+test("FL05-07：完整名单导入、活动分值、归属学院两级审核与范围失效", async () => {
 	const activity = await db.activity.findUniqueOrThrow({
 		where: { id: activityId },
 	});
@@ -496,7 +504,7 @@ test("FL05-07：完整名单导入与录分、归属学院两级审核、改分�
 		activityId,
 		kind: "INITIAL" as const,
 		note: "正式参与名单",
-		rows: [rowFor("student", "8")],
+		rows: [rowFor("student")],
 	};
 	await expect(
 		previewParticipationImport(users.outsider.session, termId, input),
@@ -515,7 +523,7 @@ test("FL05-07：完整名单导入与录分、归属学院两级审核、改分�
 	expect(
 		(await getStudentResult(users.student.session, termId)).participations,
 	).toHaveLength(0);
-	let fact = await db.participation.findUniqueOrThrow({
+	const fact = await db.participation.findUniqueOrThrow({
 		where: {
 			activityId_studentId: {
 				activityId,
@@ -525,28 +533,6 @@ test("FL05-07：完整名单导入与录分、归属学院两级审核、改分�
 		include: { sources: true },
 	});
 	sourceId = fact.sources[0].id;
-	await expect(
-		saveActivityScore(users.outsider.session, termId, {
-			participationId: fact.id,
-			revision: fact.revision,
-			value: "8",
-			reason: "越权录分",
-		}),
-	).rejects.toThrow("主办学院");
-	await expect(
-		saveActivityScore(users.publisher.session, termId, {
-			participationId: fact.id,
-			revision: fact.revision,
-			value: "11",
-			reason: "录入成绩",
-		}),
-	).rejects.toThrow("上限");
-	await saveActivityScore(users.publisher.session, termId, {
-		participationId: fact.id,
-		revision: fact.revision,
-		value: "8",
-		reason: "按签到表录分",
-	});
 	await expect(
 		reviewParticipation(users.admin.session, termId, {
 			id: sourceId,
@@ -564,57 +550,19 @@ test("FL05-07：完整名单导入与录分、归属学院两级审核、改分�
 		revision: counseled.revision,
 		action: "collegeApprove",
 	});
-	expect(
-		(await getStudentResult(users.student.session, termId)).participations[0]
-			.points,
-	).toBe("8");
-	fact = await db.participation.findUniqueOrThrow({
-		where: { id: fact.id },
-		include: { sources: true },
-	});
-	await saveActivityScore(users.publisher.session, termId, {
-		participationId: fact.id,
-		revision: fact.revision,
-		value: "7",
-		reason: "依据原始记录更正",
-	});
-	expect(
-		(
-			await db.recognitionSource.findUniqueOrThrow({
-				where: { id: sourceId },
-			})
-		).status,
-	).toBe("SUPERSEDED");
-	expect(
-		(await getStudentResult(users.student.session, termId)).participations,
-	).toHaveLength(0);
-	const corrected = await db.recognitionSource.findFirstOrThrow({
-		where: {
-			participation: { activityId, studentId: users.student.id },
-			status: "PENDING_COUNSELOR",
-		},
-	});
-	sourceId = corrected.id;
-	const secondCounsel = await reviewParticipation(
-		users.counselor.session,
-		termId,
-		{
-			id: sourceId,
-			revision: corrected.revision,
-			action: "counselorApprove",
-		},
-	);
-	await reviewParticipation(users.college.session, termId, {
-		id: sourceId,
-		revision: secondCounsel.revision,
-		action: "collegeApprove",
-	});
+	const result = await getStudentResult(users.student.session, termId);
+	expect(result.participations[0].points).toBe("10");
+	expect(result.participations[0].activityEvidence).toEqual([
+		{ id: evidenceId, name: "名单证明.png" },
+	]);
+	expect(result.result.total).toBe("10.00");
 	const roster = await pageActivityParticipants(
 		users.publisher.session,
 		termId,
 		activityId,
 	);
-	expect(roster.items[0].score).toBe("7");
+	expect(roster.items).toHaveLength(1);
+	expect(roster.items[0].name).toBe("student");
 	await db.studentProfile.update({
 		where: { userId: users.student.id },
 		data: { className: "转班后" },
@@ -640,12 +588,26 @@ test("FL08-09：退回由主办学院补充后重提，学生不能自行提交�
 		},
 		include: { sources: true },
 	});
-	await saveActivityScore(users.publisher.session, termId, {
-		participationId: current.id,
-		revision: current.revision,
-		value: "6",
-		reason: "再次依据签到记录更正",
+	const activityRow = await db.activity.findUniqueOrThrow({
+		where: { id: activityId },
 	});
+	const refreshedFile = await uploadEvidence(
+		users.publisher.session,
+		"复核签到材料.png",
+		png,
+	);
+	const refreshed = await saveActivityEvidence(
+		users.publisher.session,
+		termId,
+		{
+			activityId,
+			revision: activityRow.revision,
+			evidenceId: refreshedFile.id,
+			note: "复核当天签到记录",
+			reason: "补充签退材料",
+		},
+	);
+	activityEvidenceId = refreshed.id;
 	const pending = await db.recognitionSource.findFirstOrThrow({
 		where: {
 			participationId: current.id,
@@ -701,8 +663,7 @@ test("FL08-09：退回由主办学院补充后重提，学生不能自行提交�
 			id: sourceId,
 			revision: returned.revision,
 			action: "resubmit",
-			note: "已补充签退记录并核对分数",
-			score: "6",
+			note: "已补充签退记录并核对名单",
 		},
 	);
 	expect(resubmitted.status).toBe("PENDING_COUNSELOR");
@@ -793,7 +754,6 @@ test("FL10：更正预览不写库，token 绑定输入，活动与项目更正�
 		id: activityId,
 		nodeId: "activity",
 		points: "12",
-		scoreMode: "INDIVIDUAL",
 	};
 	const preview = await correctScoring(users.admin.session, termId, {
 		...data,
@@ -895,12 +855,9 @@ test("FL10补充：已通过固定分与规则更正实际改变新分数，旧�
 	const correctionTerm = await newTerm("真实计分更正回归");
 	const activity = await seedActivity(users.publisher.id, correctionTerm, {
 		name: "固定分更正",
-		scoreMode: "FIXED",
 		points: "3",
-	});
-	await confirmActivity(users.admin.session, correctionTerm, {
-		id: activity.id,
-		revision: 0,
+		confirmed: true,
+		publishedAt: new Date(),
 	});
 	await db.participation.create({
 		data: {
@@ -1054,7 +1011,6 @@ test("FL11：活动参与与历史关联申报互斥，两种审核顺序均拒�
 			studentId: users.other.id,
 			registeredAt: new Date(),
 			registeredBy: users.publisher.id,
-			score: "6",
 		},
 	});
 	const otherSource = await db.recognitionSource.create({
@@ -1308,7 +1264,14 @@ test("FL15-16：成绩与扣分提供真实修改历史及隔离权限，发布�
 	expect(history.items[0].reason).toBe("更正成绩单");
 	const importPreview = await previewGradeImport(users.admin.session, termId, {
 		nodeId: "grade",
-		rows: [{ login: users.student.login, value: "35" }],
+		rows: [{
+			login: users.student.login,
+			name: "student",
+			college: profile.college,
+			major: profile.major,
+			className: profile.className,
+			value: "35",
+		}],
 		reason: "导入正式更正成绩",
 	});
 	await commitGradeImport(users.admin.session, termId, importPreview.id);
@@ -1396,16 +1359,15 @@ test("FL17：超过200条活动和来源仍可完整分页且不泄露他人记�
 			name: `分页活动${index}`,
 			organizer: "组织",
 			content: "内容",
-			requirements: "要求",
-			startsAt: new Date(),
-			endsAt: new Date(Date.now() + 1000),
+			startsAt: new Date(Date.now() - 1000),
+			endsAt: new Date(Date.now() + 86_400_000),
 			nodeId: "activity",
 			points: "1",
 			confirmed: true,
 			publishedAt: new Date(),
-			audienceColleges: [profile.college],
+			audienceScope: "CLASS",
+			audienceColleges: [],
 			audienceClasses: [classKey(profile)],
-			audienceStudents: [users.student.id],
 		})),
 	});
 	const activities = await db.activity.findMany({

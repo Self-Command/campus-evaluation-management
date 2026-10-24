@@ -95,7 +95,7 @@ test("草稿回收站可恢复，旧URL禁读写，权限理由与同名恢复�
 
 test("业务引用阻止删除及删除模块，作废保留原记录并禁止后续业务写入，复制只复制规则", async () => {
   const term = await period("referenced");
-  const activity = await db.activity.create({ data: { termId: term.id, ownerId: identities.ADMIN!.id, name: "原有活动", organizer: "隔离组织", content: "真实引用夹具", requirements: "无", startsAt: new Date(), endsAt: new Date(), nodeId: "total", points: "2" } });
+  const activity = await db.activity.create({ data: { termId: term.id, ownerId: identities.ADMIN!.id, name: "原有活动", organizer: "隔离组织", content: "真实引用夹具", startsAt: new Date(), endsAt: new Date(), nodeId: "total", points: "2" } });
   const usage = await readTermManagement(admin(), term.id);
   expect(usage.usage.activities).toBe(1); expect(usage.nodeUsage.total).toBe(1); expect(usage.canDelete).toBe(false);
   await expect(manageTerm(admin(), term.id, { action: "delete", revision: 0, reason: "不应删除" })).rejects.toThrow("业务记录");
@@ -109,7 +109,7 @@ test("业务引用阻止删除及删除模块，作废保留原记录并禁止�
   expect(await db.activity.findUnique({ where: { id: activity.id } })).toEqual(activity);
   await expect(saveScheme(admin(), term.id, { revision: 1, scheme: term.scheme })).rejects.toThrow("作废");
   await expect(correctScoring(admin(), term.id, { kind: "scheme", action: "preview", scheme: term.scheme })).rejects.toThrow("作废");
-  await expect(saveActivity(admin(), term.id, { name: "禁止新增", organizer: "隔离", content: "说明", requirements: "要求", startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 10000).toISOString(), nodeId: "total", points: "1" })).rejects.toThrow();
+  await expect(saveActivity(admin(), term.id, { name: "禁止新增", organizer: "隔离", content: "说明", startsAt: new Date().toISOString(), endsAt: new Date(Date.now() + 10000).toISOString(), nodeId: "total", points: "1" })).rejects.toThrow();
 });
 
 test("删除与开启并发仅一方成功，旧revision不能重放管理操作，同名创建不产生重复", async () => {

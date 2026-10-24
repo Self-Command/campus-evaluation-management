@@ -4,11 +4,19 @@ import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, ChevronRight, FlaskConical } from "lucide-react";
+import {
+	Plus,
+	Trash2,
+	ChevronRight,
+	FlaskConical,
+	ArrowDown,
+	ArrowUp,
+} from "lucide-react";
 import { nodeSchema, type Scheme, type ScoringNode } from "@/lib/scoring/types";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { DataTableFeatures } from "@/lib/data-table-features";
 import { TemplateDirectory } from "@/components/dashboard/template-directory";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import { validateScheme } from "@/lib/scoring/validate";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
@@ -65,6 +73,8 @@ import {
 	DialogTitle,
 	DialogDescription,
 } from "@/components/ui/dialog";
+import { QuickSchemeCard } from "./quick-scheme-card";
+import { quickSchemeLayout } from "@/lib/scoring/quick-config";
 const kinds = {
 	SUM: "汇总",
 	WEIGHTED: "比例汇总",
@@ -107,12 +117,19 @@ export function SchemeEditor({
 		admin ? `/api/terms/${term.id}` : null,
 	);
 	const [scheme, setScheme] = useState(term.scheme);
+	const quickCompatible = Boolean(quickSchemeLayout(term.scheme));
+	const [quickMode, setQuickMode] = useState(
+		quickCompatible &&
+			(term.phase === "CONFIGURATION" || !admin),
+	);
 	const [selected, setSelected] = useState(
 		scheme.nodes.find((n) => n.parentId === null)!.id,
 	);
 	const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-	// Long-press drag: the whole module row is the handle, so no extra move
-	// buttons are shown in the list.
+	// Dragging is intentionally disabled until it can support touch and all
+	// target positions reliably. The explicit move controls below are the
+	// supported path and are easier to verify.
+	const dragEnabled = false;
 	const [drag, setDrag] = useState<{
 		id: string;
 		name: string;
@@ -129,6 +146,9 @@ export function SchemeEditor({
 		null,
 	);
 	const marked = useRef<HTMLElement | null>(null);
+	const [moveSourceId, setMoveSourceId] = useState<string | null>(null);
+	const [moveParentId, setMoveParentId] = useState("");
+	const [movePosition, setMovePosition] = useState<"first" | "last">("last");
 	const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
 	const [dirty, setDirty] = useState(false);
 	const [busy, setBusy] = useState(false);
@@ -328,11 +348,46 @@ export function SchemeEditor({
 			change(moveSchemeNode(scheme, sourceId, targetId, place));
 			setError("");
 			setSuccess("模块位置已调整。请核对受影响父级的比例合计，再保存方案。");
+			return true;
 		} catch (err) {
 			setError((err as Error).message);
+			return false;
 		} finally {
 			clearDrag();
 		}
+	}
+	function moveSibling(item: ScoringNode, direction: -1 | 1) {
+		if (!item.parentId) return;
+		const peers = children.get(item.parentId) || [];
+		const index = peers.findIndex((peer) => peer.id === item.id);
+		const target = peers[index + direction];
+		if (!target) return;
+		performMove(item.id, target.id, direction < 0 ? "before" : "after");
+	}
+	function openMove(item: ScoringNode) {
+		setMoveSourceId(item.id);
+		setMoveParentId(item.parentId || root.id);
+		setMovePosition("last");
+		setError("");
+		setSuccess("");
+	}
+	function confirmMove() {
+		const source = scheme.nodes.find((item) => item.id === moveSourceId);
+		const parent = scheme.nodes.find((item) => item.id === moveParentId);
+		if (!source || !parent) {
+			setError("请选择要移动的模块和新的上级模块。");
+			return;
+		}
+		const peers = (children.get(parent.id) || []).filter(
+			(item) => item.id !== source.id,
+		);
+		const moved =
+			peers.length === 0
+				? performMove(source.id, parent.id, "inside")
+				: movePosition === "first"
+					? performMove(source.id, peers[0].id, "before")
+					: performMove(source.id, peers[peers.length - 1].id, "after");
+		if (moved) setMoveSourceId(null);
 	}
 	const MARK_BEFORE = "[&>td]:border-t-2 [&>td]:border-primary border-t-2 border-primary";
 	const MARK_AFTER = "[&>td]:border-b-2 [&>td]:border-primary border-b-2 border-primary";
@@ -386,7 +441,7 @@ export function SchemeEditor({
 
 
 	function summary(n: ScoringNode) {
-		return `${kinds[n.kind]} · ${n.parentId && scheme.nodes.find((p) => p.id === n.parentId)?.kind === "WEIGHTED" ? `占上级 ${percentage(n.weight)}%` : "直接计入"} · 封顶 ${n.cap ?? "不限"}${n.normalize ? ` · ${n.rawMaximum}→${n.targetMaximum} 折算` : ""}${n.floor !== null ? ` · 最低 ${n.floor}` : ""}${n.required ? " · 必填" : ""}`;
+		return `${kinds[n.kind]} · ${n.parentId && scheme.nodes.find((p) => p.id === n.parentId)?.kind === "WEIGHTED" ? `占本部分 ${percentage(n.weight)}%` : "直接计入"} · 封顶 ${n.cap ?? "不限"}${n.normalize ? ` · ${n.rawMaximum}→${n.targetMaximum} 折算` : ""}${n.floor !== null ? ` · 最低 ${n.floor}` : ""}${n.required ? " · 必填" : ""}`;
 	}
 	function percentage(value: string) {
 		try {
@@ -399,7 +454,7 @@ export function SchemeEditor({
 		return [
 			["模块名称", n.name],
 			["计分方式", kinds[n.kind]],
-			["占上级比例", `${percentage(n.weight)}%`],
+			["占本部分比例", `${percentage(n.weight)}%`],
 			["分数范围", `${n.minimum} 至 ${n.maximum}`],
 			["封顶分", n.cap ?? "不限制"],
 			["最低计入分", n.floor ?? "不限制"],
@@ -413,12 +468,11 @@ export function SchemeEditor({
 			["同级顺序", String(n.order)],
 		];
 	}
-	// Native HTML5 drag: every non-root row is draggable, dropping on the upper or
-	// lower edge reorders among siblings (including out of a parent), and dropping
-	// in the middle nests the dragged module (and its subtree) inside the target.
+	// Native HTML5 drag is kept behind a flag while the explicit move controls are
+	// the supported path. It cannot handle touch or every target position reliably.
 	useEffect(() => {
 		const root = listRef.current;
-		if (!root) return;
+		if (!root || !dragEnabled) return;
 		for (const row of Array.from(root.querySelectorAll<HTMLElement>("tr"))) {
 			const id = row.querySelector("[data-node-id]")?.getAttribute("data-node-id");
 			const item = id ? scheme.nodes.find((n) => n.id === id) : undefined;
@@ -478,7 +532,7 @@ export function SchemeEditor({
 		// The handlers below are recreated per render on purpose; the effect only needs
 		// to rebind when the dragged module, editability or the scheme changes.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [drag, editable, scheme]);
+	}, [drag, editable, scheme, dragEnabled]);
 	function rowActions(n: ScoringNode) {
 		return (
 			<div className="flex flex-wrap gap-1">
@@ -497,6 +551,31 @@ export function SchemeEditor({
 						添加下级
 					</Button>
 				)}
+				{editable && n.parentId !== null && (
+					<>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={`上移${n.name}`}
+							title="上移"
+							onClick={() => moveSibling(n, -1)}
+						>
+							<ArrowUp />
+						</Button>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={`下移${n.name}`}
+							title="下移"
+							onClick={() => moveSibling(n, 1)}
+						>
+							<ArrowDown />
+						</Button>
+						<Button variant="ghost" size="sm" onClick={() => openMove(n)}>
+							移动到
+						</Button>
+					</>
+				)}
 			</div>
 		);
 	}
@@ -513,13 +592,13 @@ export function SchemeEditor({
 					<div
 						data-node-id={n.id}
 						className={`flex min-w-44 items-center gap-2 ${
-							editable && n.parentId !== null
+							dragEnabled && editable && n.parentId !== null
 								? "cursor-grab select-none active:cursor-grabbing"
 								: ""
 						}`}
 						style={{ paddingLeft: Math.min(row.original.depth, 8) * 12 }}
 					>
-						{editable && n.parentId !== null && (
+						{dragEnabled && editable && n.parentId !== null && (
 							<GripVertical
 								aria-hidden
 								className="size-4 shrink-0 text-muted-foreground"
@@ -550,7 +629,7 @@ export function SchemeEditor({
 		},
 		{
 			id: "weight",
-			header: "占上级比例",
+			header: "占本部分",
 			cell: ({ row }) =>
 				row.original.node.parentId &&
 				scheme.nodes.find((n) => n.id === row.original.node.parentId)?.kind ===
@@ -590,6 +669,33 @@ export function SchemeEditor({
 			cell: ({ row }) => rowActions(row.original.node),
 		},
 	];
+	const moveSource = scheme.nodes.find((item) => item.id === moveSourceId);
+	const moveOptions = scheme.nodes
+		.filter(
+			(item) =>
+				["SUM", "WEIGHTED"].includes(item.kind) &&
+				(!moveSourceId ||
+					(item.id !== moveSourceId &&
+						!descendantsOf(scheme.nodes, moveSourceId).has(item.id))),
+		)
+		.sort(
+			(a, b) =>
+				(a.parentId === null ? -1 : 0) -
+					(b.parentId === null ? -1 : 0) ||
+				a.name.localeCompare(b.name, "zh-CN"),
+		);
+
+	if (quickMode && quickCompatible) {
+		return (
+			<QuickSchemeCard
+				term={term}
+				admin={admin}
+				editable={editable}
+				returnHref={returnHref}
+				onAdvanced={() => setQuickMode(false)}
+			/>
+		);
+	}
 
 	return (
 		<>
@@ -602,6 +708,23 @@ export function SchemeEditor({
 					</span>
 				</div>
 				<div className="flex flex-wrap gap-2">
+					{quickCompatible && term.phase === "CONFIGURATION" && (
+						<Button
+							variant="outline"
+							onClick={() => {
+								if (
+									dirty &&
+									!window.confirm(
+										"有尚未保存的结构调整，是否放弃并返回快速配置？",
+									)
+								)
+									return;
+								setQuickMode(true);
+							}}
+						>
+							快速配置
+						</Button>
+					)}
 					<Link
 						href={returnHref}
 						className={buttonVariants({ variant: "outline" })}
@@ -721,13 +844,13 @@ export function SchemeEditor({
 				<TabsContent value="structure" className="mt-5">
 					<div
 						ref={listRef}
-						className={drag ? "select-none [touch-action:none]" : undefined}
+						className={dragEnabled && drag ? "select-none [touch-action:none]" : undefined}
 					>
 					<TemplateDirectory
 						title="评分模块与规则"
 						description={
 							editable
-								? "按住模块任意位置约 0.2 秒即可拖动：放到模块上沿/下沿调整顺序，放到中间移入该模块；比例不会自动调整，保存前请核对。"
+								? "使用每行的上移、下移或移动到调整结构和顺序。移动后比例不会自动调整，保存前请核对每个汇总模块的比例合计。"
 								: "展开大模块查看子模块，选择规则明细查阅各模块的计分方式、比例、封顶与折算规则。"
 						}
 						data={visible}
@@ -760,7 +883,7 @@ export function SchemeEditor({
 							<div
 								data-node-id={item.id}
 								className={`flex flex-col gap-3 ${
-									editable && item.parentId !== null
+									dragEnabled && editable && item.parentId !== null
 										? "cursor-grab select-none active:cursor-grabbing"
 										: ""
 								}`}
@@ -797,7 +920,7 @@ export function SchemeEditor({
 							</div>
 						)}
 					/>
-					{drag && (
+					{dragEnabled && drag && (
 						<div
 							className="pointer-events-none fixed z-50 flex items-center gap-2 rounded-md border bg-popover px-3 py-1.5 text-sm shadow-lg"
 							style={{ left: drag.x + 14, top: drag.y + 10 }}
@@ -906,7 +1029,7 @@ export function SchemeEditor({
 													<p className="font-medium text-sm">3. 层级关系</p>
 													<Field>
 														<FieldLabel htmlFor="node-weight">
-															占上级比例（%）
+															占本部分比例（%）
 														</FieldLabel>
 														<Input
 															id="node-weight"
@@ -938,7 +1061,7 @@ export function SchemeEditor({
 															}}
 														/>
 														<FieldDescription>
-															同一上级的直接下级比例合计需为100%。
+															同一部分内的子项比例合计需为100%。
 														</FieldDescription>
 													</Field>
 													</>
@@ -1189,27 +1312,27 @@ export function SchemeEditor({
 											<FieldLabel htmlFor={`ded-node-${index}`}>
 												扣分模块
 											</FieldLabel>
-											<NativeSelect
+											<SearchableSelect
 												id={`ded-node-${index}`}
 												value={d.nodeId}
 												disabled={!editable}
-												onChange={(e) =>
+												placeholder="选择扣分模块"
+												searchPlaceholder="搜索模块名称"
+												onValueChange={(value) =>
 													change({
 														...scheme,
 														deductions: scheme.deductions.map((p) =>
 															p.id === d.id
-																? { ...p, nodeId: e.target.value }
+																? { ...p, nodeId: value }
 																: p,
 														),
 													})
 												}
-											>
-												{scheme.nodes.map((n) => (
-													<NativeSelectOption key={n.id} value={n.id}>
-														{n.name}
-													</NativeSelectOption>
-												))}
-											</NativeSelect>
+												options={scheme.nodes.map((n) => ({
+													value: n.id,
+													label: n.name,
+												}))}
+											/>
 										</Field>
 										<Field>
 											<FieldLabel htmlFor={`ded-coef-${index}`}>
@@ -1399,7 +1522,7 @@ export function SchemeEditor({
 																		"折算后",
 																		"扣分",
 																		"计入分",
-																		"贡献分",
+																		"计入总分",
 																	].map((label) => (
 																		<TableHead key={label}>{label}</TableHead>
 																	))}
@@ -1444,7 +1567,7 @@ export function SchemeEditor({
 																</p>
 																<p className="text-sm tabular-nums">
 																	封顶后 {item.capped} · 折算后{" "}
-																	{item.normalized} · 贡献{" "}
+																	{item.normalized} · 计入总分{" "}
 																	{item.parentContribution}
 																</p>
 															</div>
@@ -1465,6 +1588,64 @@ export function SchemeEditor({
 					</TabsContent>
 				)}
 			</Tabs>
+			<Dialog
+				open={moveSource !== undefined}
+				onOpenChange={(open) => {
+					if (!open) setMoveSourceId(null);
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>移动模块</DialogTitle>
+						<DialogDescription>
+							选择新的上级模块，并决定放在同级最前还是最后。移动不会自动修改比例，保存前请核对配置状态。
+						</DialogDescription>
+					</DialogHeader>
+					<div className="flex flex-col gap-4">
+						<div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+							当前模块：<span className="font-medium">{moveSource?.name}</span>
+						</div>
+						<Field>
+							<FieldLabel htmlFor="move-parent">新的上级模块</FieldLabel>
+							<NativeSelect
+								id="move-parent"
+								value={moveParentId}
+								onChange={(event) => setMoveParentId(event.target.value)}
+							>
+								{moveOptions.map((item) => (
+									<NativeSelectOption key={item.id} value={item.id}>
+										{item.parentId === null
+											? `${item.name}（综合总分）`
+											: item.name}
+									</NativeSelectOption>
+								))}
+							</NativeSelect>
+						</Field>
+						<Field>
+							<FieldLabel htmlFor="move-position">放在同级的位置</FieldLabel>
+							<NativeSelect
+								id="move-position"
+								value={movePosition}
+								onChange={(event) =>
+									setMovePosition(event.target.value as "first" | "last")
+								}
+							>
+								<NativeSelectOption value="last">最后</NativeSelectOption>
+								<NativeSelectOption value="first">最前</NativeSelectOption>
+							</NativeSelect>
+						</Field>
+						<div className="flex justify-end gap-2">
+							<Button
+								variant="outline"
+								onClick={() => setMoveSourceId(null)}
+							>
+								取消
+							</Button>
+							<Button onClick={confirmMove}>确认移动</Button>
+						</div>
+					</div>
+				</DialogContent>
+			</Dialog>
 		</>
 	);
 }

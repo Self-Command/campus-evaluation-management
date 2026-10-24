@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { pageSession } from "@/server/page-session";
 import { listTerms } from "@/server/terms";
 import { pageActivities } from "@/server/activities";
+import { attachmentLimits } from "@/server/activity-attachments";
 import { pageRecognitions } from "@/server/recognitions";
 import { schemeSchema } from "@/lib/scoring/types";
 import { MeasurementWorkspace } from "@/components/dashboard/measurement-workspace";
@@ -45,6 +46,7 @@ export default async function Page({
 	const found = terms.find((t) => t.id === id);
 	if (!found) notFound();
 	const term = { ...found, scheme: schemeSchema.parse(found.scheme) };
+	const limits = await attachmentLimits();
 	const admin = user.role === "ADMIN";
 	const returnHref =
 		p.returnTo === "/terms" || p.returnTo?.startsWith("/terms?")
@@ -210,6 +212,7 @@ export default async function Page({
 									term={JSON.parse(JSON.stringify(term))}
 									role={user.role}
 									query={query}
+									limits={limits}
 								/>
 							</>
 						),

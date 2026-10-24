@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import yauzl from "yauzl";
 import { db } from "@/server/db";
 import { createTerm, saveScheme, activateTerm } from "@/server/terms";
 import { nodeSchema } from "@/lib/scoring/types";
@@ -13,7 +14,8 @@ import { listDeductions } from "@/server/deductions";
 import { getStudentResult, ranked, pageResultStudents } from "@/server/results";
 import { previewPublication, publishResults, confirmResult, previewSettlement, lockSettlement, reopenTerm, digest } from "@/server/publications";
 import { createAppeal, changeAppeal, pageAppeals } from "@/server/appeals";
-import { getRankings, rankingCsv, csvText } from "@/server/rankings";
+import { getRankings } from "@/server/rankings";
+import { exportClassGradeWorkbook } from "@/server/class-grade-export";
 import { publicSettings, saveSettings, uploadBrandAsset, getBrandAsset } from "@/server/settings";
 import { selfAccount } from "@/server/account-self";
 import { previewGradeImport, commitGradeImport } from "@/server/grade-import";
@@ -25,6 +27,39 @@ const identities: Record<string, { id: string; session: string; login: string }>
 let termId: string | undefined, claimId: string, evidenceId: string, publicationId: string, appealId: string, attachmentRoot: string | undefined;
 let orgCollegeId = "", orgMajorId = "", orgClassId = "";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64");
+function readEntries(buffer: Buffer) {
+  return new Promise<Record<string, string>>((resolve, reject) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, (error, zip) => {
+      if (error || !zip) return reject(error ?? new Error("无法打开工作簿"));
+      const files: Record<string, string> = {};
+      zip.on("entry", (entry: yauzl.Entry) => {
+        if (/\/$/.test(entry.fileName)) return zip.readEntry();
+        zip.openReadStream(entry, (streamError, stream) => {
+          if (streamError || !stream) return reject(streamError ?? new Error("无法读取条目"));
+          const chunks: Buffer[] = [];
+          stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+          stream.on("end", () => {
+            files[entry.fileName] = Buffer.concat(chunks).toString("utf8");
+            zip.readEntry();
+          });
+        });
+      });
+      zip.on("end", () => resolve(files));
+      zip.on("error", reject);
+      zip.readEntry();
+    });
+  });
+}
+async function gradeImportRow(login: string, value: string) {
+  const current = await db.term.findUniqueOrThrow({ where: { id: termId! }, select: { cohortPolicy: true, cohortPublicationId: true } });
+  if (current.cohortPolicy === "PREVIOUS" && current.cohortPublicationId) {
+    const published = await db.publishedResult.findFirstOrThrow({ where: { publicationId: current.cohortPublicationId, login }, select: { name: true, college: true, major: true, className: true } });
+    return { login, ...published, value };
+  }
+  const user = await db.user.findUniqueOrThrow({ where: { login }, select: { name: true, studentProfile: { select: { college: true, major: true, className: true } } } });
+  if (!user.studentProfile) throw new Error("测试学生缺少档案");
+  return { login, name: user.name, ...user.studentProfile, value };
+}
 beforeAll(async () => {
   attachmentRoot = await mkdtemp(join(tmpdir(), "campus-lifecycle-")); process.env.EVIDENCE_DIR = attachmentRoot;
   for (const [key, role] of [["admin", "ADMIN"], ["publisher", "PUBLISHER"], ["student", "STUDENT"], ["other", "STUDENT"], ["counselor", "COUNSELOR"], ["college", "COLLEGE"]] as const) {
@@ -111,6 +146,7 @@ test("个人申报两级审核、伪造分值拒收、证明归属及本人隔�
   await expect(changeClaim(college, termId!, claimId, { action: "approve", revision: 7, reason: "不能覆盖通过" })).rejects.toThrow("仅待学院");
   const result = await getStudentResult(student, termId!);
   expect(result.claims[0].points).toBe("3"); expect(result.result.provisionalTotal).toBe("3.00");
+  expect(result.claims[0].evidenceFiles).toEqual([{ id: evidenceId, name: "证明.png" }]);
   const roster = await pageResultStudents(admin, termId!, { q: identities.student.login });
   expect(roster.items).toHaveLength(1); expect(roster.items[0].complete).toBe(false); expect(roster.items[0].total).toBeNull();
   await expect(pageResultStudents(student, termId!, {})).rejects.toThrow("权限");
@@ -160,7 +196,7 @@ test("理由更正生成新版本，旧确认不迁移、异议要求实际更�
   let term = await db.term.findUniqueOrThrow({ where: { id: termId! } });
   await expect(reopenTerm(admin, termId!, { revision: term.revision, reason: "" })).rejects.toThrow();
   await reopenTerm(admin, termId!, { revision: term.revision, reason: "依据异议更正成绩" });
-  const staleBatch = await previewGradeImport(admin, termId!, { nodeId: "grade", rows: [{ login: identities.student.login, value: "75" }], reason: "导入旧预览" });
+  const staleBatch = await previewGradeImport(admin, termId!, { nodeId: "grade", rows: [await gradeImportRow(identities.student.login, "75")], reason: "导入旧预览" });
   await saveGrade(admin, termId!, { studentLogin: identities.student.login, nodeId: "grade", value: "80", revision: 0, reason: "按原始成绩单更正" });
   const p = await previewPublication(admin, termId!);
   const next = await publishResults(admin, termId!, { revision: p.termRevision, inputRevision: p.inputRevision, token: p.token, checkingEndsAt: new Date(Date.now() + 1500).toISOString(), requireConfirmation: false, requestId: randomUUID() });
@@ -173,8 +209,15 @@ test("理由更正生成新版本，旧确认不迁移、异议要求实际更�
   expect((await db.publishedResult.findUniqueOrThrow({ where: { id: before.id } })).resultHash).toBe(before.resultHash);
   expect((await db.publishedResult.findUniqueOrThrow({ where: { id: before.id } })).payload).toEqual(before.payload);
   const ranking = await getRankings(admin, termId!, {});
-  const csv = await rankingCsv(admin, termId!, {});
-  expect(csv).toContain('"\'=恶意公式"'); expect(csv).toContain(",83.00");
+  const rankingFile = await exportClassGradeWorkbook(admin, termId!, { scope: "school" });
+  expect(rankingFile.buffer.subarray(0, 2).toString()).toBe("PK");
+  const rankingSheet = (await readEntries(rankingFile.buffer))["xl/worksheets/sheet1.xml"];
+  expect(rankingSheet).toContain("=恶意公式");
+  expect(rankingSheet).toContain("<f>");
+  expect(rankingSheet).toMatch(/<c r="B\d+"[^>]*t="inlineStr"[^>]*><is><t[^>]*>=恶意公式<\/t><\/is><\/c>/);
+  expect(rankingSheet).toContain("<v>83</v>");
+  expect(rankingSheet).toContain("学院");
+  expect(rankingSheet).toContain("班级");
   expect(ranking.items[0].studentId).toBe(identities.student.id);
   expect((await getRankings(identities.student.session, termId!, {})).items).toHaveLength(1);
   await new Promise(r => setTimeout(r, 1700));
@@ -208,10 +251,9 @@ test("常用设置白名单/修订/品牌发布和本人账号设置权限", asy
   await expect(selfAccount(identities.student.session, { revision: edited.revision, name: "越权角色", role: "ADMIN" })).rejects.toThrow();
 });
 
-test("排名精确到显示两位，同分竞赛序和文本公式防护", () => {
+test("排名精确到显示两位，同分竞赛序和导出文本不以公式执行", () => {
   const rows = ranked([{ studentId: "a", login: "a", total: new Prisma.Decimal("0.01") }, { studentId: "b", login: "b", total: new Prisma.Decimal("0.01") }, { studentId: "c", login: "c", total: new Prisma.Decimal("-1.02") }]);
   expect(rows.map(r => r.rank)).toEqual([1, 1, 3]);
-  expect(csvText("  =1+1")).toBe('"\'  =1+1"'); expect(csvText("正常姓名")).toBe('"正常姓名"');
 });
 
 test("12位小数从数据库回读和导入比较不转科学计数法", async () => {
@@ -221,7 +263,7 @@ test("12位小数从数据库回读和导入比较不转科学计数法", async 
   const result = await getStudentResult(identities.student.session, termId!);
   expect(result.grades.find(g => g.nodeId === "grade")?.value).toBe(input.value);
   expect((await saveGrade(identities.admin.session, termId!, { ...input, revision: grade.revision })).revision).toBe(grade.revision);
-  const preview = await previewGradeImport(identities.admin.session, termId!, { nodeId: "grade", rows: [{ login: input.studentLogin, value: input.value }], reason: "相同精确值不覆盖" });
+  const preview = await previewGradeImport(identities.admin.session, termId!, { nodeId: "grade", rows: [await gradeImportRow(input.studentLogin, input.value)], reason: "相同精确值不覆盖" });
   expect(preview.rows[0].state).toBe("SAME");
 });
 

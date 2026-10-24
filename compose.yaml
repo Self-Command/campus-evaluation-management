@@ -1,0 +1,100 @@
+name: campus-evaluation
+
+services:
+  db:
+    image: postgres:18.4-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-campus}
+      POSTGRES_USER: ${POSTGRES_USER:-campus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # PostgreSQL 18 images keep PGDATA under /var/lib/postgresql/18/docker.
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -h 127.0.0.1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    shm_size: 256mb
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - backend
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/self-command/campus-evaluation-management:latest}
+    build:
+      context: .
+      target: runner
+      args:
+        VERSION: ${APP_VERSION:-0.1.0}
+        REVISION: ${APP_REVISION:-local}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Keep the application on loopback when a reverse proxy terminates TLS.
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-campus}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@db:5432/${POSTGRES_DB:-campus}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?Set NEXTAUTH_URL in .env.docker}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env.docker}
+      TZ: ${TZ:-Asia/Shanghai}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      DB_WAIT_TIMEOUT_MS: ${DB_WAIT_TIMEOUT_MS:-60000}
+      BOOTSTRAP_ADMIN_LOGIN: ${BOOTSTRAP_ADMIN_LOGIN:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-系统管理员}
+      APP_TRUSTED_ORIGINS: ${APP_TRUSTED_ORIGINS:-}
+      EVIDENCE_DIR: /data/evidence
+      ACTIVITY_ATTACHMENT_DIR: /data/activity-attachments
+    volumes:
+      - evidence-data:/data/evidence
+      - attachments-data:/data/activity-attachments
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - backend
+
+volumes:
+  db-data:
+  evidence-data:
+  attachments-data:
+
+networks:
+  backend:
+    driver: bridge

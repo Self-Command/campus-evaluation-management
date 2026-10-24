@@ -17,7 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
 	Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
@@ -43,7 +45,7 @@ type QueueItem = {
 	submitter: string | null; submittedAt: string; reviewer: string | null; reviewedAt: string | null;
 	reviewReason: string | null; revision: number; canDecide: boolean; canRevise: boolean;
 };
-type Queue = { items: QueueItem[]; total: number; page: number; status: string; stats: { pending: number; returned: number; mine: number }; role: string };
+type Queue = { items: QueueItem[]; total: number; page: number; status: string; stats: { pending: number; returned: number }; role: string };
 type Node = { id: string; name: string; minimum: string; maximum: string; required: boolean; input: { id: string; value: string; revision: number; updatedAt: string } | null; change: { id: string; value: string; reason: string; status: string; revision: number; submittedBy: string; submittedAt: string; reviewReason: string | null } | null };
 type Detail = {
 	student: { id: string; login: string; name: string; disabled: boolean; profile: { college: string; major: string; className: string } | null };
@@ -57,11 +59,11 @@ type Detail = {
 };
 
 const queueStatuses = [
-	["PENDING", "待处理与退回"],
+	["PENDING", "待处理（含已退回）"],
 	["PENDING_COLLEGE", "待学院审核"],
-	["RETURNED", "已退回"],
+	["RETURNED", "已退回待修改"],
 	["APPROVED", "已通过"],
-	["ABANDONED", "已放弃"],
+	["ABANDONED", "已撤回本次修改"],
 ] as const;
 
 export function GradeWorkspace({ term, role }: { term: { id: string; name: string; phase: string; disposition: string }; role: "ADMIN" | "COLLEGE" | "COUNSELOR" }) {
@@ -80,6 +82,9 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 	const [success, setSuccess] = useState("");
 	const [sendingBack, setSendingBack] = useState<{ id: string; revision: number; label: string } | null>(null);
 	const [dirty, setDirty] = useState(false);
+	const [view, setView] = useState<"queue" | "roster">(
+		role === "COUNSELOR" ? "roster" : "queue",
+	);
 	useUnsavedChanges(dirty);
 
 	const queue = useRemote<Queue>(`/api/grade-changes?${new URLSearchParams({ termId: term.id, status: queueStatus, page: String(queuePage) })}`);
@@ -101,7 +106,7 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 		setError("");
 		try {
 			await requestJson(`/api/grade-changes/${id}`, { termId: term.id, revision, action, ...extra }, "PATCH");
-			refresh(action === "approve" ? "成绩已审核通过并生效。" : action === "return" ? "已退回原辅导员修正。" : action === "resubmit" ? "已重新提交学院审核。" : "已放弃本次修订。");
+			refresh(action === "approve" ? "成绩已审核通过并生效。" : action === "return" ? "已退回原辅导员修改。" : action === "resubmit" ? "已重新提交学院审核。" : "已撤回本次成绩修改。");
 		} catch (err) {
 			setError((err as Error).message);
 		} finally {
@@ -120,7 +125,7 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 				value: data.get("value"), reason: data.get("reason"),
 				requestId: crypto.randomUUID(),
 			});
-			refresh("成绩修订已提交学院审核，审核通过前不影响成绩。");
+			refresh("成绩修改已提交学院审核，审核通过前不影响原成绩。");
 		} catch (err) {
 			setError((err as Error).message);
 		} finally {
@@ -139,7 +144,7 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 				value: data.get("value"), reason: data.get("reason"),
 				revision: current.input?.revision ?? null,
 			});
-			refresh("例外更正已直接生效并留痕。");
+			refresh("管理员更正已直接生效并记录原因。");
 		} catch (err) {
 			setError((err as Error).message);
 		} finally {
@@ -160,11 +165,11 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 				<p className="text-xs text-muted-foreground">{row.original.login} · {row.original.className}</p>
 			</div>
 		) },
-		{ id: "node", header: "成绩模块", cell: ({ row }) => row.original.nodeName },
-		{ id: "change", header: "有效值 → 修订值", cell: ({ row }) => (
+		{ id: "node", header: "成绩项", cell: ({ row }) => row.original.nodeName },
+		{ id: "change", header: "当前成绩 → 修改后成绩", cell: ({ row }) => (
 			<span className="tabular-nums">{row.original.baseValue ?? "未录入"} → {row.original.value}</span>
 		) },
-		{ id: "reason", header: "修订理由", cell: ({ row }) => <span className="line-clamp-2 max-w-48 text-sm">{row.original.reason}</span> },
+		{ id: "reason", header: "修改原因", cell: ({ row }) => <span className="line-clamp-2 max-w-48 text-sm">{row.original.reason}</span> },
 		{ id: "submitter", header: "提交", cell: ({ row }) => (
 			<div>
 				<p className="text-sm">{row.original.submitter || "—"}</p>
@@ -173,7 +178,7 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 		) },
 		{ id: "status", header: "状态", cell: ({ row }) => (
 			<div className="flex flex-col items-start gap-1">
-				<Badge variant={row.original.status === "RETURNED" ? "destructive" : row.original.status === "APPROVED" ? "secondary" : "outline"}>
+				<Badge variant={row.original.status === "APPROVED" ? "outline" : "secondary"}>
 					{statusLabels[row.original.status] || row.original.status}
 				</Badge>
 				{row.original.reviewReason && <span className="max-w-40 text-xs text-muted-foreground">{row.original.reviewReason}</span>}
@@ -183,12 +188,12 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 			<div className="flex flex-wrap gap-2">
 				{row.original.canDecide && (
 					<>
-						<Button size="sm" disabled={busy} onClick={() => act(row.original.id, row.original.revision, "approve", { reason: "学院审核通过" })}>通过</Button>
-						<Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.original.id, revision: row.original.revision, label: `${row.original.studentName} · ${row.original.nodeName}` })}>退回</Button>
+						<Button size="sm" disabled={busy} onClick={() => act(row.original.id, row.original.revision, "approve", { reason: "学院审核通过" })}>审核通过</Button>
+						<Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.original.id, revision: row.original.revision, label: `${row.original.studentName} · ${row.original.nodeName}` })}>退回辅导员修改</Button>
 					</>
 				)}
 				{row.original.canRevise && (
-					<Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.original.studentId)}>修正并重提</Button>
+					<Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.original.studentId)}>修改后重新提交</Button>
 				)}
 			</div>
 		) },
@@ -210,7 +215,7 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 			<span className="tabular-nums">{row.original.entered} / {row.original.required}</span>
 		) },
 		{ id: "pending", header: "待审", cell: ({ row }) => row.original.pending ? <Badge variant="outline">{row.original.pending}</Badge> : <span className="text-muted-foreground">0</span> },
-		{ id: "returned", header: "退回", cell: ({ row }) => row.original.returned ? <Badge variant="destructive">{row.original.returned}</Badge> : <span className="text-muted-foreground">0</span> },
+		{ id: "returned", header: "退回待修改", cell: ({ row }) => row.original.returned ? <Badge variant="secondary">{row.original.returned}</Badge> : <span className="text-muted-foreground">0</span> },
 		{ id: "actions", header: "操作", cell: ({ row }) => (
 			<Button size="sm" variant="ghost" onClick={() => openStudent(row.original.id)}>
 				{role === "COLLEGE" ? "查看与审核" : role === "ADMIN" ? "查看成绩" : "录入成绩"}
@@ -219,29 +224,87 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 	];
 	return (
 		<>
-			<div className="grid gap-4 sm:grid-cols-3">
+			<div className="grid grid-cols-3 gap-2 sm:gap-4">
 				{(role === "COLLEGE"
-					? [["待学院审核", queue.data?.stats.pending ?? 0], ["已退回待修正", queue.data?.stats.returned ?? 0], ["待处理合计", queue.data?.total ?? 0]]
+					? [
+							["待学院审核", queue.data?.stats.pending ?? 0],
+							["退回待辅导员修改", queue.data?.stats.returned ?? 0],
+							[
+								"待处理合计",
+								(queue.data?.stats.pending ?? 0) +
+									(queue.data?.stats.returned ?? 0),
+							],
+						]
 					: role === "COUNSELOR"
-						? [["待学院审核", queue.data?.stats.pending ?? 0], ["退回本人修正", queue.data?.stats.returned ?? 0], ["本人待审修订", queue.data?.stats.mine ?? 0]]
-						: [["全校待学院审核", queue.data?.stats.pending ?? 0], ["已退回待修正", queue.data?.stats.returned ?? 0], ["本周期学生", roster.data?.total ?? 0]]
+						? [
+								["本人待学院审核", queue.data?.stats.pending ?? 0],
+								["退回本人修改", queue.data?.stats.returned ?? 0],
+								["负责班级学生", roster.data?.total ?? 0],
+							]
+						: [
+								["全校待学院审核", queue.data?.stats.pending ?? 0],
+								["已退回待修正", queue.data?.stats.returned ?? 0],
+								["本周期学生", roster.data?.total ?? 0],
+							]
 				).map(([label, value]) => (
 					<Card key={String(label)}>
 						<CardHeader className="pb-2">
-							<CardDescription>{label}</CardDescription>
-							<CardTitle className="text-2xl tabular-nums">{String(value)}</CardTitle>
+							<CardDescription className="text-xs leading-tight">{label}</CardDescription>
+							<CardTitle className="text-xl tabular-nums sm:text-2xl">{String(value)}</CardTitle>
 						</CardHeader>
 					</Card>
 				))}
 			</div>
 			<Feedback error={error} success={success} />
+			<Tabs
+				value={view}
+				onValueChange={(next) => setView(next as "queue" | "roster")}
+				className="min-w-0"
+			>
+				<TabsList>
+					<TabsTrigger value="queue">
+						{role === "COLLEGE"
+							? "待我审核"
+							: role === "COUNSELOR"
+								? "我的成绩修改"
+								: "成绩修改与审核"}
+						{queue.data ? ` ${queue.data.stats.pending + queue.data.stats.returned}` : ""}
+					</TabsTrigger>
+					<TabsTrigger value="roster">
+						{role === "COUNSELOR"
+							? "负责班级学生"
+							: role === "COLLEGE"
+								? "本院学生"
+								: "全校学生"}
+						{roster.data ? ` ${roster.data.total}` : ""}
+					</TabsTrigger>
+				</TabsList>
+				<TabsContent value="queue" className="min-w-0">
 			<RemoteState {...queue} />
 			{queue.data && (
 				<TemplateDirectory
-					title={role === "COUNSELOR" ? "我的成绩修订" : "成绩审核队列"}
-					description={role === "COLLEGE" ? "本院辅导员提交的成绩修订；通过后按批准值生效，退回必须填写理由。" : "按提交时间排列的成绩修订与处理状态。"}
+					description={`共 ${queue.data.total} 条成绩修改`}
 					data={queue.data.items}
 					columns={queueColumns}
+					empty={
+						role === "COUNSELOR"
+							? {
+									title: "暂无成绩修改",
+									description:
+										"在下方学生名单中录入成绩；修改时提交学院审核。",
+								}
+							: role === "COLLEGE"
+								? {
+										title: "暂无待审核的成绩修改",
+										description:
+											"辅导员提交后会显示在这里；可切换状态查看历史。",
+									}
+								: {
+										title: "暂无成绩修改记录",
+										description:
+											"辅导员提交或管理员直接更正后，会在这里显示；可切换状态查看历史。",
+									}
+					}
 					filters={
 						<Field className="w-full sm:w-56">
 							<FieldLabel htmlFor="grade-queue-status">处理状态</FieldLabel>
@@ -258,19 +321,20 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 							<p className="text-xs text-muted-foreground">{row.reason}</p>
 							<Badge variant="outline" className="self-start">{statusLabels[row.status] || row.status}</Badge>
 							<div className="flex flex-wrap gap-2">
-								{row.canDecide && <Button size="sm" disabled={busy} onClick={() => act(row.id, row.revision, "approve", { reason: "学院审核通过" })}>通过</Button>}
-								{row.canDecide && <Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.id, revision: row.revision, label: `${row.studentName} · ${row.nodeName}` })}>退回</Button>}
-								{row.canRevise && <Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.studentId)}>修正并重提</Button>}
+								{row.canDecide && <Button size="sm" disabled={busy} onClick={() => act(row.id, row.revision, "approve", { reason: "学院审核通过" })}>审核通过</Button>}
+								{row.canDecide && <Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: row.id, revision: row.revision, label: `${row.studentName} · ${row.nodeName}` })}>退回辅导员修改</Button>}
+								{row.canRevise && <Button size="sm" variant="outline" disabled={busy} onClick={() => openStudent(row.studentId)}>修改后重新提交</Button>}
 							</div>
 						</div>
 					)}
 				/>
 			)}
+				</TabsContent>
+				<TabsContent value="roster" className="min-w-0">
 			<RemoteState {...roster} />
 			{roster.data && (
 				<TemplateDirectory
-					title={role === "COUNSELOR" ? "负责班级成绩" : role === "COLLEGE" ? "本院学生成绩" : "全校学生成绩"}
-					description={`共 ${roster.data.total} 位学生。待审修订在学院通过前不改变有效成绩。`}
+					description={`共 ${roster.data.total} 位学生；待审核的修改在学院通过前不改变有效成绩。`}
 					data={roster.data.items}
 					columns={rosterColumns}
 					filters={
@@ -279,16 +343,13 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 								<FieldLabel htmlFor="grade-query">姓名或学号</FieldLabel>
 								<Input id="grade-query" value={draft} maxLength={80} onChange={(event) => setDraft(event.target.value)} placeholder="输入姓名或学号" />
 							</Field>
-							{([["college", "学院", "colleges"], ["major", "专业", "majors"], ["className", "班级", "classes"]] as const).map(([key, label, options]) => (
+							{([["college", "学院", "colleges"], ["major", "专业", "majors"], ["className", "班级", "classes"]] as const).filter(([key]) => role === "ADMIN" || key !== "college").map(([key, label, options]) => (
 								<Field className="w-full sm:w-40" key={key}>
 									<FieldLabel htmlFor={`grade-scope-${key}`}>{label}</FieldLabel>
-									<NativeSelect id={`grade-scope-${key}`} value={draftScope[key]} onChange={(event) => {
-										const next = { ...draftScope, [key]: event.target.value, ...(key === "college" ? { major: "", className: "" } : key === "major" ? { className: "" } : {}) };
+									<SearchableSelect id={`grade-scope-${key}`} value={draftScope[key]} onValueChange={(value) => {
+										const next = { ...draftScope, [key]: value, ...(key === "college" ? { major: "", className: "" } : key === "major" ? { className: "" } : {}) };
 										setDraftScope(next); setScope(next); setQuery(draft.trim()); setRosterPage(1);
-									}}>
-										<NativeSelectOption value="">全部{label}</NativeSelectOption>
-										{roster.data!.scopeOptions[options].map(value => <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>)}
-									</NativeSelect>
+									}} placeholder={`全部${label}`} searchPlaceholder={`搜索${label}`} options={roster.data!.scopeOptions[options].map(value => ({ value, label: value }))} />
 								</Field>
 							))}
 							<Button type="submit" variant="outline">搜索</Button>
@@ -304,6 +365,8 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 					)}
 				/>
 			)}
+				</TabsContent>
+			</Tabs>
 			<Sheet open={!!selectedId} onOpenChange={(open) => { if (!open && (!dirty || window.confirm("放弃尚未提交的输入？"))) { setSelectedId(""); setDirty(false); } }}>
 				<SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
 					<SheetHeader>
@@ -320,8 +383,8 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 							<>
 								<Card>
 									<CardHeader>
-										<CardTitle className="text-base">成绩模块与有效值</CardTitle>
-										<CardDescription>待审修订在学院通过前不影响有效成绩；退回的修订需辅导员修正后重新提交。</CardDescription>
+										<CardTitle className="text-base">各项成绩</CardTitle>
+										<CardDescription>待审核的成绩修改在学院通过前不影响当前成绩；被退回的修改需辅导员修改后重新提交。</CardDescription>
 									</CardHeader>
 									<CardContent className="flex flex-col gap-3">
 										{detail.data.nodes.length === 0 && <p className="text-sm text-muted-foreground">本周期评分方案没有成绩输入模块。</p>}
@@ -329,10 +392,10 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 											<div key={item.id} className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 last:border-b-0 last:pb-0">
 												<div className="min-w-0">
 													<p className="font-medium">{item.name}{item.required ? " · 必录" : ""}</p>
-													<p className="text-xs text-muted-foreground">有效值 <span className="tabular-nums">{item.input?.value ?? "未录入"}</span> · 范围 {item.minimum}～{item.maximum}{item.input ? ` · 第 ${item.input.revision} 版` : ""}</p>
+													<p className="text-xs text-muted-foreground">当前成绩 <span className="tabular-nums">{item.input?.value ?? "未录入"}</span> · 范围 {item.minimum}～{item.maximum}{item.input ? ` · 第 ${item.input.revision} 版` : ""}</p>
 													{item.change && (
 														<p className="text-xs text-muted-foreground">
-															待审修订 <span className="tabular-nums">{item.change.value}</span> · {statusLabels[item.change.status] || item.change.status} · {item.change.reason}
+															待审核修改 <span className="tabular-nums">{item.change.value}</span> · {statusLabels[item.change.status] || item.change.status} · {item.change.reason}
 															{item.change.reviewReason ? ` · 学院意见：${item.change.reviewReason}` : ""}
 														</p>
 													)}
@@ -340,12 +403,12 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 												<div className="flex flex-wrap gap-2">
 													{detail.data!.canReview && item.change?.status === "PENDING_COLLEGE" && (
 														<>
-															<Button size="sm" disabled={busy} onClick={() => act(item.change!.id, item.change!.revision, "approve", { reason: "学院审核通过" })}>通过</Button>
-															<Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: item.change!.id, revision: item.change!.revision, label: `${detail.data!.student.name} · ${item.name}` })}>退回</Button>
+															<Button size="sm" disabled={busy} onClick={() => act(item.change!.id, item.change!.revision, "approve", { reason: "学院审核通过" })}>审核通过</Button>
+															<Button size="sm" variant="outline" disabled={busy} onClick={() => setSendingBack({ id: item.change!.id, revision: item.change!.revision, label: `${detail.data!.student.name} · ${item.name}` })}>退回辅导员修改</Button>
 														</>
 													)}
 													{detail.data!.canSubmit && item.change && (
-														<Button size="sm" variant="outline" disabled={busy} onClick={() => act(item.change!.id, item.change!.revision, "abandon", { reason: "辅导员放弃本次修订" })}>放弃修订</Button>
+														<Button size="sm" variant="outline" disabled={busy} onClick={() => act(item.change!.id, item.change!.revision, "abandon", { reason: "辅导员撤回本次修改" })}>撤回本次修改</Button>
 													)}
 													<Button size="sm" variant="ghost" onClick={() => { setNode(item.id); setError(""); setSuccess(""); }}>选择</Button>
 												</div>
@@ -356,11 +419,11 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 								{current && (detail.data.canSubmit || detail.data.canCorrect) && (
 									<Card>
 										<CardHeader>
-											<CardTitle className="text-base">{detail.data.canSubmit ? (current.change?.status === "RETURNED" ? "修正退回的成绩" : "提交成绩修订") : "例外更正（直接生效）"}</CardTitle>
+											<CardTitle className="text-base">{detail.data.canSubmit ? (current.change?.status === "RETURNED" ? "修改被退回的成绩" : "提交成绩修改") : "管理员直接更正（会记录原因）"}</CardTitle>
 											<CardDescription>
 												{detail.data.canSubmit
-													? "提交后进入待学院审核；学院通过前有效成绩保持不变。"
-													: "管理员例外更正直接写入有效成绩并保留前后值与理由，仅用于组织或数据异常。"}
+													? "提交后进入待学院审核；学院通过前当前成绩保持不变。"
+													: "直接更正会立即写入当前成绩，并保留修改前后值和原因；仅用于组织或数据异常。"}
 											</CardDescription>
 										</CardHeader>
 										<CardContent>
@@ -384,23 +447,21 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 											>
 												<FieldGroup>
 													<Field>
-														<FieldLabel htmlFor="grade-node">成绩模块</FieldLabel>
-														<NativeSelect id="grade-node" value={current.id} onChange={(event) => { if (dirty && !window.confirm("切换模块将放弃未提交输入，是否继续？")) return; setDirty(false); setNode(event.target.value); }}>
-															{detail.data.nodes.map(item => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
-														</NativeSelect>
-														<FieldDescription>当前有效值：{current.input?.value ?? "未录入"}；允许范围 {current.minimum}～{current.maximum}。</FieldDescription>
+														<FieldLabel htmlFor="grade-node">成绩项</FieldLabel>
+														<SearchableSelect id="grade-node" value={current.id} onValueChange={(value) => { if (dirty && !window.confirm("切换成绩项将放弃未提交输入，是否继续？")) return; setDirty(false); setNode(value); }} placeholder="请选择成绩项" searchPlaceholder="搜索成绩项" options={detail.data.nodes.map(item => ({ value: item.id, label: item.name, description: `允许范围 ${item.minimum}～${item.maximum}${item.required ? " · 必填" : ""}` }))} />
+														<FieldDescription>当前成绩：{current.input?.value ?? "未录入"}；允许范围 {current.minimum}～{current.maximum}。</FieldDescription>
 													</Field>
 													<Field>
 														<FieldLabel htmlFor="grade-value">成绩</FieldLabel>
 														<Input id="grade-value" name="value" inputMode="decimal" required defaultValue={current.change?.value ?? current.input?.value ?? ""} />
 													</Field>
 													<Field>
-														<FieldLabel htmlFor="grade-reason">{detail.data.canSubmit ? "提交理由" : "更正理由"}</FieldLabel>
+														<FieldLabel htmlFor="grade-reason">{detail.data.canSubmit ? "修改原因" : "更正原因"}</FieldLabel>
 														<Textarea id="grade-reason" name="reason" required minLength={2} maxLength={1000} rows={2} defaultValue={current.change?.reason ?? ""} />
 													</Field>
 												</FieldGroup>
 												<div className="flex flex-wrap gap-3">
-													<Button type="submit" disabled={busy || readOnly}>{detail.data.canSubmit ? (current.change?.status === "RETURNED" ? "重新提交审核" : "提交学院审核") : "保存例外更正"}</Button>
+													<Button type="submit" disabled={busy || readOnly}>{detail.data.canSubmit ? (current.change?.status === "RETURNED" ? "重新提交学院审核" : "提交学院审核") : "保存更正"}</Button>
 													{readOnly && <span className="self-center text-sm text-muted-foreground">当前阶段或周期状态只读，需管理员重开后才能提交。</span>}
 												</div>
 											</form>
@@ -408,15 +469,15 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 									</Card>
 								)}
 								<section className="flex flex-col gap-3">
-									<h2 className="font-medium text-base">修订与审核记录</h2>
-									<p className="text-xs text-muted-foreground">最近 60 条；退回理由、审核人与生效前后值全部保留。</p>
-									{detail.data.changes.length === 0 && <p className="text-sm text-muted-foreground">暂无成绩修订记录。</p>}
+									<h2 className="font-medium text-base">修改与审核记录</h2>
+									<p className="text-xs text-muted-foreground">最近 60 条；退回原因、审核人与生效前后值全部保留。</p>
+									{detail.data.changes.length === 0 && <p className="text-sm text-muted-foreground">暂无成绩修改记录。</p>}
 									{detail.data.changes.map(change => (
 										<div key={change.id} className="flex flex-col gap-1 border-b pb-3 last:border-b-0">
 											<div className="flex flex-wrap items-center gap-2">
 												<span className="font-medium">{change.nodeName}</span>
 												<span className="tabular-nums text-sm">{change.baseValue ?? "未录入"} → {change.value}</span>
-												<Badge variant={change.status === "RETURNED" ? "destructive" : change.status === "APPROVED" ? "secondary" : "outline"}>{statusLabels[change.status] || change.status}</Badge>
+												<Badge variant={change.status === "RETURNED" ? "secondary" : "outline"}>{statusLabels[change.status] || change.status}</Badge>
 											</div>
 											<p className="text-sm text-muted-foreground">{change.reason}</p>
 											<p className="text-xs text-muted-foreground">
@@ -435,8 +496,8 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 			<Dialog open={!!sendingBack} onOpenChange={(open) => { if (!open) setSendingBack(null); }}>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>退回成绩修订</DialogTitle>
-						<DialogDescription>{sendingBack?.label} · 退回后由原辅导员修正并重新提交学院审核。</DialogDescription>
+						<DialogTitle>退回成绩修改</DialogTitle>
+						<DialogDescription>{sendingBack?.label} · 退回后由原辅导员修改并重新提交学院审核。</DialogDescription>
 					</DialogHeader>
 					<form
 						className="flex flex-col gap-4"
@@ -453,9 +514,9 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 						}}
 					>
 						<Field>
-							<FieldLabel htmlFor="grade-return-reason">退回理由</FieldLabel>
+							<FieldLabel htmlFor="grade-return-reason">退回原因</FieldLabel>
 							<Textarea id="grade-return-reason" name="reason" required minLength={2} maxLength={1000} rows={3} />
-							<FieldDescription>理由会展示给提交辅导员，并保留在审核记录中。</FieldDescription>
+							<FieldDescription>原因会展示给提交辅导员，并保留在审核记录中。</FieldDescription>
 						</Field>
 						<DialogFooter>
 							<Button type="button" variant="outline" onClick={() => setSendingBack(null)}>取消</Button>
@@ -466,7 +527,11 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 			</Dialog>
 			<Separator className="my-2" />
 			<p className="text-xs text-muted-foreground">
-				本页只处理成绩输入与审核。综合成绩、排名与发布请使用成绩查询与结果发布页面。
+				{role === "COLLEGE"
+					? "本页审核本院辅导员提交的成绩修改；完整成绩明细请在页面上方的“导出成绩明细表”中下载。"
+					: role === "COUNSELOR"
+						? "本页录入负责班级学生的成绩并提交修改；完整成绩明细请在页面上方的“导出成绩明细表”中下载。"
+						: "本页查看成绩修改并直接更正成绩；完整成绩明细请在页面上方的“导出成绩明细表”中下载。"}
 			</p>
 		</>
 	);

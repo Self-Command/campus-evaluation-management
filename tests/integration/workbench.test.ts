@@ -22,10 +22,10 @@ beforeAll(async () => {
   termIds.push(term.id); selectedTerm = term.id;
   await activateTerm(users.admin.session, term.id, { revision: 0 });
   const otherTerm = await createTerm(users.admin.session, { name: `${marker}-其他周期`, template: false }); termIds.push(otherTerm.id);
-  const common = { termId: term.id, organizer: "活动组织", content: "真实活动内容", requirements: "参加要求", startsAt: new Date(Date.now() - 3600_000), endsAt: new Date(Date.now() + 86400_000), nodeId: "total", points: "5", confirmed: true };
+  const common = { termId: term.id, organizer: "活动组织", content: "真实活动内容", startsAt: new Date(Date.now() - 3600_000), endsAt: new Date(Date.now() + 86400_000), nodeId: "total", points: "5", confirmed: true, publishedAt: new Date() };
   const own = await db.activity.create({ data: { ...common, name: `${marker}-本人负责活动`, ownerId: users.publisher.id } }); privateActivity = own.id;
-  const other = await db.activity.create({ data: { ...common, name: `${marker}-他人负责活动`, ownerId: users.otherPublisher.id } }); otherActivity = other.id;
-  await db.activity.create({ data: { ...common, name: `${marker}-未确认活动`, ownerId: users.publisher.id, confirmed: false } });
+  const other = await db.activity.create({ data: { ...common, name: `${marker}-他人负责活动`, ownerId: users.otherPublisher.id, startsAt: new Date(Date.now() - 172_800_000), endsAt: new Date(Date.now() - 86_400_000) } }); otherActivity = other.id;
+  await db.activity.create({ data: { ...common, name: `${marker}-未发布活动`, ownerId: users.publisher.id, confirmed: false, publishedAt: null } });
   await db.activity.create({ data: { ...common, name: `${marker}-其他周期活动`, ownerId: users.publisher.id, termId: otherTerm.id } });
   const fact = await db.participation.create({ data: { activityId: own.id, studentId: users.student.id } });
   await db.recognitionSource.createMany({ data: [
@@ -69,11 +69,11 @@ test("管理工作台显示当前周期全局待审、发布者只显示本人�
   const admin = await getWorkbench(users.admin.session, selectedTerm);
   expect(admin.role).toBe("ADMIN"); if (admin.role !== "ADMIN") throw new Error("应为管理员工作台");
   expect(admin.stats.pendingRecognitions).toBe(1); expect(admin.stats.pendingClaims).toBe(1);
-  expect(admin.stats.unconfirmedActivities).toBe(1);
+  expect(admin.stats.ongoingActivities).toBe(1);
   expect(admin.reviewQueue.map(row => row.kind).sort()).toEqual(["ACTIVITY", "CLAIM"]);
   const publisher = await getWorkbench(users.publisher.session, selectedTerm);
   expect(publisher.role).toBe("PUBLISHER"); if (publisher.role !== "PUBLISHER") throw new Error("应为发布者工作台");
-  expect(publisher.stats.activities).toBe(2); expect(publisher.stats.pendingRecognitions).toBe(1);
+  expect(publisher.stats.activities).toBe(2); expect(publisher.stats.unpublishedActivities).toBe(1); expect(publisher.stats.pendingRecognitions).toBe(1);
   expect(publisher.stats.approvedRecognitions).toBe(1); expect(publisher.stats.needsChanges).toBe(2);
   expect(publisher.activities.find(row => row.id === privateActivity)?.approvedCount).toBe(1);
   expect(publisher.activities.some(row => row.id === otherActivity)).toBe(false);
@@ -90,7 +90,7 @@ test("学生工作台只含本人事项，重复通过来源只计一个有效�
   expect(data.stats.approvedRecognitions).toBe(1); expect(data.stats.pendingRecognitions).toBe(1);
   expect(data.stats.needsChanges).toBe(3); expect(data.stats.pendingClaims).toBe(0);
   expect(data.followUps.map(row => row.description).sort()).toEqual(["本人证明须补充", "组织证明须补充", "成果须补证明"].sort());
-  expect(data.opportunities.every(row => !row.name.includes("未确认") && !row.name.includes("其他周期"))).toBe(true);
+  expect(data.opportunities.every(row => !row.name.includes("未发布") && !row.name.includes("其他周期"))).toBe(true);
   expect(JSON.stringify(data)).not.toContain("他人私有理由"); expect(JSON.stringify(data)).not.toContain("他人成果");
   expect(data).not.toHaveProperty("periods"); expect(data).not.toHaveProperty("activities");
 });

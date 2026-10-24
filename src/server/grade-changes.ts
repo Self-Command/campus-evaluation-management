@@ -39,8 +39,16 @@ const submitSchema = z.object({
   requestId: z.string().min(8).max(100),
 }).strict();
 
+// The HTTP envelope carries termId for routing; strict schemas below must keep
+// rejecting forged fields on the payload itself.
+function payloadWithoutTermId(input: unknown) {
+  const parsed = z.record(z.string(), z.unknown()).parse(input);
+  delete parsed.termId;
+  return parsed;
+}
+
 export async function submitGradeChange(sessionId: string, termId: string, input: unknown) {
-  const data = submitSchema.parse(input);
+  const data = submitSchema.parse(payloadWithoutTermId(input));
   return termTransaction(sessionId, termId, ["COUNSELOR"], ["ACTIVE"], async (tx, term, actorId) => {
     const actor = await actorOf(tx, actorId);
     await inputStudentScope(tx, actor, data.studentId);
@@ -72,7 +80,7 @@ const changeSchema = z.object({
 }).strict();
 
 export async function changeGradeChange(sessionId: string, termId: string, id: string, input: unknown) {
-  const data = changeSchema.parse(input);
+  const data = changeSchema.parse(payloadWithoutTermId(input));
   return termTransaction(sessionId, termId, ["COUNSELOR", "COLLEGE"], ["ACTIVE"], async (tx, term, actorId) => {
     const actor = await actorOf(tx, actorId);
     const change = await tx.gradeChange.findUnique({ where: { id } });
@@ -208,18 +216,21 @@ export async function readGradeQueue(sessionId: string, termId: string, input: u
   const query = z.object({ status: inputChangeFilter.default("PENDING"), page: z.coerce.number().int().min(1).max(100000).default(1) }).parse(input);
   return termTransaction(sessionId, termId, ["ADMIN", "COLLEGE", "COUNSELOR"], allPhases, async (tx, term, actorId) => {
     const actor = await actorOf(tx, actorId);
-    const collegeScope: Prisma.GradeChangeWhereInput = actor.role === "COLLEGE" ? { studentId: { in: await scopedStudentIds(tx, actor) } } : {};
+    const scope: Prisma.GradeChangeWhereInput =
+      actor.role === "COLLEGE"
+        ? { studentId: { in: await scopedStudentIds(tx, actor) } }
+        : actor.role === "COUNSELOR"
+          ? { submittedBy: actorId }
+          : {};
     const where: Prisma.GradeChangeWhereInput = {
-      termId, ...collegeScope,
+      termId, ...scope,
       ...(query.status === "PENDING" ? { status: { in: [...inputPendingStatuses] } } : { status: query.status }),
-      ...(actor.role === "COUNSELOR" ? { submittedBy: actorId } : {}),
     };
-    const [rows, total, pending, returned, mine] = await Promise.all([
+    const [rows, total, pending, returned] = await Promise.all([
       tx.gradeChange.findMany({ where, orderBy: [{ submittedAt: "asc" }, { id: "asc" }], take: 20, skip: (query.page - 1) * 20 }),
       tx.gradeChange.count({ where }),
-      tx.gradeChange.count({ where: { termId, ...collegeScope, status: "PENDING_COLLEGE" } }),
-      tx.gradeChange.count({ where: { termId, status: "RETURNED", ...(actor.role === "COUNSELOR" ? { submittedBy: actorId } : {}) } }),
-      tx.gradeChange.count({ where: { termId, submittedBy: actorId, status: { in: [...inputPendingStatuses] } } }),
+      tx.gradeChange.count({ where: { termId, ...scope, status: "PENDING_COLLEGE" } }),
+      tx.gradeChange.count({ where: { termId, ...scope, status: "RETURNED" } }),
     ]);
     const nodes = gradeNodes(term);
     const [students, names] = await Promise.all([
@@ -242,7 +253,7 @@ export async function readGradeQueue(sessionId: string, termId: string, input: u
         };
       }),
       total, page: query.page, status: query.status,
-      stats: { pending, returned, mine },
+      stats: { pending, returned },
       role: actor.role,
     };
   }, "read");

@@ -137,7 +137,7 @@ function ProjectsSection({ data }: { data: PublisherData }) {
                 </CardTitle>
                 <CardDescription className="break-words">{activity.organizer}</CardDescription>
                 <CardAction className="col-start-1 row-start-auto flex flex-wrap justify-self-start gap-2 md:col-start-2 md:row-start-1 md:justify-self-end">
-                  <Badge variant="outline">{activity.confirmed ? "分值已确认" : "分值待确认"}</Badge>
+                  <Badge variant="outline">{activity.publishedAt ? "已发布" : "未发布"}</Badge>
                 </CardAction>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
@@ -168,7 +168,7 @@ function ProjectsSection({ data }: { data: PublisherData }) {
                 <Link href={`/activities/${activity.id}`} className="text-sm underline underline-offset-4">
                   查看活动
                 </Link>
-                {activity.confirmed && data.term!.phase === "ACTIVE" && (
+                {activity.publishedAt && data.term!.phase === "ACTIVE" && (
                   <Link
                     href={`/imports?kind=participation&termId=${data.term!.id}&activityId=${activity.id}`}
                     className="text-sm underline underline-offset-4"
@@ -232,8 +232,8 @@ function FocusCard({ data }: { data: PublisherData }) {
         </Badge>
         <dl className="flex flex-col gap-4 text-sm">
           <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">待确认分值活动</dt>
-            <dd className="tabular-nums">{data.stats.unconfirmedActivities}</dd>
+            <dt className="text-muted-foreground">未发布活动</dt>
+            <dd className="tabular-nums">{data.stats.unpublishedActivities}</dd>
           </div>
           <div className="flex justify-between gap-3">
             <dt className="text-muted-foreground">已通过活动参与</dt>

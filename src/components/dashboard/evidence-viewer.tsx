@@ -117,7 +117,7 @@ function EvidencePreview({ evidence }: { evidence: EvidenceFile }) {
 		(current?.url === renderError?.url ? renderError?.message : "");
 	const isPdf = current?.type === "application/pdf";
 	const loading =
-		!current || (!!current.url && loadedUrl !== current.url && !error);
+		!current || (!!current.url && !isPdf && loadedUrl !== current.url && !error);
 	return (
 		<div className="flex min-w-0 flex-col rounded-xl border bg-card">
 			<div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4">
@@ -157,11 +157,7 @@ function EvidencePreview({ evidence }: { evidence: EvidenceFile }) {
 				<Feedback error={error} />
 				{loading && (
 					<p role="status" className="text-sm text-muted-foreground">
-						{!current
-							? "正在读取证明材料…"
-							: isPdf
-								? "正在打开PDF…"
-								: "正在打开图片…"}
+						{!current ? "正在读取证明材料…" : "正在打开图片…"}
 					</p>
 				)}
 				{current?.url &&

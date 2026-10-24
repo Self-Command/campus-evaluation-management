@@ -8,7 +8,7 @@ import { nodeSchema, schemeSchema } from "@/lib/scoring/types";
 import type { Prisma, TermPhase } from "@/generated/prisma/client";
 import { schemeReferences, schemeReferenceErrors } from "@/server/scheme-references";
 
-export async function termTransaction<T>(sessionId: string, termId: string, roles: string[], phases: TermPhase[], operation: (tx: Prisma.TransactionClient, term: Awaited<ReturnType<typeof db.term.findUniqueOrThrow>>, actorId: string) => Promise<T>, mode: "read" | "write" | "manage" = "write") {
+export async function termTransaction<T>(sessionId: string, termId: string, roles: string[], phases: TermPhase[], operation: (tx: Prisma.TransactionClient, term: Awaited<ReturnType<typeof db.term.findUniqueOrThrow>>, actorId: string) => Promise<T>, mode: "read" | "write" | "manage" = "write", options: { timeout?: number } = {}) {
   return db.$transaction(async tx => {
     // Shared account lock freezes identity/scope while publishing. Account administration
     // takes this lock exclusively. Always acquire accounts before a period lock.
@@ -23,7 +23,7 @@ export async function termTransaction<T>(sessionId: string, termId: string, role
     if (mode === "write" && term.disposition !== "NORMAL") throw new AccountError(term.disposition === "VOID" ? "周期已作废，仅可查询历史" : "周期已归档，请先取消归档", 409);
     if (!phases.includes(term.phase)) throw new AccountError("当前学期阶段不允许此操作", 409);
     return operation(tx, term, session.userId);
-  }, { timeout: 15_000 });
+  }, { timeout: options.timeout ?? 15_000 });
 }
 export const termViewSchema = z.enum(["normal", "archived", "void", "deleted", "all"]);
 export async function listTerms(sessionId: string, options: { view?: z.infer<typeof termViewSchema> } = {}) {

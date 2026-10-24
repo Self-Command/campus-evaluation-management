@@ -1,111 +1,67 @@
 "use client";
-// invoice ClientSelector field group, with tasks/task-status-filter multi-select menus.
+// Activity audience selector adapted from the template's client selector and
+// task filter multi-select patterns. Long college/class lists stay searchable.
 import { useEffect, useState } from "react";
-import { ListFilter } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
 	Field,
 	FieldGroup,
 	FieldLabel,
 	FieldDescription,
 } from "@/components/ui/field";
-import { Badge } from "@/components/ui/badge";
 import {
-	DropdownMenu,
-	DropdownMenuTrigger,
-	DropdownMenuContent,
-	DropdownMenuGroup,
-	DropdownMenuCheckboxItem,
-} from "@/components/ui/dropdown-menu";
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@/components/ui/toggle-group";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
+import { SearchableMultiSelect } from "@/components/dashboard/searchable-multi-select";
 export type AudienceClass = {
 	college: string;
 	major: string;
 	className: string;
 };
+export type AudienceScope = "ALL" | "COLLEGE" | "CLASS";
 export type Audience = {
+	scope: AudienceScope;
 	colleges: string[];
 	classes: AudienceClass[];
-	studentIds: string[];
-};
-type Student = AudienceClass & {
-	id: string;
-	name: string;
-	login: string;
-	invalid?: boolean;
 };
 type Options = {
 	colleges: string[];
 	classes: AudienceClass[];
-	students: Student[];
-	selectedStudents?: Student[];
-	total: number;
-	page: number;
 };
 export type AudiencePreview = {
 	count: number;
-	students: Student[];
+	collegeCount: number;
+	majorCount: number;
+	classCount: number;
 	errors: string[];
-	token: string;
+};
+export const scopeLabels: Record<AudienceScope, string> = {
+	ALL: "全校",
+	COLLEGE: "按学院",
+	CLASS: "按班级",
 };
 export const emptyAudience: Audience = {
+	scope: "COLLEGE",
 	colleges: [],
 	classes: [],
-	studentIds: [],
 };
-const classKey = (value: AudienceClass) =>
+export const classKey = (value: AudienceClass) =>
 	JSON.stringify([value.college, value.major, value.className]);
 export const classLabel = (value: AudienceClass) =>
 	`${value.college} / ${value.major} / ${value.className}`;
-function MultiSelect({
-	label,
-	options,
-	selected,
-	onToggle,
-	disabled,
-}: {
-	label: string;
-	options: { value: string; label: string }[];
-	selected: string[];
-	onToggle: (value: string) => void;
-	disabled?: boolean;
-}) {
-	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						type="button"
-						variant="outline"
-						disabled={disabled}
-						className="w-full justify-between"
-					/>
-				}
-			>
-				<ListFilter data-icon="inline-start" />
-				{label} · 已选 {selected.length} 项
-			</DropdownMenuTrigger>
-			<DropdownMenuContent
-				className="max-h-80 w-[min(32rem,85vw)] overflow-y-auto"
-				align="start"
-			>
-				<DropdownMenuGroup>
-					{options.map((option) => (
-						<DropdownMenuCheckboxItem
-							key={option.value}
-							checked={selected.includes(option.value)}
-							onCheckedChange={() => onToggle(option.value)}
-							onSelect={(event) => event.preventDefault()}
-						>
-							{option.label}
-						</DropdownMenuCheckboxItem>
-					))}
-				</DropdownMenuGroup>
-			</DropdownMenuContent>
-		</DropdownMenu>
-	);
+export function audienceSummary(value: Audience) {
+	if (value.scope === "ALL") return "全校所有在籍学生";
+	if (value.scope === "COLLEGE")
+		return value.colleges.length
+			? `已选 ${value.colleges.length} 个学院`
+			: "尚未选择学院";
+	return value.classes.length
+		? `已选 ${value.classes.length} 个班级`
+		: "尚未选择班级";
 }
+
 export function AudienceEditor({
 	termId,
 	value,
@@ -117,43 +73,21 @@ export function AudienceEditor({
 	onChange: (value: Audience) => void;
 	disabled?: boolean;
 }) {
-	const [search, setSearch] = useState("");
-	const [query, setQuery] = useState("");
-	const [page, setPage] = useState(1);
 	const [retry, setRetry] = useState(0);
-	const key = JSON.stringify({ termId, query, page, value, retry });
+	const key = JSON.stringify({ termId, retry });
 	const [state, setState] = useState<{
 		key: string;
 		data: Options | null;
 		error: string;
 	} | null>(null);
-	const [known, setKnown] = useState<Record<string, Student>>({});
 	useEffect(() => {
 		let cancelled = false;
-		const args = JSON.parse(key) as {
-			termId: string;
-			query: string;
-			page: number;
-			value: Audience;
-		};
 		requestJson<Options>("/api/activities/audience", {
 			action: "options",
-			termId: args.termId,
-			q: args.query,
-			page: args.page,
-			audience: args.value,
+			termId,
 		})
 			.then((data) => {
-				if (cancelled) return;
-				setState({ key, data, error: "" });
-				setKnown((previous) => ({
-					...previous,
-					...Object.fromEntries(
-						[...data.students, ...(data.selectedStudents || [])].map(
-							(student) => [student.id, student],
-						),
-					),
-				}));
+				if (!cancelled) setState({ key, data, error: "" });
 			})
 			.catch((error) => {
 				if (!cancelled) setState({ key, data: null, error: error.message });
@@ -161,39 +95,42 @@ export function AudienceEditor({
 		return () => {
 			cancelled = true;
 		};
-	}, [key]);
+	}, [key, termId]);
 	const current = state?.key === key ? state : null;
 	const options = current?.data;
 	const toggle = (items: string[], id: string) =>
 		items.includes(id) ? items.filter((item) => item !== id) : [...items, id];
-	const conflicts = value.classes.filter(
-		(item) => !value.colleges.includes(item.college),
-	);
-	const selectedStudents = value.studentIds
-		.map((id) => known[id])
-		.filter((item): item is Student => !!item);
-	const studentConflicts = selectedStudents.filter(
-		(item) =>
-			!value.colleges.includes(item.college) ||
-			!value.classes.some((target) => classKey(target) === classKey(item)),
-	);
-	const invalidStudents = selectedStudents.filter((item) => item.invalid);
-	function updateScope(next: Audience) {
-		setPage(1);
-		onChange(next);
-	}
+	const loading = value.scope !== "ALL" && !current;
 	return (
 		<FieldGroup>
 			<Field>
-				<FieldLabel>发布范围</FieldLabel>
+				<FieldLabel>参与范围</FieldLabel>
 				<FieldDescription>
-					学院、班级、指定学生三组各至少选择一项。组内任选一项，三组需同时满足。调整学院不会自动删除已选班级或学生。
+					先选择一种范围方式，同一方式内多选为并集，不叠加其他限制。发布后范围内学生可在活动列表看到活动；参与名单仍由主办方导入或维护。
 				</FieldDescription>
+				<ToggleGroup
+					value={[value.scope]}
+					onValueChange={(next) => {
+						const scope = next[0] as AudienceScope | undefined;
+						if (scope && scope !== value.scope)
+							onChange({ ...value, scope });
+					}}
+					disabled={disabled}
+					variant="outline"
+				>
+					{(
+						Object.entries(scopeLabels) as [AudienceScope, string][]
+					).map(([scope, label]) => (
+						<ToggleGroupItem key={scope} value={scope}>
+							{label}
+						</ToggleGroupItem>
+					))}
+				</ToggleGroup>
 			</Field>
 			<Feedback error={current?.error} />
-			{!current && (
+			{loading && (
 				<p className="text-sm text-muted-foreground" role="status">
-					正在读取学生名单…
+					正在读取班级目录…
 				</p>
 			)}
 			{current?.error && (
@@ -205,164 +142,72 @@ export function AudienceEditor({
 					重试
 				</Button>
 			)}
-			<Field>
-				<FieldLabel>学院（多选）</FieldLabel>
-				<MultiSelect
-					disabled={disabled || !options}
-					label="选择学院"
-					options={[
-						...new Set([...(options?.colleges || []), ...value.colleges]),
-					].map((college) => ({ value: college, label: college }))}
-					selected={value.colleges}
-					onToggle={(college) =>
-						updateScope({ ...value, colleges: toggle(value.colleges, college) })
-					}
-				/>
-				<FieldDescription>
-					{value.colleges.join("、") || "尚未选择学院"}
-				</FieldDescription>
-			</Field>
-			<Field>
-				<FieldLabel>班级（多选）</FieldLabel>
-				<MultiSelect
-					disabled={disabled || !options}
-					label="选择班级"
-					options={Array.from(
-						new Map(
-							[...(options?.classes || []), ...value.classes].map((item) => [
-								classKey(item),
-								item,
-							]),
-						).values(),
-					).map((item) => ({ value: classKey(item), label: classLabel(item) }))}
-					selected={value.classes.map(classKey)}
-					onToggle={(id) =>
-						updateScope({
-							...value,
-							classes: value.classes.some((item) => classKey(item) === id)
-								? value.classes.filter((item) => classKey(item) !== id)
-								: [
-										...value.classes,
-										(options?.classes || []).find(
-											(item) => classKey(item) === id,
-										)!,
-									],
-						})
-					}
-				/>
-				<FieldDescription>
-					{value.classes.map(classLabel).join("；") || "尚未选择班级"}
-				</FieldDescription>
-			</Field>
-			<Field>
-				<FieldLabel htmlFor="audience-search">查找学生</FieldLabel>
-				<div className="flex flex-wrap gap-2">
-					<Input
-						id="audience-search"
-						className="min-w-0 flex-1"
-						value={search}
-						onChange={(event) => setSearch(event.target.value)}
-						onKeyDown={(event) => {
-							if (event.key === "Enter") {
-								event.preventDefault();
-								setQuery(search);
-								setPage(1);
-							}
-						}}
-						placeholder="姓名或学号"
+			{value.scope === "ALL" && (
+				<div className="rounded-lg border bg-muted/40 p-4 text-sm">
+					<p className="font-medium">全校所有在籍学生均可参与</p>
+					<p className="mt-1 text-muted-foreground">
+						无需再选择学院或班级；名单导入时仍按学生身份和学号校验。
+					</p>
+				</div>
+			)}
+			{value.scope === "COLLEGE" && (
+				<Field>
+					<FieldLabel>学院（多选）</FieldLabel>
+					<SearchableMultiSelect
+						disabled={disabled || !options}
+						label="选择学院"
+						options={[
+							...new Set([...(options?.colleges || []), ...value.colleges]),
+						].map((college) => ({ value: college, label: college }))}
+						selected={value.colleges}
+						onToggle={(college) =>
+							onChange({ ...value, colleges: toggle(value.colleges, college) })
+						}
 					/>
-					<Button
-						type="button"
-						variant="outline"
-						disabled={disabled}
-						onClick={() => {
-							setQuery(search);
-							setPage(1);
-						}}
-					>
-						搜索
-					</Button>
-				</div>
-				<MultiSelect
-					disabled={disabled || !options}
-					label="选择学生"
-					options={(options?.students || []).map((item) => ({
-						value: item.id,
-						label: `${item.name} · ${item.login} · ${classLabel(item)}`,
-					}))}
-					selected={value.studentIds}
-					onToggle={(id) =>
-						onChange({ ...value, studentIds: toggle(value.studentIds, id) })
-					}
-				/>
-				<FieldDescription>
-					共 {options?.total ?? "—"} 人，第 {page}{" "}
-					页。已选学生跨页保留。
-				</FieldDescription>
-				<div className="flex flex-wrap gap-2">
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						disabled={disabled || page <= 1 || !options}
-						onClick={() => setPage((number) => number - 1)}
-					>
-						上一页
-					</Button>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						disabled={disabled || !options || page * 20 >= options.total}
-						onClick={() => setPage((number) => number + 1)}
-					>
-						下一页
-					</Button>
-				</div>
-			</Field>
-			<Field>
-				<FieldLabel>已选 {value.studentIds.length} 位学生</FieldLabel>
-				<div className="flex flex-wrap gap-2">
-					{value.studentIds.map((id) => (
-						<Badge key={id} variant="outline" className="max-w-full">
-							<span className="min-w-0 break-all whitespace-normal">
-								{known[id]
-									? `${known[id].name} · ${known[id].login}${known[id].invalid ? "（已失效）" : ""}`
-									: `学生 ${id}`}
-							</span>
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								disabled={disabled}
-								aria-label={`移除${known[id]?.name || "学生"}`}
-								onClick={() =>
-									onChange({
-										...value,
-										studentIds: value.studentIds.filter((item) => item !== id),
-									})
-								}
-							>
-								移除
-							</Button>
-						</Badge>
-					))}
-				</div>
-			</Field>
-			<Feedback
-				error={[
-					...invalidStudents.map(
-						(item) =>
-							`${item.name}（${item.login}）的学生账号已失效，请移除或重新选择。`,
-					),
-					...conflicts.map(
-						(item) => `班级 ${classLabel(item)} 不属于已选学院。`,
-					),
-					...studentConflicts.map(
-						(item) => `${item.name}（${item.login}）不属于已选学院和班级。`,
-					),
-				].join(" ")}
-			/>
+					<FieldDescription>
+						{value.colleges.join("、") ||
+							"尚未选择学院，发布前至少选择一个学院"}
+					</FieldDescription>
+				</Field>
+			)}
+			{value.scope === "CLASS" && (
+				<Field>
+					<FieldLabel>班级（多选）</FieldLabel>
+					<SearchableMultiSelect
+						disabled={disabled || !options}
+						label="选择班级"
+						options={Array.from(
+							new Map(
+								[...(options?.classes || []), ...value.classes].map((item) => [
+									classKey(item),
+									item,
+								]),
+							).values(),
+						).map((item) => ({
+							value: classKey(item),
+							label: classLabel(item),
+						}))}
+						selected={value.classes.map(classKey)}
+						onToggle={(id) =>
+							onChange({
+								...value,
+								classes: value.classes.some((item) => classKey(item) === id)
+									? value.classes.filter((item) => classKey(item) !== id)
+									: [
+											...value.classes,
+											(options?.classes || []).find(
+												(item) => classKey(item) === id,
+											)!,
+										],
+							})
+						}
+					/>
+					<FieldDescription>
+						{value.classes.map(classLabel).join("；") ||
+							"尚未选择班级，发布前至少选择一个班级"}
+					</FieldDescription>
+				</Field>
+			)}
 		</FieldGroup>
 	);
 }

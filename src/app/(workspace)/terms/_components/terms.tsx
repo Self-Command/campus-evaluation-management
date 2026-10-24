@@ -7,6 +7,7 @@ import { Plus } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { DataTableFeatures } from "@/lib/data-table-features";
 import { TemplateDirectory } from "@/components/dashboard/template-directory";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
@@ -180,25 +181,18 @@ export function Terms({
 				),
 		},
 		{
-			accessorKey: "phase",
-			header: "业务阶段",
+			id: "status",
+			header: "状态",
 			cell: ({ row }) => (
-				<Badge variant="outline">{phaseLabels[row.original.phase]}</Badge>
-			),
-		},
-		{
-			id: "disposition",
-			header: "管理状态",
-			cell: ({ row }) => (
-				<Badge
-					variant={
-						row.original.disposition && row.original.disposition !== "NORMAL"
-							? "secondary"
-							: "outline"
-					}
-				>
-					{dispositionLabels[row.original.disposition || "NORMAL"]}
-				</Badge>
+				<div className="flex flex-wrap items-center gap-1.5">
+					<Badge variant="outline">{phaseLabels[row.original.phase]}</Badge>
+					{row.original.disposition &&
+						row.original.disposition !== "NORMAL" && (
+							<Badge variant="secondary">
+								{dispositionLabels[row.original.disposition]}
+							</Badge>
+						)}
+				</div>
 			),
 		},
 		{
@@ -244,7 +238,6 @@ export function Terms({
 			<Feedback success={success} />
 			{remote.data && (
 				<TemplateDirectory
-					title="测评周期"
 					description={`当前${viewLabels[view]}共 ${filtered.length} 个。复制只保留评分方案，不带业务记录和证明。`}
 					data={filtered.slice((currentPage - 1) * 20, currentPage * 20)}
 					columns={columns}
@@ -371,20 +364,22 @@ export function Terms({
 							</Field>
 							<Field>
 								<FieldLabel htmlFor="term-source">评分方案来源</FieldLabel>
-								<NativeSelect
+								<SearchableSelect
 									id="term-source"
 									value={source}
-									onChange={(e) => setSource(e.target.value)}
-								>
-									<NativeSelectOption value="">使用空白方案</NativeSelectOption>
-									{sources
-										.filter((t) => t.disposition !== "DELETED")
-										.map((t) => (
-											<NativeSelectOption key={t.id} value={t.id}>
-												复制：{t.name}
-											</NativeSelectOption>
-										))}
-								</NativeSelect>
+									onValueChange={setSource}
+									placeholder="使用空白方案"
+									searchPlaceholder="搜索周期名称"
+									options={[
+										{ value: "", label: "使用空白方案" },
+										...sources
+											.filter((t) => t.disposition !== "DELETED")
+											.map((t) => ({
+												value: t.id,
+												label: `复制：${t.name}`,
+											})),
+									]}
+								/>
 								<FieldDescription>
 									只复制评分模块和扣分规则，保留原周期。
 								</FieldDescription>

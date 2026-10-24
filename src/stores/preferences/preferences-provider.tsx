@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, use, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 import { type StoreApi, useStore } from "zustand";
 
@@ -91,7 +91,7 @@ export function PreferencesStoreProvider({
 }
 
 export function usePreferencesStore<T>(selector: (state: PreferencesState) => T): T {
-  const store = use(PreferencesStoreContext) as StoreApi<PreferencesState> | null;
+  const store = useContext(PreferencesStoreContext) as StoreApi<PreferencesState> | null;
   if (!store) throw new Error("Missing PreferencesStoreProvider");
   return useStore(store, selector);
 }

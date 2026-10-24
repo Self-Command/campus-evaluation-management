@@ -19,24 +19,27 @@ export function TemplateDirectory<T extends RowData>({
   data,
   columns,
   mobile,
+  empty,
   pagination,
 }: {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   actions?: ReactNode;
   filters?: ReactNode;
   search?: { action: string; query: string; placeholder: string; hidden?: Record<string, string> };
   data: T[];
   columns: ColumnDef<DataTableFeatures, T>[];
   mobile?: (row: T) => ReactNode;
+  empty?: { title: string; description: string };
   pagination?: { page: number; total: number; href: (page: number) => string; onPageChange?: (page: number) => void };
 }) {
   const router = useRouter();
   return (
     <Card className="min-w-0 max-w-full">
+      {(title || description || search || actions) && (
       <CardHeader className="border-b has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[1fr_auto]">
-        <CardTitle className="text-xl leading-none">{title}</CardTitle>
-        <CardDescription className="max-w-sm leading-snug">{description}</CardDescription>
+        {title && <CardTitle className="text-xl leading-none">{title}</CardTitle>}
+        {description && <CardDescription className="max-w-xl leading-snug">{description}</CardDescription>}
         <CardAction className="col-start-1 row-start-auto flex w-full flex-wrap justify-start gap-2 justify-self-stretch md:col-start-2 md:row-span-2 md:row-start-1 md:w-auto md:justify-end md:justify-self-end">
           {search && (
             <form action={search.action} className="flex w-full min-w-0 gap-2 md:w-auto">
@@ -62,9 +65,10 @@ export function TemplateDirectory<T extends RowData>({
           {actions}
         </CardAction>
       </CardHeader>
+      )}
       <CardContent className="flex min-w-0 flex-col gap-4 px-0">
         {filters && <div className="flex flex-wrap items-center justify-between gap-3 px-4">{filters}</div>}
-        <DataTable data={data} columns={columns} mobile={mobile} />
+        <DataTable data={data} columns={columns} mobile={mobile} empty={empty} />
         {pagination && (
           <>
             <Separator />

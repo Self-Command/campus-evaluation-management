@@ -10,14 +10,14 @@ import { effectiveCheckingDeadline } from "@/server/publication-window";
 export const resultStudentSelect = { id: true, login: true, name: true, studentProfile: true } as const;
 export type ResultStudent = Prisma.UserGetPayload<{ select: typeof resultStudentSelect }>;
 
-export type ScoringOverride = { activity?: { id: string; nodeId: string; points: string; scoreMode: string }; project?: { id: string; nodeId: string; points: string } };
+export type ScoringOverride = { activity?: { id: string; nodeId: string; points: string }; project?: { id: string; nodeId: string; points: string } };
 export async function collectStudentResults(tx: Prisma.TransactionClient, term: Term, students: ResultStudent[], override: ScoringOverride = {}) {
   const ids = students.map(s => s.id);
   const [facts, grades, deductions, claims] = await Promise.all([
-    tx.participation.findMany({ where: { studentId: { in: ids }, removedAt: null, activity: { termId: term.id, confirmed: true }, sources: { some: { status: "APPROVED" } } }, include: { activity: true, sources: { where: { status: "APPROVED" }, select: { id: true, reviewReason: true, evidence: { select: { evidenceId: true } } } } }, orderBy: { id: "asc" } }),
+    tx.participation.findMany({ where: { studentId: { in: ids }, removedAt: null, activity: { termId: term.id, confirmed: true }, sources: { some: { status: "APPROVED" } } }, include: { activity: true, sources: { where: { status: "APPROVED" }, select: { id: true, reviewReason: true, createdAt: true, reviewedAt: true, counseledAt: true, collegeReviewedAt: true, evidence: { select: { evidenceId: true, evidence: { select: { name: true } } } }, activityEvidence: { select: { evidence: { select: { id: true, name: true } } } } } } }, orderBy: { id: "asc" } }),
     tx.gradeInput.findMany({ where: { termId: term.id, studentId: { in: ids } }, orderBy: { id: "asc" } }),
     tx.deductionInput.findMany({ where: { termId: term.id, studentId: { in: ids }, revoked: false }, orderBy: { id: "asc" } }),
-    tx.personalClaim.findMany({ where: { studentId: { in: ids }, status: "APPROVED", termId: term.id }, include: { project: true, evidence: { select: { evidenceId: true } } }, orderBy: { id: "asc" } }),
+    tx.personalClaim.findMany({ where: { studentId: { in: ids }, status: "APPROVED", termId: term.id }, include: { project: true, evidence: { select: { evidenceId: true, evidence: { select: { name: true } } } } }, orderBy: { id: "asc" } }),
   ]);
   for (const fact of facts) if (override.activity?.id === fact.activityId) fact.activity = { ...fact.activity, ...override.activity, points: new Prisma.Decimal(override.activity.points) };
   for (const claim of claims) if (override.project?.id === claim.projectId && claim.project) claim.project = { ...claim.project, ...override.project, points: new Prisma.Decimal(override.project.points) };
@@ -28,12 +28,9 @@ export async function collectStudentResults(tx: Prisma.TransactionClient, term: 
     const studentGrades = grades.filter(g => g.studentId === student.id);
     const studentDeductions = deductions.filter(d => d.studentId === student.id);
     const totals = new Map<string, Rational>();
-    const missingActivityScores: { id: string; name: string }[] = [];
     for (const fact of participations) {
       if (nodes.get(fact.activity.nodeId)?.kind !== "ACTIVITY") throw new AccountError("有效参与记录的评分归属无效，请联系管理员", 409);
-      if (fact.activity.scoreMode === "INDIVIDUAL" && fact.score === null) { missingActivityScores.push({ id: fact.id, name: `${fact.activity.name}：个人活动分数未录入` }); continue; }
-      const points = fact.activity.scoreMode === "INDIVIDUAL" ? fact.score! : fact.activity.points;
-      totals.set(fact.activity.nodeId, (totals.get(fact.activity.nodeId) ?? Rational.from("0")).add(Rational.from(points.toFixed())));
+      totals.set(fact.activity.nodeId, (totals.get(fact.activity.nodeId) ?? Rational.from("0")).add(Rational.from(fact.activity.points.toFixed())));
     }
     for (const claim of personal) {
       // New claims carry the counselor-entered score; legacy claims keep the
@@ -55,21 +52,24 @@ export async function collectStudentResults(tx: Prisma.TransactionClient, term: 
     const deductionTotals = new Map<string, Rational>();
     for (const item of studentDeductions) deductionTotals.set(item.projectId, (deductionTotals.get(item.projectId) ?? Rational.from("0")).add(Rational.from(item.amount.toFixed())));
     const result = calculate(term.scheme, { values, deductions: Object.fromEntries([...deductionTotals].map(([id, value]) => [id, value.fixed(12)])) });
-    if (missingActivityScores.length) { result.complete = false; result.total = null; result.missing.push(...missingActivityScores); }
     return {
       term: { id: term.id, name: term.name, phase: term.phase, disposition: term.disposition, revision: term.revision, inputRevision: term.inputRevision },
       student: { id: student.id, login: student.login, name: student.name, profile: student.studentProfile }, result,
-      grades: studentGrades.map(g => ({ id: g.id, nodeId: g.nodeId, name: nodes.get(g.nodeId)!.name, value: g.value.toFixed(), revision: g.revision })),
+      grades: studentGrades.map(g => ({ id: g.id, nodeId: g.nodeId, name: nodes.get(g.nodeId)!.name, value: g.value.toFixed(), revision: g.revision, updatedAt: g.updatedAt.toISOString() })),
       deductions: studentDeductions.map(item => {
         const project = scheme.deductions.find(project => project.id === item.projectId);
         if (!project) throw new AccountError("扣分项目已失效", 409);
-        return { id: item.id, projectId: item.projectId, name: project.name, nodeName: nodes.get(project.nodeId)!.name, coefficient: project.coefficient, amount: item.amount.toFixed(), reason: item.reason };
+        return { id: item.id, projectId: item.projectId, name: project.name, nodeName: nodes.get(project.nodeId)!.name, coefficient: project.coefficient, amount: item.amount.toFixed(), applied: item.amount.mul(project.coefficient).toFixed(2), reason: item.reason, revision: item.revision, updatedAt: item.updatedAt.toISOString() };
       }),
-      participations: participations.map(fact => ({ id: fact.id, activityId: fact.activity.id, name: fact.activity.name, nodeId: fact.activity.nodeId, points: (fact.activity.scoreMode === "INDIVIDUAL" ? fact.score : fact.activity.points)?.toFixed() ?? null, approvedSourceCount: fact.sources.length, sources: fact.sources })),
+      participations: participations.map(fact => {
+        const activityEvidence = [...new Map(fact.sources.flatMap(source => source.activityEvidence ? [[source.activityEvidence.evidence.id, source.activityEvidence.evidence] as const] : [])).values()].map(file => ({ id: file.id, name: file.name }));
+        const approvedAt = fact.sources.map(source => source.collegeReviewedAt ?? source.counseledAt ?? source.reviewedAt ?? source.createdAt).sort((a, b) => b.getTime() - a.getTime())[0] ?? fact.createdAt;
+        return { id: fact.id, activityId: fact.activity.id, name: fact.activity.name, nodeId: fact.activity.nodeId, points: fact.activity.points.toFixed(), approvedSourceCount: fact.sources.length, activityDate: fact.activity.startsAt.toISOString(), approvedAt: approvedAt.toISOString(), sources: fact.sources.map(source => ({ id: source.id, reviewReason: source.reviewReason, evidence: source.evidence.map(file => ({ evidenceId: file.evidenceId, name: file.evidence.name })) })), activityEvidence };
+      }),
       claims: personal.map(c => {
         const nodeId = c.scoreNodeId ?? c.project?.nodeId ?? "";
         const points = c.score ?? c.project?.points;
-        return { id: c.id, projectId: c.projectId, name: c.title, factKey: c.factKey, occurredOn: c.occurredOn, nodeId, points: points ? points.toFixed() : "0", note: c.note, reviewReason: c.reviewReason, evidenceIds: c.evidence.map(e => e.evidenceId) };
+        return { id: c.id, projectId: c.projectId, activityId: c.activityId, name: c.title, occurredOn: c.occurredOn, nodeId, points: points ? points.toFixed() : "0", note: c.note, reviewReason: c.reviewReason, reviewedAt: c.reviewedAt, scoredAt: c.scoredAt, evidenceIds: c.evidence.map(e => e.evidenceId), evidenceFiles: c.evidence.map(e => ({ id: e.evidenceId, name: e.evidence.name })) };
       }),
     };
   });
@@ -122,7 +122,7 @@ export async function getStudentResult(sessionId: string, termId: string, studen
       if (!term.publishedResultSetId) throw new AccountError("本周期尚未发布结果", 409);
       const record = await tx.publishedResult.findUnique({ where: { publicationId_studentId: { publicationId: term.publishedResultSetId, studentId: targetId } }, include: { publication: true, confirmation: true } });
       if (!record) throw new AccountError("该学生不在本次发布范围内", 404);
-      const ranking = ranked(await tx.publishedResult.findMany({ where: { publicationId: term.publishedResultSetId }, select: { total: true, login: true, studentId: true } }));
+      const ranking = ranked(await tx.publishedResult.findMany({ where: { publicationId: term.publishedResultSetId, className: record.className }, select: { total: true, login: true, studentId: true } }));
       const payload = record.payload as unknown as StudentResultPayload;
       return { ...payload, term: { ...payload.term, phase: term.phase, disposition: term.disposition }, publication: { id: record.publication.id, sequence: record.publication.sequence, publishedAt: record.publication.publishedAt, checkingEndsAt: await effectiveCheckingDeadline(tx, record.publication), requireConfirmation: record.publication.requireConfirmation }, resultHash: record.resultHash, confirmation: record.confirmation, rank: ranking.find(r => r.studentId === targetId)?.rank ?? null, population: ranking.length };
     }

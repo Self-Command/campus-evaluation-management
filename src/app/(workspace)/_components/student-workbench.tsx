@@ -47,12 +47,20 @@ export function StudentWorkbench({
 	data: StudentData;
 	context: ReactNode;
 }) {
+	const description =
+		data.term?.phase === "LOCKED"
+			? "查看本人成绩、计分依据和审核记录；如有疑问可提交成绩异议。"
+			: data.term?.phase === "CHECKING"
+				? "核对本次发布成绩，确认无误或提交成绩异议。"
+				: data.term?.phase === "CONFIGURATION"
+					? "核对本人成绩和计分依据；评分方案生效后可提交成果。"
+					: "核对本人成绩和计分依据，补充材料；成绩随审核更新。";
 	return (
 		<div className="flex min-w-0 flex-col gap-4">
 			<div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
 				<PageHeading
 					title="我的测评概览"
-					description={`${data.user.name}，核对本人成绩和计分依据，补充材料，确认发布结果。`}
+					description={`${data.user.name}，${description}`}
 				/>
 				{data.term && (
 					<div className="flex flex-wrap items-center gap-2 lg:w-fit">
@@ -68,7 +76,7 @@ export function StudentWorkbench({
 							className={buttonVariants({ variant: "outline", size: "sm" })}
 						>
 							<ClipboardList data-icon="inline-start" />
-							成果申报
+							{data.term?.phase === "LOCKED" ? "我的申报" : "成果申报"}
 						</Link>
 					</div>
 				)}
@@ -132,12 +140,12 @@ function KpiCards({ data }: { data: StudentData }) {
 			description: "查看审核意见后补充材料并重新提交",
 		},
 		{
-			title: "发布名次",
-			value: outcome.rank === null ? "尚无名次" : `第 ${outcome.rank} 名`,
+			title: "发布排名",
+			value: outcome.rank === null ? "暂无排名" : `第 ${outcome.rank} 名`,
 			description:
 				outcome.population === null
-					? "以发布名单为准"
-					: `发布名单共 ${outcome.population} 人`,
+					? "以发布结果为准"
+					: `本次发布共 ${outcome.population} 人`,
 		},
 	];
 	return (
@@ -203,10 +211,12 @@ function ClassSchedule({ data }: { data: StudentData }) {
 				</Alert>
 				<dl className="flex flex-col divide-y text-sm">
 					<div className="flex flex-wrap justify-between gap-2 py-3">
-						<dt className="text-muted-foreground">评分方案 / 成绩版本</dt>
-						<dd>
-							{data.term!.revision} / {data.term!.inputRevision}
-						</dd>
+						<dt className="text-muted-foreground">评分方案版本</dt>
+						<dd>第 {data.term!.revision} 版</dd>
+					</div>
+					<div className="flex flex-wrap justify-between gap-2 py-3">
+						<dt className="text-muted-foreground">成绩更新次数</dt>
+						<dd>{data.term!.inputRevision} 次</dd>
 					</div>
 					<div className="flex flex-wrap justify-between gap-2 py-3">
 						<dt className="text-muted-foreground">发布版本</dt>
@@ -223,10 +233,10 @@ function ClassSchedule({ data }: { data: StudentData }) {
 						</dd>
 					</div>
 					<div className="flex flex-wrap justify-between gap-2 py-3">
-						<dt className="text-muted-foreground">确认状态</dt>
+						<dt className="text-muted-foreground">确认情况</dt>
 						<dd>
 							{outcome.confirmedAt
-								? dateText(outcome.confirmedAt)
+								? `已于 ${dateText(outcome.confirmedAt)} 确认`
 								: publication
 									? publication.requireConfirmation
 										? data.term!.phase === "LOCKED"
@@ -263,6 +273,7 @@ function ClassSchedule({ data }: { data: StudentData }) {
 	);
 }
 function AssignmentStatus({ data }: { data: StudentData }) {
+	const locked = data.term!.phase === "LOCKED";
 	return (
 		<Card className="h-full min-w-0">
 			<CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
@@ -272,16 +283,16 @@ function AssignmentStatus({ data }: { data: StudentData }) {
 				</CardDescription>
 				<CardAction className="col-start-1 row-start-auto justify-self-start md:col-start-2 md:row-start-1 md:justify-self-end flex flex-wrap gap-2">
 					<Link
-						href={`/recognitions?termId=${data.term!.id}`}
+						href={`/my-activities?termId=${data.term!.id}&view=joined`}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						活动参与
+						我参加的活动
 					</Link>
 					<Link
 						href={`/claims?termId=${data.term!.id}`}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						成果申报
+						{locked ? "申报记录" : "成果申报"}
 					</Link>
 				</CardAction>
 			</CardHeader>
@@ -289,7 +300,11 @@ function AssignmentStatus({ data }: { data: StudentData }) {
 				<WorkbenchItems
 					items={data.followUps}
 					emptyTitle="暂无待补材料"
-					emptyDescription="参加活动或取得成果后，可提交说明和证明。"
+					emptyDescription={
+						locked
+							? "本周期没有需要补充的材料。"
+							: "参加活动或取得成果后，可提交说明和证明。"
+					}
 				/>
 			</CardContent>
 		</Card>
@@ -391,14 +406,14 @@ function UpcomingEvents({ data }: { data: StudentData }) {
 	return (
 		<Card className="min-w-0">
 			<CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-				<CardTitle className="text-sm">近期活动</CardTitle>
-				<CardDescription>本周期已发布、面向你所在范围的活动</CardDescription>
+				<CardTitle className="text-sm">最新活动</CardTitle>
+				<CardDescription>正在进行、面向你所在范围的活动。</CardDescription>
 				<CardAction className="col-start-1 row-start-auto flex flex-wrap justify-self-start gap-2 md:col-start-2 md:row-start-1 md:justify-self-end">
 					<Link
-						href={`/activity-feed?termId=${data.term!.id}`}
+						href={`/my-activities?termId=${data.term!.id}&view=feed`}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						已发布活动
+						最新活动
 					</Link>
 				</CardAction>
 			</CardHeader>
@@ -438,7 +453,7 @@ function UpcomingEvents({ data }: { data: StudentData }) {
 				) : (
 					<NoData
 						title="暂无可参加活动"
-						description="可查看已发布活动，或直接提交本人已经取得的成果与证明材料。"
+						description="当前没有正在进行的活动，或切换测评周期查看历史。"
 					/>
 				)}
 			</CardContent>

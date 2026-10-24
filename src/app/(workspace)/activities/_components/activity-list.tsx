@@ -16,6 +16,7 @@ import {
 	DialogDescription,
 } from "@/components/ui/dialog";
 import { ActivityForm, type Activity } from "./activity-form";
+import type { UploadLimits } from "@/components/dashboard/rich-text-editor";
 import { dateText, statusLabels, type AppRole } from "@/lib/business-labels";
 import type { Scheme } from "@/lib/scoring/types";
 export function ActivityList({
@@ -24,27 +25,37 @@ export function ActivityList({
 	role,
 	query,
 	colleges = [],
+	limits,
 }: {
 	data: { items: Activity[]; total: number; page: number };
 	term: { id: string; phase: string; disposition?: string; scheme: Scheme };
 	role: AppRole;
 	query: string;
 	colleges?: { id: string; name: string; code?: string }[];
+	limits: UploadLimits;
 }) {
 	const router = useRouter();
 	const path = usePathname();
 	const params = useSearchParams();
 	const tab =
 		params.get("tab") || (path.startsWith("/terms/") ? "overview" : "");
+	const view = params.get("view");
 	const listQuery = new URLSearchParams({
 		termId: term.id,
 		q: query,
 		page: String(data.page),
 	});
 	if (tab) listQuery.set("tab", tab);
+	if (view) listQuery.set("view", view);
 	const returnHref = `${path}?${listQuery}`;
 	const detailHref = (id: string) =>
 		`/activities/${id}?returnTo=${encodeURIComponent(returnHref)}`;
+	const publishLabel = (activity: Activity) =>
+		activity.publishedAt
+			? "已发布"
+			: (activity.publishRevision ?? 0) > 0
+				? "已撤回"
+				: "未发布";
 	const [open, setOpen] = useState(false);
 	const columns: ColumnDef<DataTableFeatures, Activity>[] = [
 		{
@@ -77,19 +88,7 @@ export function ActivityList({
 		{
 			accessorKey: "points",
 			header: "分值",
-			cell: ({ row }) =>
-				row.original.scoreMode === "INDIVIDUAL"
-					? `每人单独录分，最高 ${row.original.points} 分`
-					: `统一 ${row.original.points} 分`,
-		},
-		{
-			accessorKey: "confirmed",
-			header: "分值状态",
-			cell: ({ row }) => (
-				<Badge variant={row.original.confirmed ? "outline" : "secondary"}>
-					{row.original.confirmed ? "已确认" : "未确认"}
-				</Badge>
-			),
+			cell: ({ row }) => `${row.original.points} 分`,
 		},
 		...(role === "STUDENT"
 			? [
@@ -109,21 +108,37 @@ export function ActivityList({
 					},
 					{
 						id: "ownScore",
-						header: "得分 / 审核",
+						header: "审核进度",
 						cell: ({ row }: { row: { original: Activity } }) => (
-							<div>
-								<p>
-									{row.original.scoreMode === "INDIVIDUAL"
-										? (row.original.ownParticipation?.score ?? "未录分")
-										: `${row.original.points} 分`}
-								</p>
-								<p className="text-xs text-muted-foreground">
-									{row.original.ownParticipation?.sources
-										.map(
-											(source) => statusLabels[source.status] || source.status,
-										)
-										.join("、") || "暂无审核记录"}
-								</p>
+							<div className="flex flex-col gap-1">
+								<Badge variant="outline">
+									{[
+										...new Set(
+											row.original.ownParticipation?.sources.map(
+												(source) =>
+													statusLabels[source.status] || source.status,
+											) ?? [],
+										),
+									].join("、") || "暂无审核记录"}
+								</Badge>
+								{[
+									...new Set(
+										row.original.ownParticipation?.sources
+											.map((source) =>
+												source.status === "RETURNED" && source.reviewReason
+													? source.reviewReason
+													: null,
+											)
+											.filter((reason): reason is string => !!reason) ?? [],
+									),
+								].map((reason) => (
+									<p
+										key={reason}
+										className="max-w-56 text-xs text-muted-foreground"
+									>
+										退回原因：{reason}
+									</p>
+								))}
 							</div>
 						),
 					},
@@ -133,9 +148,7 @@ export function ActivityList({
 						id: "published",
 						header: "发布状态",
 						cell: ({ row }: { row: { original: Activity } }) => (
-							<Badge variant="outline">
-								{row.original.publishedAt ? "已发布" : "未发布"}
-							</Badge>
+							<Badge variant="outline">{publishLabel(row.original)}</Badge>
 						),
 					},
 				]),
@@ -155,19 +168,39 @@ export function ActivityList({
 	return (
 		<>
 			<TemplateDirectory
-				title={role === "STUDENT" ? "我参加的活动" : "活动管理"}
-				description={
-					role === "STUDENT"
-						? `共 ${data.total} 个已登记活动。审核通过后才计分；参与记录保留登记时班级。`
-						: `共 ${data.total} 个活动。草稿、分值确认和发布是三个步骤。`
-				}
+				description={`共 ${data.total} 个活动`}
 				data={data.items}
 				columns={columns}
+				empty={
+					role === "STUDENT"
+						? {
+								title: "暂无已登记的活动",
+								description:
+									"学院登记你的参与后，会在这里显示活动分值和审核进度。",
+							}
+						: role === "COUNSELOR"
+							? {
+									title: "当前没有可查看的活动",
+									description:
+										"学院发布活动后会显示在这里；可切换测评周期查看历史。",
+								}
+							: {
+									title: "当前没有活动",
+									description:
+										term.phase === "ACTIVE"
+											? "可切换测评周期查看历史；在活动周期内可创建并发布活动。"
+											: "可切换测评周期查看历史；本周期当前阶段不能新建活动。",
+								}
+				}
 				search={{
 					action: path,
 					query,
 					placeholder: "搜索活动名称",
-					hidden: { termId: term.id, ...(tab ? { tab } : {}) },
+					hidden: {
+						termId: term.id,
+						...(tab ? { tab } : {}),
+						...(view ? { view } : {}),
+					},
 				}}
 				actions={
 					(role === "ADMIN" || role === "COLLEGE") &&
@@ -194,7 +227,7 @@ export function ActivityList({
 								{row.name}
 							</Link>
 							<Badge variant="outline">
-								{row.confirmed ? "已确认" : "未确认"}
+								{role === "STUDENT" ? "已登记" : publishLabel(row)}
 							</Badge>
 						</div>
 						<p className="text-xs text-muted-foreground">
@@ -207,20 +240,11 @@ export function ActivityList({
 									? dateText(row.ownParticipation.registeredAt)
 									: "—"}{" "}
 								·{" "}
-								{row.scoreMode === "INDIVIDUAL"
-									? (row.ownParticipation?.score ?? "未录分")
-									: `${row.points} 分`}{" "}
-								·{" "}
 								{row.ownParticipation?.sources
 									.map((source) => statusLabels[source.status] || source.status)
 									.join("、") || "暂无审核记录"}
 							</p>
-						) : (
-							<p className="text-sm">
-								{row.publishedAt ? "已发布" : "未发布"} ·{" "}
-								{row.scoreMode === "INDIVIDUAL" ? "每人单独录分" : "统一分值"}
-							</p>
-						)}
+						) : null}
 						<div className="flex items-center justify-between">
 							<span className="text-sm">{row.points} 分</span>
 							<Link
@@ -249,13 +273,14 @@ export function ActivityList({
 					<DialogHeader>
 						<DialogTitle>创建活动</DialogTitle>
 						<DialogDescription>
-							保存后确认分值，核对范围再发布。参与登记和审核计分分开处理。
+							保存后核对范围并发布，学生即可看到。参与登记和审核计分分开处理。
 						</DialogDescription>
 					</DialogHeader>
 					<ActivityForm
 						term={term}
 						role={role}
 						colleges={colleges}
+						limits={limits}
 						onSaved={(id) => {
 							setOpen(false);
 							router.push(detailHref(id));

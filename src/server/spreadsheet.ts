@@ -56,7 +56,9 @@ export async function parseAccountFile(
   } else throw new AccountError("仅支持 CSV 和 XLSX");
   if (raw.length < 2 || raw.length > maxRows + 1) throw new AccountError(`名单需包含表头及1–${maxRows}行学生，每批最多${maxRows}人`);
   if (raw[0].length > 30 || raw.some(row => row.length > 30)) throw new AccountError("每份名单最多30列");
-  const headers = raw[0].map((v, i) => String(v ?? "").trim() || `第${i + 1}列`);
+  const headers = raw[0].map(v => String(v ?? "").trim());
+  if (headers.some(header => !header)) throw new AccountError("表头不能为空，请删除空白列后重新上传");
+  if (new Set(headers).size !== headers.length) throw new AccountError("表头不能重复，请保留每个字段唯一的中文列名");
   const rows = raw.slice(1).map(row => row.map(value => {
     // Numeric Excel student IDs cannot reliably preserve leading zeros or long digits.
     if (typeof value === "number") return { value: String(value), numeric: true };

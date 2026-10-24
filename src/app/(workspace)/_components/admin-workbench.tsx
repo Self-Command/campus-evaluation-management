@@ -15,15 +15,27 @@ type AdminData = Extract<WorkbenchData, { role: "ADMIN" }>;
 export function AdminWorkbench({ data, context }: { data: AdminData; context: ReactNode }) {
   const termId = data.term?.id;
   const href = (path: string, query = "") => `${path}?termId=${termId}${query}`;
+  const phaseAction = !data.term
+    ? null
+    : data.term.phase === "CONFIGURATION"
+      ? { label: "继续配置评分方案", href: `/terms/${data.term.id}?tab=scheme` }
+      : { label: data.term.phase === "ACTIVE" ? "准备结果发布" : "查看发布结果", href: `/publication?termId=${data.term.id}` };
   return (
     <div className="@container/main flex min-w-0 flex-col gap-4 md:gap-6">
       <PageHeading
-        title="管理工作台"
-        description={`${data.user.name}，先处理待审记录和成绩异议，再发布本周期结果。`}
+        title="学校测评工作台"
+        description={`${data.user.name}，这里汇总各学院和辅导员的办理进度；你负责处理成绩异议、发布结果和监督办理进度。`}
         action={
-          <Link href="/terms?new=1" className={buttonVariants()}>
-            创建测评周期
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {phaseAction ? (
+              <Link href={phaseAction.href} className={buttonVariants()}>
+                {phaseAction.label}
+              </Link>
+            ) : null}
+            <Link href="/terms?new=1" className={buttonVariants({ variant: phaseAction ? "outline" : "default" })}>
+              创建测评周期
+            </Link>
+          </div>
         }
       />
       {context}
@@ -63,32 +75,36 @@ function MetricCards({ data }: { data: AdminData }) {
   const termId = data.term!.id;
   const items = [
     {
-      title: "待审核活动参与",
-      value: data.stats.pendingRecognitions,
-      description: "核对参与记录和证明",
-      href: `/recognitions?termId=${termId}&status=PENDING`,
-      icon: ClipboardCheck,
-    },
-    {
-      title: "待审核成果申报",
-      value: data.stats.pendingClaims,
-      description: "核对材料、评分和审核进度",
-      href: `/claims?termId=${termId}&status=PENDING`,
-      icon: FileCheck2,
-    },
-    {
-      title: "待确认分值的活动",
-      value: data.stats.unconfirmedActivities,
-      description: "确认分值后才能提交参与名单",
+      title: "进行中的活动",
+      value: data.stats.ongoingActivities,
+      description: "已发布且当前在活动时间内",
       href: `/activities?termId=${termId}`,
+      action: "查看活动",
       icon: CalendarClock,
     },
     {
-      title: "待处理成绩异议",
+      title: "待我处理的成绩异议",
       value: data.stats.openAppeals,
-      description: "含待处理和处理中",
+      description: "含处理中，处理后通知学生",
       href: `/appeals?termId=${termId}`,
+      action: data.stats.openAppeals ? "去处理" : "查看异议",
       icon: MessageSquareWarning,
+    },
+    {
+      title: "活动参与等待审核",
+      value: data.stats.pendingRecognitions,
+      description: "辅导员和学院审核，仅查看进度",
+      href: `/recognitions?termId=${termId}&status=PENDING`,
+      action: "查看进度",
+      icon: ClipboardCheck,
+    },
+    {
+      title: "成果申报等待处理",
+      value: data.stats.pendingClaims,
+      description: "辅导员评分、学院审核，仅查看进度",
+      href: `/claims?termId=${termId}&status=PENDING`,
+      action: "查看进度",
+      icon: FileCheck2,
     },
   ];
   return (
@@ -107,7 +123,7 @@ function MetricCards({ data }: { data: AdminData }) {
             <div className="font-medium text-3xl tabular-nums leading-none tracking-tight">{item.value}</div>
             <p className="text-sm text-muted-foreground">{item.description}</p>
             <Link href={item.href} className="text-sm underline underline-offset-4">
-              去处理
+              {item.action}
             </Link>
           </CardContent>
         </Card>
@@ -119,47 +135,47 @@ function PerformanceOverview({ data }: { data: AdminData }) {
   return (
     <Card className="@container/card min-w-0">
       <CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-        <CardTitle className="leading-none">审核队列</CardTitle>
+        <CardTitle className="leading-none">全校待办进度</CardTitle>
         <CardDescription>
           {data.term!.name} · 共{" "}
-          {data.stats.pendingRecognitions + data.stats.pendingClaims} 条待审记录，按提交时间显示最早 8 条。
+          {data.stats.pendingRecognitions + data.stats.pendingClaims} 条记录等待处理，按提交时间显示最早 8
+          条；审核由对应辅导员和学院完成。
         </CardDescription>
         <CardAction className="col-start-1 row-start-auto justify-self-start md:col-start-2 md:row-start-1 md:justify-self-end flex flex-wrap items-center gap-2">
           <Link
             href={`/recognitions?termId=${data.term!.id}&status=PENDING`}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
-            活动参与
+            活动参与进度
           </Link>
           <Link
             href={`/claims?termId=${data.term!.id}&status=PENDING`}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
-            成果申报
-          </Link>
-          <Link
-            href={`/activities?termId=${data.term!.id}`}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            确认活动
+            成果申报进度
           </Link>
         </CardAction>
       </CardHeader>
       <CardContent>
         <WorkbenchItems
           items={data.reviewQueue}
-          emptyTitle="暂无待审核记录"
-          emptyDescription="有新的活动参与或成果申报后，会在这里显示。"
+          emptyTitle="暂无等待处理的记录"
+          emptyDescription="活动参与和成果申报提交后，会在这里显示处理进度。"
         />
       </CardContent>
     </Card>
   );
 }
 function SubscriberOverview({ data }: { data: AdminData }) {
+  const phaseTarget = (period: AdminData["periods"][number]) => ({
+    href: period.phase === "CONFIGURATION" ? `/terms/${period.id}?tab=scheme` : `/publication?termId=${period.id}`,
+    label:
+      period.phase === "CONFIGURATION" ? "配置评分方案" : period.phase === "ACTIVE" ? "准备发布" : "查看发布结果",
+  });
   return (
     <Card className="min-w-0">
       <CardHeader className="has-data-[slot=card-action]:grid-cols-1 md:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-        <CardTitle className="leading-none">各周期发布与确认</CardTitle>
+        <CardTitle className="leading-none">各周期发布进度</CardTitle>
         <CardDescription>
           最近 {data.periods.length} 个周期的发布名单和确认人数；当前在籍学生{" "}
           {data.stats.activeStudents} 人，历史发布人数按发布时保存。
@@ -177,9 +193,9 @@ function SubscriberOverview({ data }: { data: AdminData }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>周期 / 方案版本</TableHead>
+                    <TableHead>周期 / 评分方案版本</TableHead>
                     <TableHead>阶段</TableHead>
-                    <TableHead>活动 / 成果待审</TableHead>
+                    <TableHead>活动 / 成果待处理</TableHead>
                     <TableHead>未决异议</TableHead>
                     <TableHead>发布名单 / 已确认</TableHead>
                     <TableHead>核对截止</TableHead>
@@ -205,15 +221,8 @@ function SubscriberOverview({ data }: { data: AdminData }) {
                       </TableCell>
                       <TableCell>{period.checkingEndsAt ? dateText(period.checkingEndsAt) : "尚未发布"}</TableCell>
                       <TableCell>
-                        <Link
-                          className="underline underline-offset-4"
-                          href={
-                            period.phase === "CONFIGURATION"
-                              ? `/terms/${period.id}?tab=scheme`
-                              : `/publication?termId=${period.id}`
-                          }
-                        >
-                          {period.phase === "CONFIGURATION" ? "配置评分方案" : "结果发布"}
+                        <Link className="underline underline-offset-4" href={phaseTarget(period).href}>
+                          {phaseTarget(period).label}
                         </Link>
                       </TableCell>
                     </TableRow>
@@ -230,7 +239,7 @@ function SubscriberOverview({ data }: { data: AdminData }) {
                   </div>
                   <dl className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <dt className="text-muted-foreground">活动 / 成果待审</dt>
+                      <dt className="text-muted-foreground">活动 / 成果待处理</dt>
                       <dd>
                         {period.pendingRecognitions} / {period.pendingClaims}
                       </dd>
@@ -254,10 +263,10 @@ function SubscriberOverview({ data }: { data: AdminData }) {
                     核对截止：{period.checkingEndsAt ? dateText(period.checkingEndsAt) : "尚未发布"}
                   </p>
                   <Link
-                    href={`/terms/${period.id}`}
+                    href={phaseTarget(period).href}
                     className={buttonVariants({ variant: "outline", size: "sm", className: "self-start" })}
                   >
-                    进入周期
+                    {phaseTarget(period).label}
                   </Link>
                 </div>
               ))}

@@ -8,13 +8,21 @@ export function DataTable<T extends RowData>({
   data,
   columns,
   mobile,
+  empty,
 }: {
   data: T[];
   columns: ColumnDef<DataTableFeatures, T>[];
   mobile?: (row: T) => React.ReactNode;
+  empty?: { title: string; description: string };
 }) {
   const table = useTable({ features: dataTableFeatures, data, columns, manualPagination: true });
-  if (!data.length) return <NoData title="没有匹配的记录" description="请调整筛选条件，或添加新的业务记录。" />;
+  if (!data.length)
+    return (
+      <NoData
+        title={empty?.title ?? "没有匹配的记录"}
+        description={empty?.description ?? "请调整筛选条件，或添加新的业务记录。"}
+      />
+    );
   return (
     <>
       {mobile && (

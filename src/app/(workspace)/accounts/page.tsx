@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { pageSession } from "@/server/page-session";
 import { listAccounts } from "@/server/accounts";
 import { PageHeading } from "@/components/dashboard/page-heading";
+import { buttonVariants } from "@/components/ui/button";
 import { Accounts } from "./_components/accounts";
 export default async function AccountsPage({
 	searchParams,
@@ -38,7 +40,23 @@ export default async function AccountsPage({
 		<>
 			<PageHeading
 				title="账号管理"
-				description="添加或停用账号，调整角色、所属学院和班级，重置密码。"
+				description="添加、调整、停用或删除账号，重置密码；导入账号后可查看导入记录并整批撤销。"
+				action={
+					<div className="flex flex-wrap gap-2">
+						<Link
+							href="/imports?kind=accounts&view=history"
+							className={buttonVariants({ variant: "outline" })}
+						>
+							导入记录
+						</Link>
+						<Link
+							href="/accounts/duplicates"
+							className={buttonVariants({ variant: "outline" })}
+						>
+							重复账号处置
+						</Link>
+					</div>
+				}
 			/>
 			<Accounts
 				data={JSON.parse(JSON.stringify(result))}

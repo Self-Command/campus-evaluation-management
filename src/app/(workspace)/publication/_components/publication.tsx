@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Check } from "lucide-react";
+import { cn } from "cn";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { DataTableFeatures } from "@/lib/data-table-features";
 import { TemplateEditor } from "@/components/dashboard/template-editor";
@@ -327,6 +329,22 @@ export function Publication({ termId }: { termId: string }) {
 			),
 		},
 	];
+		const publishSteps = [
+		{ title: "检查", description: "名单与成绩完整性" },
+		{ title: "发布", description: "生成成绩版本" },
+		{ title: "学生确认", description: "确认或提出异议" },
+		{ title: "锁定", description: "保存结算存档" },
+	];
+	const stepIndex = !data
+		? 0
+		: data.term.phase === "CHECKING"
+			? 2
+			: data.term.phase === "LOCKED"
+				? 3
+				: data.term.phase === "ACTIVE" && preview?.canPublish
+					? 1
+					: 0;
+	const flowDone = data?.term.phase === "LOCKED";
 	const cohortRows: CohortStudent[] = preview
 		? [
 				...(preview.cohortChanges?.added ?? []).map((student) => ({
@@ -346,13 +364,10 @@ export function Publication({ termId }: { termId: string }) {
 			{data && (
 				<>
 					<div className="flex flex-wrap items-center justify-between gap-3">
-						<div className="flex flex-wrap items-center gap-3">
-							<Badge variant="outline">{phaseLabels[data.term.phase]}</Badge>
-							<span className="text-xs text-muted-foreground">
-								评分方案版本 {data.term.revision} · 成绩版本{" "}
-								{data.term.inputRevision}
-							</span>
-						</div>
+						<span className="text-xs text-muted-foreground">
+							评分方案版本 {data.term.revision} · 成绩版本{" "}
+							{data.term.inputRevision}
+						</span>
 						{(!data.term.disposition || data.term.disposition === "NORMAL") &&
 							["CHECKING", "LOCKED"].includes(data.term.phase) && (
 								<Button
@@ -366,6 +381,50 @@ export function Publication({ termId }: { termId: string }) {
 								</Button>
 							)}
 					</div>
+					{data.term.phase !== "CONFIGURATION" && (
+						<ol
+							aria-label={`发布流程，当前阶段${phaseLabels[data.term.phase]}`}
+							className="grid grid-cols-2 gap-3 rounded-lg border p-3 xl:grid-cols-4"
+						>
+							{publishSteps.map((step, index) => {
+								const done = flowDone || index < stepIndex;
+								const active = !flowDone && index === stepIndex;
+								return (
+									<li
+										key={step.title}
+										aria-current={active ? "step" : undefined}
+										className="flex min-w-0 items-start gap-2"
+									>
+										<span
+											className={cn(
+												"mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border text-xs tabular-nums",
+												done
+													? "border-primary bg-primary text-primary-foreground"
+													: active
+														? "border-primary text-primary"
+														: "text-muted-foreground",
+											)}
+										>
+											{done ? <Check className="size-3.5" /> : index + 1}
+										</span>
+										<div className="min-w-0">
+											<p
+												className={cn(
+													"text-sm font-medium",
+													!done && !active && "text-muted-foreground",
+												)}
+											>
+												{step.title}
+											</p>
+											<p className="text-xs text-muted-foreground">
+												{step.description}
+											</p>
+										</div>
+									</li>
+								);
+							})}
+						</ol>
+					)}
 					<TemplateEditor
 						preview={
 							<Card>

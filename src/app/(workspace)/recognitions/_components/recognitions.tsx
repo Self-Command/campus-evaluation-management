@@ -76,7 +76,6 @@ type Recognition = {
 	};
 	participation: {
 		id: string;
-		score: string | null;
 		removedAt: string | null;
 		removalReason: string | null;
 		registrationSnapshot: Record<string, unknown> | null;
@@ -84,7 +83,6 @@ type Recognition = {
 			id: string;
 			name: string;
 			points: string;
-			scoreMode: string;
 			ownerId: string;
 			collegeId: string | null;
 			college: { name: string } | null;
@@ -279,12 +277,8 @@ export function Recognitions({
 		{
 			id: "score",
 			header: "活动得分",
-			cell: ({ row }) => {
-				const activity = row.original.participation.activity;
-				return activity.scoreMode === "INDIVIDUAL"
-					? (row.original.participation.score ?? "尚未录分")
-					: `${activity.points} 分（固定）`;
-			},
+			cell: ({ row }) =>
+				`${row.original.participation.activity.points} 分`,
 		},
 		{
 			accessorKey: "status",
@@ -333,16 +327,32 @@ export function Recognitions({
 	return (
 		<>
 			<TemplateDirectory
-				title={
+				description={
 					role === "ADMIN"
-						? "活动参与记录"
+						? `共 ${data.total} 条记录。查看全校参与记录和审核进度。`
 						: role === "STUDENT"
-							? "我的活动参与"
-							: "活动参与审核"
+							? `共 ${data.total} 条记录。查看本人参与记录和审核进度。`
+							: role === "COLLEGE"
+								? `共 ${data.total} 条记录。仅显示本学院学生的活动参与。`
+								: role === "COUNSELOR"
+									? `共 ${data.total} 条记录。仅显示负责班级学生的活动参与。`
+									: `共 ${data.total} 条记录。查看你发布活动的参与审核进度。`
 				}
-				description={`共 ${data.total} 条记录。主办学院维护参与记录和活动得分；辅导员审核后，由学生所在学院审核。`}
 				data={data.items}
 				columns={columns}
+				empty={
+					role === "STUDENT"
+						? {
+								title: "暂无活动参与记录",
+								description:
+									"学院登记你参加活动后，会在这里显示活动得分和审核进度。",
+							}
+						: {
+								title: "当前没有参与记录",
+								description:
+									"活动名单登记后，会在这里显示审核进度；可切换状态查看历史。",
+							}
+				}
 				actions={
 					<Link
 						href={
@@ -352,7 +362,7 @@ export function Recognitions({
 						}
 						className={buttonVariants({ variant: "outline", size: "sm" })}
 					>
-						返回活动
+						查看活动列表
 					</Link>
 				}
 				filters={
@@ -416,9 +426,7 @@ export function Recognitions({
 							{dateText(row.createdAt)}
 						</p>
 						<p className="text-sm">
-							{row.participation.activity.scoreMode === "INDIVIDUAL"
-								? (row.participation.score ?? "尚未录分")
-								: `${row.participation.activity.points} 分（固定）`}
+							{row.participation.activity.points} 分
 						</p>
 						<Button
 							variant="outline"
@@ -494,10 +502,7 @@ export function Recognitions({
 									</p>
 									<p className="mt-2 text-sm tabular-nums">
 										活动得分：
-										{selected.participation.activity.scoreMode ===
-										"INDIVIDUAL"
-											? (selected.participation.score ?? "尚未录分")
-											: `${selected.participation.activity.points} 分（固定）`}
+										{selected.participation.activity.points} 分
 									</p>
 									<Link
 										href={`/activities/${selected.participation.activity.id}?termId=${term.id}&tab=evidence`}
@@ -663,8 +668,8 @@ export function Recognitions({
 											disabled={busy}
 										>
 											{selected.status === "PENDING_COUNSELOR"
-												? "通过"
-												: "通过并计分"}
+												? "核对通过"
+												: "审核通过并计分"}
 										</Button>
 										<Button
 											type="submit"
@@ -737,10 +742,6 @@ export function Recognitions({
 											await submit("resubmit", {
 												note: form.get("note"),
 												reason: form.get("reason") || undefined,
-												...(selected.participation.activity.scoreMode ===
-												"INDIVIDUAL"
-													? { score: form.get("score") }
-													: {}),
 											});
 										}}
 									>
@@ -759,28 +760,6 @@ export function Recognitions({
 													rows={4}
 												/>
 											</Field>
-											{selected.participation.activity.scoreMode ===
-												"INDIVIDUAL" && (
-												<Field>
-													<FieldLabel htmlFor="recognition-score">
-														活动得分
-													</FieldLabel>
-													<Input
-														id="recognition-score"
-														name="score"
-														inputMode="decimal"
-														defaultValue={
-															selected.participation.score ?? ""
-														}
-														required
-													/>
-													<FieldDescription>
-														上限{" "}
-														{selected.participation.activity.points}{" "}
-														分。修改得分须填写原因，并重新提交辅导员审核。
-													</FieldDescription>
-												</Field>
-											)}
 											<Field>
 												<FieldLabel htmlFor="recognition-resubmit-reason">
 													更正原因

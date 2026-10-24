@@ -1,11 +1,37 @@
 import { NextResponse } from "next/server";
 import { authorize } from "@/server/authorization";
+import { apiError } from "@/server/http";
+import { resolveImportTemplate } from "@/server/import-templates";
+import {
+	importRoles,
+	parseImportKind,
+	templateCsv,
+} from "@/lib/imports/templates";
+
 export async function GET(request: Request) {
-  const kind = new URL(request.url).searchParams.get("kind");
-  const auth = await authorize(kind === "participation" ? ["ADMIN", "PUBLISHER", "COLLEGE"] : ["ADMIN"]);
-  if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const templates = { accounts: { name: "学生账号模板-v1.csv", header: "学号,姓名,学院,专业,班级" }, grades: { name: "成绩输入模板-v1.csv", header: "学号,成绩" }, participation: { name: "活动参与名单模板-v2.csv", header: "学号,姓名,学院,专业,班级,活动原始分" } };
-  if (!kind || !(kind in templates)) return NextResponse.json({ error: "模板类型无效" }, { status: 400 });
-  const template = templates[kind as keyof typeof templates];
-  return new Response(`\uFEFF${template.header}\r\n`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(template.name)}`, "Cache-Control": "private, no-store" } });
+	const url = new URL(request.url);
+	const kind = parseImportKind(url.searchParams.get("kind"));
+	if (!kind)
+		return NextResponse.json({ error: "模板类型无效" }, { status: 400 });
+	const auth = await authorize(importRoles[kind]);
+	if ("error" in auth)
+		return NextResponse.json({ error: auth.error }, { status: auth.status });
+	try {
+		const template = await resolveImportTemplate(auth.user.sessionId, kind, {
+			termId: url.searchParams.get("termId"),
+			nodeId: url.searchParams.get("nodeId"),
+			activityId: url.searchParams.get("activityId"),
+			accountRole: url.searchParams.get("role"),
+		});
+		return new Response(templateCsv(template), {
+			headers: {
+				"Content-Type": "text/csv; charset=utf-8",
+				"Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(template.name)}`,
+				"X-Import-Template-Version": template.version,
+				"Cache-Control": "private, no-store",
+			},
+		});
+	} catch (error) {
+		return apiError(error);
+	}
 }

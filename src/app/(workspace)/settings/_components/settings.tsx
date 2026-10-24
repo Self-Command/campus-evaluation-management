@@ -38,6 +38,9 @@ type SettingsData = {
 	loginFailureLimitEnabled: boolean;
 	loginFailureMaxAttempts: number;
 	loginFailureLockMinutes: number;
+	activityAttachmentMaxFiles: number;
+	activityAttachmentMaxSizeMb: number;
+	activityAttachmentAllowedExtensions: string[];
 	logoAssetId: string | null;
 	faviconAssetId: string | null;
 	revision: number;
@@ -63,6 +66,9 @@ function SettingsForm({ value }: { value: SettingsData }) {
 	const [reason, setReason] = useState("");
 	const [tab, setTab] = useState("brand");
 	const [invalid, setInvalid] = useState<Record<string, string>>({});
+	const [extensionsText, setExtensionsText] = useState(
+		value.activityAttachmentAllowedExtensions.join(", "),
+	);
 	useUnsavedChanges(dirty || busy || !!uploading);
 	function change(
 		key: keyof SettingsData,
@@ -125,6 +131,32 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					)
 						issues[key] = `${label}需填写1至${max}的整数。`;
 				}
+				const extensions = [
+					...new Set(
+						extensionsText
+							.split(/[,，\s]+/)
+							.map((item) => item.trim().toLowerCase().replace(/^\./, ""))
+							.filter(Boolean),
+					),
+				];
+				if (
+					!extensions.length ||
+					extensions.length > 20 ||
+					extensions.some((item) => !/^[a-z0-9]{1,10}$/.test(item))
+				)
+					issues.extensions =
+						"请填写1至20个后缀，小写字母或数字，不带点，用逗号分隔。";
+				for (const [key, label, max] of [
+					["activityAttachmentMaxFiles", "附件数量上限", 20],
+					["activityAttachmentMaxSizeMb", "单个附件大小上限", 50],
+				] as const) {
+					if (
+						!Number.isInteger(draft[key]) ||
+						draft[key] < 1 ||
+						draft[key] > max
+					)
+						issues[key] = `${label}需填写1至${max}的整数。`;
+				}
 				if (reason.trim().length < 2 || reason.trim().length > 500)
 					issues.reason = "请填写2至500个字符的修改理由。";
 				setInvalid(issues);
@@ -133,7 +165,9 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					setTab(
 						first.startsWith("loginFailure")
 							? "security"
-							: first === "reason"
+							: ["extensions", "activityAttachmentMaxFiles", "activityAttachmentMaxSizeMb"].includes(first)
+								? "activity"
+								: first === "reason"
 								? tab
 								: "brand",
 					);
@@ -149,6 +183,9 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										reason: "settings-reason",
 										loginFailureMaxAttempts: "settings-login-attempts",
 										loginFailureLockMinutes: "settings-login-lock",
+										activityAttachmentMaxFiles: "settings-attachment-files",
+										activityAttachmentMaxSizeMb: "settings-attachment-size",
+										extensions: "settings-attachment-extensions",
 									} as Record<string, string>
 								)[first],
 							)
@@ -169,6 +206,9 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							loginFailureLimitEnabled: draft.loginFailureLimitEnabled,
 							loginFailureMaxAttempts: draft.loginFailureMaxAttempts,
 							loginFailureLockMinutes: draft.loginFailureLockMinutes,
+							activityAttachmentMaxFiles: draft.activityAttachmentMaxFiles,
+							activityAttachmentMaxSizeMb: draft.activityAttachmentMaxSizeMb,
+							activityAttachmentAllowedExtensions: extensions,
 							logoAssetId: draft.logoAssetId,
 							faviconAssetId: draft.faviconAssetId,
 							reason,
@@ -271,6 +311,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 						<TabsTrigger value="brand">品牌与标题</TabsTrigger>
 						<TabsTrigger value="assets">标识与主题</TabsTrigger>
 						<TabsTrigger value="security">登录安全</TabsTrigger>
+						<TabsTrigger value="activity">活动附件</TabsTrigger>
 					</TabsList>
 					<TabsContent className="mt-4" value="brand">
 						<FieldGroup>
@@ -472,6 +513,59 @@ function SettingsForm({ value }: { value: SettingsData }) {
 									</FieldDescription>
 								</Field>
 							))}
+						</FieldGroup>
+					</TabsContent>
+					<TabsContent className="mt-4" value="activity">
+						<FieldGroup>
+							{(
+								[
+									["activityAttachmentMaxFiles", "每个活动最多附件数", "settings-attachment-files", 20],
+									["activityAttachmentMaxSizeMb", "单个附件大小上限（MB）", "settings-attachment-size", 50],
+								] as const
+							).map(([key, label, id, max]) => (
+								<Field key={key} data-invalid={!!invalid[key]}>
+									<FieldLabel htmlFor={id}>{label}</FieldLabel>
+									<Input
+										id={id}
+										type="number"
+										inputMode="numeric"
+										min={1}
+										max={max}
+										step={1}
+										value={Number.isNaN(draft[key]) ? "" : draft[key]}
+										disabled={busy}
+										aria-invalid={!!invalid[key]}
+										onChange={(e) =>
+											change(
+												key,
+												e.target.value === "" ? Number.NaN : Number(e.target.value),
+											)
+										}
+									/>
+									{invalid[key] && <FieldError>{invalid[key]}</FieldError>}
+									<FieldDescription>可设置1至{max}的整数。</FieldDescription>
+								</Field>
+							))}
+							<Field data-invalid={!!invalid.extensions}>
+								<FieldLabel htmlFor="settings-attachment-extensions">
+									允许上传的文件后缀
+								</FieldLabel>
+								<Input
+									id="settings-attachment-extensions"
+									value={extensionsText}
+									disabled={busy}
+									aria-invalid={!!invalid.extensions}
+									onChange={(e) => {
+										setExtensionsText(e.target.value);
+										setDirty(true);
+										setInvalid((current) => ({ ...current, extensions: "" }));
+									}}
+								/>
+								{invalid.extensions && <FieldError>{invalid.extensions}</FieldError>}
+								<FieldDescription>
+									小写、不带点，用逗号分隔。默认：png, jpg, jpeg, webp, gif, pdf, doc, docx, xls, xlsx, ppt, pptx, zip, txt, md。
+								</FieldDescription>
+							</Field>
 						</FieldGroup>
 					</TabsContent>
 				</Tabs>

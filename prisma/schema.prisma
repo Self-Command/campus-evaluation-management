@@ -37,7 +37,11 @@ model User {
   assignedClasses    SchoolClass[]
   counselorAssignments ClassCounselorAssignment[]
   affiliations       StudentAffiliation[]
+  mergedIntoId       String?
+  mergedInto         User? @relation("UserMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom         User[] @relation("UserMerge")
   @@index([collegeId, role])
+  @@index([mergedIntoId])
 }
 
 model StudentProfile {
@@ -137,14 +141,48 @@ model AuthSession {
 }
 
 model AccountImport {
-  id          String   @id @default(cuid())
-  actorId     String
-  rows        Json
-  snapshot    String
-  status      String   @default("PREVIEW")
-  result      Json?
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
+  id              String   @id @default(cuid())
+  actorId         String
+  targetRole      String   @default("STUDENT")
+  rows            Json
+  snapshot        String
+  note            String?
+  fileHash        String?
+  templateVersion String?
+  scopeKey        String?
+  requestId       String?
+  status          String   @default("PREVIEW")
+  result          Json?
+  rowResults      Json?
+  confirmations   Json?
+  expiresAt       DateTime
+  committedAt     DateTime?
+  createdAt       DateTime @default(now())
+  revokedAt       DateTime?
+  revokedBy       String?
+  revokeReason    String?
+  revokeResult    Json?
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+// A confirmed same-class/same-name pair is an explicit, reasoned exception.
+// The pair is ordered and scoped to the class snapshot so later class changes
+// require a fresh review instead of inheriting a stale exception.
+model DuplicateIdentityException {
+  id             String   @id @default(cuid())
+  classKey       String
+  normalizedName String
+  studentNumberA String
+  studentNumberB String
+  studentIdA     String?
+  studentIdB     String?
+  batchId        String?
+  actorId        String
+  reason         String
+  createdAt      DateTime @default(now())
+  @@unique([classKey, normalizedName, studentNumberA, studentNumberB])
+  @@index([classKey, normalizedName])
   @@index([actorId, createdAt])
 }
 
@@ -221,6 +259,12 @@ enum ClaimStatus {
   REJECTED
 }
 
+enum ActivityAudienceScope {
+  ALL
+  COLLEGE
+  CLASS
+}
+
 model Activity {
   id String @id @default(cuid())
   termId String
@@ -231,18 +275,17 @@ model Activity {
   name String
   organizer String
   content String
-  requirements String
   startsAt DateTime
   endsAt DateTime
   nodeId String
   points Decimal @db.Decimal(22,12)
   confirmed Boolean @default(false)
   publishedAt DateTime?
+  endedAt DateTime?
   publishRevision Int @default(0)
-  scoreMode String @default("FIXED")
+  audienceScope ActivityAudienceScope @default(COLLEGE)
   audienceColleges String[] @default([])
   audienceClasses String[] @default([])
-  audienceStudents String[] @default([])
   rosterCommittedAt DateTime?
   rosterRevision Int @default(0)
   rosterImportId String?
@@ -252,6 +295,7 @@ model Activity {
   updatedAt DateTime @updatedAt
   participations Participation[]
   evidence ActivityEvidence[]
+  attachments ActivityAttachment[]
   @@index([termId, ownerId])
   @@index([termId, collegeId])
   @@index([termId, publishedAt])
@@ -286,7 +330,6 @@ model Participation {
   registeredBy String?
   registrationSnapshot Json?
   importBatchId String?
-  score Decimal? @db.Decimal(22,12)
   removedAt DateTime?
   removedBy String?
   removalReason String?
@@ -454,9 +497,16 @@ model GradeImport {
   rows Json
   reason String
   snapshot String
+  fileHash String?
+  templateVersion String?
+  scopeKey String?
+  requestId String?
   status String @default("PREVIEW")
   result Json?
+  rowResults Json?
+  confirmations Json?
   expiresAt DateTime
+  committedAt DateTime?
   createdAt DateTime @default(now())
   @@index([termId, actorId])
 }
@@ -474,9 +524,16 @@ model ParticipationImport {
   diff Json?
   snapshot String
   baselineRevision Int?
+  fileHash String?
+  templateVersion String?
+  scopeKey String?
+  requestId String?
   status String @default("PREVIEW")
   result Json?
+  rowResults Json?
+  confirmations Json?
   expiresAt DateTime
+  committedAt DateTime?
   createdAt DateTime @default(now())
   @@index([termId, actorId])
   @@index([activityId, createdAt])
@@ -704,6 +761,22 @@ model BrandAsset {
   bytes Bytes
   sha256 String
   createdAt DateTime @default(now())
+}
+
+model ActivityAttachment {
+  id String @id @default(cuid())
+  activityId String?
+  activity Activity? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  uploaderId String
+  name String
+  mime String
+  size Int
+  sha256 String
+  storageKey String @unique
+  kind String @default("FILE")
+  createdAt DateTime @default(now())
+  @@index([activityId])
+  @@index([uploaderId, createdAt])
 }
 
 

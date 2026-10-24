@@ -368,10 +368,9 @@ async function main() {
 		activityEvidenceId: string;
 		student: SeedStudent;
 		host: SeedUser;
-		score?: string;
 		status: "PENDING_COUNSELOR" | "PENDING_COLLEGE" | "RETURNED" | "APPROVED";
 	}) {
-		const { activityId, activityEvidenceId, student, host, score, status } = options;
+		const { activityId, activityEvidenceId, student, host, status } = options;
 		const counselor = student.counselor;
 		const collegeReviewer = collegeAccounts.get(student.collegeKey)!;
 		const reviewed = status !== "PENDING_COUNSELOR";
@@ -381,7 +380,6 @@ async function main() {
 			data: {
 				activityId,
 				studentId: student.user.id,
-				score: score ?? null,
 				revision,
 				registeredAt: now,
 				registeredBy: host.id,
@@ -502,7 +500,6 @@ async function main() {
 			name: "程序设计竞赛（信息工程学院）",
 			organizer: "信息工程学院",
 			content: "围绕工程问题完成程序设计、功能验证与成果答辩。",
-			requirements: "完成竞赛任务，活动签到与名单一致。",
 			startsAt: new Date("2026-10-12T01:00:00.000Z"),
 			endsAt: new Date("2026-10-12T04:00:00.000Z"),
 			nodeId: "professional",
@@ -510,7 +507,7 @@ async function main() {
 			confirmed: true,
 			publishedAt: now,
 			publishRevision: 1,
-			scoreMode: "INDIVIDUAL",
+			audienceScope: "COLLEGE",
 			audienceColleges: [info.name, econ.name],
 			rosterCommittedAt: now,
 			rosterRevision: 1,
@@ -529,7 +526,6 @@ async function main() {
 		activityEvidenceId: competitionProof.id,
 		student: students.get("20261001")!,
 		host: infoStaff,
-		score: "9",
 		status: "PENDING_COUNSELOR",
 	});
 	await addParticipant({
@@ -537,7 +533,6 @@ async function main() {
 		activityEvidenceId: competitionProof.id,
 		student: students.get("20261003")!,
 		host: infoStaff,
-		score: "8",
 		status: "PENDING_COLLEGE",
 	});
 	await addParticipant({
@@ -545,7 +540,6 @@ async function main() {
 		activityEvidenceId: competitionProof.id,
 		student: students.get("20262001")!,
 		host: infoStaff,
-		score: "7",
 		status: "PENDING_COLLEGE",
 	});
 	await addParticipant({
@@ -553,7 +547,6 @@ async function main() {
 		activityEvidenceId: competitionProof.id,
 		student: students.get("20262003")!,
 		host: infoStaff,
-		score: "10",
 		status: "APPROVED",
 	});
 
@@ -565,7 +558,6 @@ async function main() {
 			name: "社区敬老志愿服务（经济管理学院）",
 			organizer: "经济管理学院青年志愿者协会",
 			content: "为社区长者提供便民服务，协助开展文娱与数字设备使用指导。",
-			requirements: "完成四小时服务，服务记录与名单一致。",
 			startsAt: new Date("2026-10-15T01:00:00.000Z"),
 			endsAt: new Date("2026-10-15T05:00:00.000Z"),
 			nodeId: "public_service",
@@ -573,7 +565,7 @@ async function main() {
 			confirmed: true,
 			publishedAt: now,
 			publishRevision: 1,
-			scoreMode: "FIXED",
+			audienceScope: "COLLEGE",
 			audienceColleges: [econ.name, foreign.name],
 			rosterCommittedAt: now,
 			rosterRevision: 1,
@@ -617,13 +609,12 @@ async function main() {
 			name: "英语演讲比赛（外国语学院）",
 			organizer: "外国语学院",
 			content: "围绕校园生活开展英语主题演讲与交流。",
-			requirements: "完成主题演讲并提交活动签到记录。",
 			startsAt: new Date("2026-10-18T01:00:00.000Z"),
 			endsAt: new Date("2026-10-18T03:00:00.000Z"),
 			nodeId: "cultural_sports",
 			points: "8",
 			confirmed: true,
-			scoreMode: "FIXED",
+			audienceScope: "COLLEGE",
 			audienceColleges: [foreign.name],
 			sharedEvidenceVersion: 1,
 			revision: 1,
@@ -643,13 +634,12 @@ async function main() {
 			name: "校团委主题学习活动",
 			organizer: "校团委",
 			content: "校团委组织的主题学习活动，主办学院尚待确认。",
-			requirements: "确定主办学院后，由主办学院维护参与名单、原始分和活动证明。",
 			startsAt: new Date("2026-10-08T01:00:00.000Z"),
 			endsAt: new Date("2026-10-08T03:00:00.000Z"),
 			nodeId: "ideology",
 			points: "5",
 			confirmed: true,
-			scoreMode: "FIXED",
+			audienceScope: "COLLEGE",
 			audienceColleges: [info.name],
 			revision: 1,
 		},
@@ -663,13 +653,12 @@ async function main() {
 			name: "校园公益活动",
 			organizer: "信息工程学院学生会",
 			content: "开展校园环境维护与公益宣传。",
-			requirements: "完成公益服务并提交活动记录。",
 			startsAt: new Date("2026-10-25T01:00:00.000Z"),
 			endsAt: new Date("2026-10-25T03:00:00.000Z"),
 			nodeId: "labor_practice",
 			points: "4",
 			confirmed: false,
-			scoreMode: "FIXED",
+			audienceScope: "COLLEGE",
 			audienceColleges: [info.name],
 		},
 	});

@@ -1,6 +1,6 @@
 "use client";
 // Complete users directory + profile personal-details and invoice field groups from the selected template.
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -14,11 +14,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@/components/ui/native-select";
+	Field,
+	FieldDescription,
+	FieldGroup,
+	FieldLabel,
+} from "@/components/ui/field";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import {
 	Sheet,
 	SheetContent,
@@ -26,6 +28,15 @@ import {
 	SheetTitle,
 	SheetDescription,
 } from "@/components/ui/sheet";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { DeleteUsageDialog } from "@/components/dashboard/delete-usage-dialog";
 import { dateText } from "@/lib/business-labels";
 import { OrganizationFields } from "@/components/dashboard/organization-fields";
 import type {
@@ -88,6 +99,52 @@ export function Students({
 		editing ? "/api/organizations" : null,
 	);
 	const canEdit = role === "ADMIN" || role === "COLLEGE";
+	const [deleting, setDeleting] = useState<Student | null>(null);
+	const [numberOpen, setNumberOpen] = useState(false);
+	const [numberValue, setNumberValue] = useState("");
+	const [numberReason, setNumberReason] = useState("");
+	const [numberBusy, setNumberBusy] = useState(false);
+	const [numberError, setNumberError] = useState("");
+	function openNumber(profile: Student) {
+		setNumberValue(profile.studentProfile.studentNumber || profile.login);
+		setNumberReason("");
+		setNumberError("");
+		setNumberOpen(true);
+	}
+	async function saveNumber(event: FormEvent) {
+		event.preventDefault();
+		if (!selected || numberBusy) return;
+		if (!/^[A-Za-z0-9._-]{3,64}$/.test(numberValue.trim())) {
+			setNumberError("学号需为3至64位字母、数字、点、下划线或连字符");
+			return;
+		}
+		if (numberReason.trim().length < 2) {
+			setNumberError("请填写更正理由");
+			return;
+		}
+		setNumberBusy(true);
+		setNumberError("");
+		try {
+			const updated = await requestJson<Student>(
+				`/api/students/${selected.id}/number`,
+				{
+					revision: selected.revision,
+					studentNumber: numberValue.trim(),
+					reason: numberReason.trim(),
+				},
+				"PATCH",
+			);
+			setSelected(updated);
+			setNumberOpen(false);
+			setSuccess("学号已更正，该学生的登录账号同步更新，需使用新学号重新登录。");
+			remote.reload();
+			details.reload();
+		} catch (err) {
+			setNumberError((err as Error).message);
+		} finally {
+			setNumberBusy(false);
+		}
+	}
 	function updateLocation(
 		nextQuery: string,
 		nextScope: Scope,
@@ -150,7 +207,7 @@ export function Students({
 				</div>
 			),
 		},
-		{ accessorKey: "revision", header: "档案版本" },
+		{ accessorKey: "revision", header: "变更次数" },
 		{
 			accessorKey: "createdAt",
 			header: "建档时间",
@@ -160,19 +217,37 @@ export function Students({
 			id: "actions",
 			header: "操作",
 			cell: ({ row }) => (
-				<Button variant="ghost" size="sm" onClick={() => open(row.original)}>
-					档案详情
-				</Button>
+				<div className="flex flex-wrap gap-1">
+					<Button variant="ghost" size="sm" onClick={() => open(row.original)}>
+						档案详情
+					</Button>
+					{role === "ADMIN" && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="text-destructive hover:text-destructive"
+							onClick={() => setDeleting(row.original)}
+						>
+							删除
+						</Button>
+					)}
+				</div>
 			),
 		},
 	];
 	return (
 		<>
 			<RemoteState {...remote} />
+			{!selected && success && <Feedback success={success} />}
 			{remote.data && (
 				<TemplateDirectory
-					title="学生档案"
-					description={`共 ${remote.data.total} 位学生。已发布的成绩使用发布时的班级记录。`}
+					description={
+						role === "COUNSELOR"
+							? `共 ${remote.data.total} 位负责班级学生。姓名和班级由管理员或学院更正。`
+							: role === "COLLEGE"
+								? `共 ${remote.data.total} 位本院学生。可更正学生姓名和班级，修改会保留原因。`
+								: `共 ${remote.data.total} 位全校学生。可更正学生姓名和班级，修改会保留原因。`
+					}
 					data={remote.data.items}
 					columns={columns}
 					actions={
@@ -181,7 +256,7 @@ export function Students({
 								href="/imports?kind=accounts"
 								className={buttonVariants({ variant: "outline", size: "sm" })}
 							>
-								导入学生
+								导入学生账号
 							</Link>
 						)
 					}
@@ -214,18 +289,20 @@ export function Students({
 									["major", "专业", "majors"],
 									["className", "班级", "classes"],
 								] as const
-							).map(([key, label, options]) => (
+							)
+								.filter(([key]) => role === "ADMIN" || key !== "college")
+								.map(([key, label, options]) => (
 								<Field className="w-full sm:w-44" key={key}>
 									<FieldLabel htmlFor={`profile-scope-${key}`}>
 										{label}
 									</FieldLabel>
-									<NativeSelect
+									<SearchableSelect
 										id={`profile-scope-${key}`}
 										value={draftScope[key]}
-										onChange={(event) => {
+										onValueChange={(value) => {
 											const next = {
 												...draftScope,
-												[key]: event.target.value,
+												[key]: value,
 												...(key === "college"
 													? { major: "", className: "" }
 													: key === "major"
@@ -238,16 +315,13 @@ export function Students({
 											setPage(1);
 											updateLocation(draft.trim(), next, 1);
 										}}
-									>
-										<NativeSelectOption value="">
-											全部{label}
-										</NativeSelectOption>
-										{remote.data!.scopeOptions[options].map((value) => (
-											<NativeSelectOption key={value} value={value}>
-												{value}
-											</NativeSelectOption>
-										))}
-									</NativeSelect>
+										placeholder={`全部${label}`}
+										searchPlaceholder={`搜索${label}`}
+										options={remote.data!.scopeOptions[options].map((value) => ({
+											value,
+											label: value,
+										}))}
+									/>
 								</Field>
 							))}
 							<Button type="submit" variant="outline">搜索</Button>
@@ -267,7 +341,7 @@ export function Students({
 									);
 								}}
 							>
-								全部学生
+								重置筛选
 							</Button>
 						</form>
 					}
@@ -301,13 +375,24 @@ export function Students({
 								{row.studentProfile.schoolClass?.counselor?.name || "未设置"}
 								{!row.studentProfile.classId ? " · 未分班" : ""}
 							</p>
-							<Button
-								variant="outline"
-								className="self-start"
-								onClick={() => open(row)}
-							>
-								档案详情
-							</Button>
+							<div className="flex flex-wrap gap-2">
+								<Button
+									variant="outline"
+									className="self-start"
+									onClick={() => open(row)}
+								>
+									档案详情
+								</Button>
+								{role === "ADMIN" && (
+									<Button
+										variant="ghost"
+										className="self-start text-destructive hover:text-destructive"
+										onClick={() => setDeleting(row)}
+									>
+										删除
+									</Button>
+								)}
+							</div>
 						</div>
 					)}
 				/>
@@ -327,9 +412,11 @@ export function Students({
 			>
 				<SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
 					<SheetHeader>
-						<SheetTitle>{selected?.name} 的学生档案</SheetTitle>
+						<SheetTitle>{selected?.name}的学生档案</SheetTitle>
 						<SheetDescription>
-							档案只能更正姓名和班级；每次更正都会记录原因。
+							{role === "ADMIN"
+								? "可更正姓名、班级和学号，或删除没有业务记录的学生账号；每次更正都会记录原因。"
+								: "可更正姓名和班级；每次更正都会记录原因。"}
 						</SheetDescription>
 					</SheetHeader>
 					{selected && (
@@ -355,7 +442,7 @@ export function Students({
 										"班级状态",
 										selected.studentProfile.classId ? "已分班" : "未分班",
 									],
-									["档案版本", String(selected.revision)],
+									["变更次数", String(selected.revision)],
 									["建档时间", dateText(selected.createdAt)],
 								].map(([label, value]) => (
 									<div className="flex flex-col gap-1" key={label}>
@@ -413,19 +500,37 @@ export function Students({
 								</section>
 							)}
 							{!editing ? (
-								canEdit && (
-									<Button
-										variant="outline"
-										className="self-start"
-										onClick={() => {
-											setEditing(true);
-											setError("");
-											setSuccess("");
-										}}
-									>
-										更正档案
-									</Button>
-								)
+								<div className="flex flex-wrap gap-2">
+									{canEdit && (
+										<Button
+											variant="outline"
+											onClick={() => {
+												setEditing(true);
+												setError("");
+												setSuccess("");
+											}}
+										>
+											更正姓名与班级
+										</Button>
+									)}
+									{role === "ADMIN" && (
+										<Button variant="outline" onClick={() => openNumber(selected)}>
+											更正学号
+										</Button>
+									)}
+									{role === "ADMIN" && (
+										<Button
+											variant="ghost"
+											className="text-destructive hover:text-destructive"
+											onClick={() => {
+												setSelected(null);
+												setDeleting(selected);
+											}}
+										>
+											删除学生账号
+										</Button>
+									)}
+								</div>
 							) : (
 								<form
 									key={`${selected.id}-${selected.revision}`}
@@ -524,6 +629,112 @@ export function Students({
 					)}
 				</SheetContent>
 			</Sheet>
+			<Dialog
+				open={numberOpen}
+				onOpenChange={(open) => {
+					if (!open && !numberBusy) setNumberOpen(false);
+				}}
+			>
+				<DialogContent className="sm:max-w-lg">
+					<DialogHeader>
+						<DialogTitle>更正学号</DialogTitle>
+						<DialogDescription>
+							学号同时是登录账号。更正后该学生当前的登录会话会失效，需要使用新学号重新登录；历史业务记录保留。
+						</DialogDescription>
+					</DialogHeader>
+					{selected && (
+						<form className="flex flex-col gap-4" onSubmit={saveNumber}>
+							<div className="rounded-lg border bg-muted/30 p-3 text-sm">
+								<p className="font-medium">{selected.name}</p>
+								<p className="mt-1 text-xs text-muted-foreground">
+									当前学号 {selected.studentProfile.studentNumber || selected.login}
+									· {selected.studentProfile.college} /{" "}
+									{selected.studentProfile.major} /{" "}
+									{selected.studentProfile.className}
+								</p>
+							</div>
+							<Field>
+								<FieldLabel htmlFor="student-number">新学号</FieldLabel>
+								<Input
+									id="student-number"
+									value={numberValue}
+									onChange={(event) => setNumberValue(event.target.value)}
+									required
+									minLength={3}
+									maxLength={64}
+									autoComplete="off"
+								/>
+								<FieldDescription>
+									仅允许字母、数字、点、下划线和连字符；不能与其他账号登录名或学号重复。
+								</FieldDescription>
+							</Field>
+							<Field>
+								<FieldLabel htmlFor="student-number-reason">更正理由</FieldLabel>
+								<Textarea
+									id="student-number-reason"
+									value={numberReason}
+									onChange={(event) => setNumberReason(event.target.value)}
+									required
+									minLength={2}
+									maxLength={500}
+									rows={3}
+									placeholder="说明学号错误来源和核对依据"
+								/>
+							</Field>
+							<Feedback error={numberError} />
+							<DialogFooter>
+								<Button
+									type="button"
+									variant="outline"
+									disabled={numberBusy}
+									onClick={() => setNumberOpen(false)}
+								>
+									取消
+								</Button>
+								<Button
+									type="submit"
+									disabled={
+										numberBusy ||
+										numberReason.trim().length < 2 ||
+										numberValue.trim().length < 3
+									}
+								>
+									{numberBusy ? "正在保存…" : "保存更正"}
+								</Button>
+							</DialogFooter>
+						</form>
+					)}
+				</DialogContent>
+			</Dialog>
+			<DeleteUsageDialog
+				open={!!deleting}
+				onOpenChange={(open) => {
+					if (!open) setDeleting(null);
+				}}
+				title={deleting ? `删除学生「${deleting.name}」？` : "删除学生？"}
+				description="删除会移除学生账号、学籍档案、班级关系和登录会话。已有成绩、申报、参与、审核等业务记录时不能删除，只能停用账号。"
+				usageUrl={
+					deleting
+						? `/api/admin/accounts/${encodeURIComponent(deleting.id)}`
+						: null
+				}
+				deleteUrl={
+					deleting ? `/api/students/${encodeURIComponent(deleting.id)}` : null
+				}
+				confirmLabel="学号"
+				buildBody={(usage, reason, confirm) => ({
+					revision: usage.revision,
+					reason,
+					confirmLogin: confirm,
+				})}
+				onDeleted={() => {
+					const name = deleting?.name;
+					setDeleting(null);
+					setSelected(null);
+					setSuccess(`学生“${name}”已删除。`);
+					remote.reload();
+				}}
+			/>
 		</>
 	);
 }

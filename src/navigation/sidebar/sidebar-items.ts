@@ -56,26 +56,32 @@ export function navigation(role: AppRole): NavGroup[] {
 				items: [
 					{
 						id: "home",
-						title: "学生档案",
-						url: "/students",
-						icon: GraduationCap,
-					},
-					{
-						id: "terms",
-						title: "测评周期",
-						url: "/terms",
-						icon: CalendarDays,
+						title: "工作台",
+						url: "/",
+						icon: LayoutDashboard,
 					},
 				],
 			},
 			{
 				id: 2,
+				label: "学生",
+				items: [
+					{
+						id: "students",
+						title:
+							role === "COLLEGE" ? "本院学生" : "我的学生",
+						url: "/students",
+						icon: GraduationCap,
+					},
+				],
+			},
+			{
+				id: 3,
 				label: "测评业务",
 				items: [
 					{
 						id: "activities",
-						title:
-							role === "COLLEGE" ? "活动管理" : "活动参与",
+						title: "本院活动",
 						url: "/activities",
 						icon: ClipboardList,
 					},
@@ -87,7 +93,8 @@ export function navigation(role: AppRole): NavGroup[] {
 					},
 					{
 						id: "claims",
-						title: "成果申报审核",
+						title:
+							role === "COLLEGE" ? "成果申报审核" : "成果评分",
 						url: "/claims",
 						icon: ClipboardList,
 					},
@@ -108,18 +115,18 @@ export function navigation(role: AppRole): NavGroup[] {
 			...(role === "COLLEGE"
 				? [
 						{
-							id: 3,
+							id: 4,
 							label: "数据与账号",
 							items: [
 								{
 									id: "imports",
-									title: "参与名单导入",
+									title: "导入活动名单",
 									url: "/imports?kind=participation",
 									icon: FileInput,
 								},
 								{
 									id: "organizations",
-									title: "组织架构",
+									title: "本院班级",
 									url: "/organizations",
 									icon: Building2,
 								},
@@ -128,12 +135,12 @@ export function navigation(role: AppRole): NavGroup[] {
 					]
 				: []),
 			{
-				id: 4,
+				id: 5,
 				label: "个人",
 				items: [
 					{
 						id: "account",
-						title: "个人设置",
+						title: "个人账号",
 						url: "/account",
 						icon: ShieldCheck,
 					},
@@ -150,44 +157,43 @@ export function navigation(role: AppRole): NavGroup[] {
 			id: 2,
 			label: "测评业务",
 			items: [
-				{
-					id: "terms",
-					title: "测评周期",
-					url: "/terms",
-					icon: CalendarDays,
-				},
-				{
-					id: "activities",
-					title:
-						role === "STUDENT"
-							? "我参加的活动"
-							: role === "PUBLISHER"
-								? "我的活动"
-								: "活动管理",
-					url: "/activities",
-					icon: ClipboardList,
-				},
-				...(role === "STUDENT"
+				...(role !== "STUDENT"
 					? [
 							{
-								id: "activity-feed",
-								title: "已发布活动",
-								url: "/activity-feed",
+								id: "terms",
+								title: "测评周期",
+								url: "/terms",
 								icon: CalendarDays,
 							},
 						]
 					: []),
 				{
-					id: "recognitions",
-					title: role === "ADMIN" ? "活动参与审核" : "活动参与",
-					url: "/recognitions",
-					icon: ListChecks,
+					id: "activities",
+					title:
+						role === "ADMIN"
+							? "活动管理"
+							: role === "STUDENT"
+								? "活动"
+								: "我的活动",
+					url: role === "STUDENT" ? "/my-activities" : "/activities",
+					icon: ClipboardList,
 				},
+				...(role === "STUDENT"
+					? []
+					: [
+							{
+								id: "recognitions",
+								title:
+									role === "ADMIN" ? "活动参与记录" : "活动参与",
+								url: "/recognitions",
+								icon: ListChecks,
+							},
+						]),
 				...(role !== "PUBLISHER"
 					? [
 							{
 								id: "results",
-								title: role === "STUDENT" ? "我的成绩" : "成绩查询",
+								title: role === "STUDENT" ? "我的成绩" : "学生成绩查询",
 								url: "/results",
 								icon: GraduationCap,
 							},
@@ -215,7 +221,7 @@ export function navigation(role: AppRole): NavGroup[] {
 						items: [
 							{
 								id: "organizations",
-								title: "组织架构",
+								title: "学院与班级",
 								url: "/organizations",
 								icon: Building2,
 							},
@@ -245,7 +251,7 @@ export function navigation(role: AppRole): NavGroup[] {
 							},
 							{
 								id: "imports",
-								title: "数据导入",
+								title: "批量导入",
 								url: "/imports",
 								icon: FileInput,
 							},
@@ -273,7 +279,7 @@ export function navigation(role: AppRole): NavGroup[] {
 					? [
 							{
 								id: "profile",
-								title: "我的档案",
+								title: "我的学籍信息",
 								url: "/profile",
 								icon: CircleUser,
 							},
@@ -281,7 +287,7 @@ export function navigation(role: AppRole): NavGroup[] {
 					: []),
 				{
 					id: "account",
-					title: "个人设置",
+					title: "个人账号",
 					url: "/account",
 					icon: ShieldCheck,
 				},

@@ -11,8 +11,8 @@ import { pageClaims, claimFilterSchema } from "@/server/claims";
 const titles = {
 	ADMIN: "成果申报监督",
 	COLLEGE: "成果申报审核",
-	COUNSELOR: "成果申报审核",
-	STUDENT: "成果申报",
+	COUNSELOR: "成果评分",
+	STUDENT: "我的成果申报",
 } as const;
 const descriptions = {
 	ADMIN:
@@ -20,7 +20,8 @@ const descriptions = {
 	COLLEGE:
 		"审核辅导员已评分的申报：通过、退回学生修改，或退回辅导员重新评分。",
 	COUNSELOR:
-		"核对学生提交的成果和证明，选择计分项并评分，再提交学院审核。",	STUDENT:
+		"核对学生提交的成果和证明，选择计分项并评分，再提交学院审核。",
+	STUDENT:
 		"提交成果、发生日期、说明和证明；辅导员评分、学院审核后可随时查看进度。",
 } as const;
 

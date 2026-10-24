@@ -19,7 +19,11 @@ export default async function Page({
     <>
       <PageHeading
         title={user.role === "STUDENT" ? "我的成绩" : "成绩查询"}
-        description="查看成绩明细、计分依据，以及参与和扣分记录，确认发布结果。"
+        description={
+            user.role === "STUDENT"
+                ? "查看本人成绩、每一项分数的来源和确认记录。"
+                : "按学生查看成绩明细、计分依据和确认记录。"
+        }
       />
       <TermContext terms={terms} selected={term?.id} />
       {!term ? (

@@ -10,7 +10,7 @@ import { jsonValue } from "@/server/claims";
 import { issueFlowToken, verifyFlowToken, stateDigest } from "@/server/flow-token";
 import { schemeReferences, schemeReferenceErrors } from "@/server/scheme-references";
 
-const correctionSchema = z.object({ action: z.enum(["preview", "commit"]), kind: z.enum(["scheme", "activity", "project"]), revision: z.number().int().nonnegative().optional(), reason: z.string().trim().min(2).max(1000).optional(), token: z.string().max(4000).optional(), id: z.string().optional(), scheme: schemeSchema.optional(), nodeId: z.string().optional(), points: decimalSchema.optional(), scoreMode: z.enum(["FIXED", "INDIVIDUAL"]).optional() });
+const correctionSchema = z.object({ action: z.enum(["preview", "commit"]), kind: z.enum(["scheme", "activity", "project"]), revision: z.number().int().nonnegative().optional(), reason: z.string().trim().min(2).max(1000).optional(), token: z.string().max(4000).optional(), id: z.string().optional(), scheme: schemeSchema.optional(), nodeId: z.string().optional(), points: decimalSchema.optional() });
 async function impactedStudents(tx: Prisma.TransactionClient, term: Term) {
   const [facts, claims, grades, deductions, frozen] = await Promise.all([
     tx.participation.findMany({ where: { activity: { termId: term.id } }, select: { studentId: true }, distinct: ["studentId"] }),
@@ -45,10 +45,7 @@ export async function correctScoring(sessionId: string, termId: string, input: u
         const activity = await tx.activity.findUnique({ where: { id: data.id } });
         if (!activity || activity.termId !== termId) throw new AccountError("活动不存在", 404);
         original = activity;
-        const scoreMode = data.scoreMode ?? activity.scoreMode;
-        if (scoreMode !== activity.scoreMode && await tx.participation.count({ where: { activityId: activity.id } })) errors.push("已有参与记录的活动不可切换计分方式；请保留原方式并更正分值或归属");
-        if (scoreMode === "INDIVIDUAL" && await tx.participation.count({ where: { activityId: activity.id, score: { gt: data.points } } })) errors.push("存在超过新分值上限的个人分数，请先由发布者按依据更正并重新审核");
-        override.activity = { id: activity.id, nodeId: data.nodeId, points: data.points, scoreMode };
+        override.activity = { id: activity.id, nodeId: data.nodeId, points: data.points };
       } else {
         const project = await tx.recognitionProject.findUnique({ where: { id: data.id } });
         if (!project || project.termId !== termId) throw new AccountError("申报项目不存在", 404);

@@ -3,7 +3,11 @@ node_modules/
 .next-production/
 .env*
 !.env.example
+!.env.docker.example
 .local/
+/.workbuddy-ai/
+/.scratch/export-visual/
+/.scratch/joined.png
 playwright-report/
 test-results/
 coverage/

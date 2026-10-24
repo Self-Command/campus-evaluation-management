@@ -9,10 +9,7 @@ import {
 	DialogDescription,
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import { Input } from "@/components/ui/input";
 import type { Scheme } from "@/lib/scoring/types";
 export function ScoringCorrection({
@@ -29,7 +26,6 @@ export function ScoringCorrection({
 		id: string;
 		nodeId: string;
 		points: string;
-		scoreMode?: "FIXED" | "INDIVIDUAL";
 	};
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -37,7 +33,6 @@ export function ScoringCorrection({
 }) {
 	const [nodeId, setNodeId] = useState(item.nodeId);
 	const [points, setPoints] = useState(item.points);
-	const [scoreMode, setScoreMode] = useState(item.scoreMode || "FIXED");
 	const [busy, setBusy] = useState(false);
 	return (
 		<Dialog
@@ -64,7 +59,6 @@ export function ScoringCorrection({
 						id: item.id,
 						nodeId,
 						points,
-						...(kind === "activity" ? { scoreMode } : {}),
 					}}
 					onBusyChange={setBusy}
 					onCommitted={onCommitted}
@@ -72,43 +66,20 @@ export function ScoringCorrection({
 					<FieldGroup>
 						<Field>
 							<FieldLabel htmlFor="correct-node">更正后计分模块</FieldLabel>
-							<NativeSelect
+							<SearchableSelect
 								id="correct-node"
 								value={nodeId}
-								onChange={(event) => setNodeId(event.target.value)}
-								required
-							>
-								{term.scheme.nodes
+								onValueChange={setNodeId}
+								placeholder="选择计分模块"
+								searchPlaceholder="搜索计分模块"
+								options={term.scheme.nodes
 									.filter((node) => node.kind === "ACTIVITY")
-									.map((node) => (
-										<NativeSelectOption key={node.id} value={node.id}>
-											{node.name}
-										</NativeSelectOption>
-									))}
-							</NativeSelect>
+									.map((node) => ({ value: node.id, label: node.name }))}
+							/>
 						</Field>
-						{kind === "activity" && (
-							<Field>
-								<FieldLabel htmlFor="correct-score-mode">
-									更正后活动计分方式
-								</FieldLabel>
-								<NativeSelect
-									id="correct-score-mode"
-									value={scoreMode}
-									onChange={(event) =>
-										setScoreMode(event.target.value as "FIXED" | "INDIVIDUAL")
-									}
-								>
-									<NativeSelectOption value="FIXED">固定分</NativeSelectOption>
-									<NativeSelectOption value="INDIVIDUAL">
-										逐人分
-									</NativeSelectOption>
-								</NativeSelect>
-							</Field>
-						)}
 						<Field>
 							<FieldLabel htmlFor="correct-points">
-								更正后分值 / 逐人分上限
+								更正后分值
 							</FieldLabel>
 							<Input
 								id="correct-points"

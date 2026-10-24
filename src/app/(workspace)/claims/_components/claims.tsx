@@ -12,6 +12,7 @@ import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
 import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
@@ -104,6 +105,11 @@ const actionLabels: Record<string, string> = {
 	RESCORE: "退回辅导员重评",
 	REVOKE: "管理员撤销",
 };
+function studentLine(student: Claim["student"], includeName = false) {
+	return [includeName ? student.name : "", student.studentNumber, student.className]
+		.filter(Boolean)
+		.join(" · ");
+}
 export function Claims({
 	term,
 	role,
@@ -167,7 +173,11 @@ export function Claims({
 					: {
 							title: "本周期已锁定，成果申报已关闭",
 							description:
-								"当前记录可查看，不能新增、评分或审核。如需更正，请联系管理员。",
+								role === "ADMIN"
+									? "当前记录可查看；已通过的申报仍可在详情中按规则撤销。"
+									: role === "STUDENT"
+										? "当前记录可查看；如需更正成绩，请通过成绩异议提交问题和证明。"
+										: "当前记录可查看，不能新增、评分或审核。如需更正，请联系管理员。",
 						};
 	function beginSubmission() {
 		if (role !== "STUDENT" || !active) return;
@@ -238,10 +248,11 @@ export function Claims({
 						cell: ({ row }: { row: { original: Claim } }) => (
 							<div>
 								<p>{row.original.student.name}</p>
-								<p className="text-xs text-muted-foreground">
-									{row.original.student.studentNumber} ·{" "}
-									{row.original.student.className}
-								</p>
+								{studentLine(row.original.student) && (
+									<p className="text-xs text-muted-foreground">
+										{studentLine(row.original.student)}
+									</p>
+								)}
 							</div>
 						),
 					} satisfies ColumnDef<DataTableFeatures, Claim>,
@@ -288,20 +299,26 @@ export function Claims({
 						setResubmit(false);
 					}}
 				>
-					{role === "STUDENT" ? "查看" : "处理"}
+					{role === "STUDENT"
+						? "查看"
+						: role === "COUNSELOR"
+							? ["PENDING_COUNSELOR", "RESCORING"].includes(row.original.status)
+								? "评分"
+								: "查看"
+							: role === "COLLEGE"
+								? row.original.status === "PENDING_COLLEGE"
+									? "审核"
+									: "查看"
+								: "查看"}
 				</Button>
 			),
 		},
 	];
 	const directoryDescription = {
-		STUDENT:
-			"提交后由辅导员评分、学院审核；退回后可补充材料重新提交，或放弃本次申报。",
-		COUNSELOR:
-			"只显示你负责班级学生的申报；选择计分项、填写分数后提交学院。",
-		COLLEGE:
-			"只显示本学院学生的申报；可通过、退回学生修改或退回辅导员重评。",
-		ADMIN:
-			"查看全校申报、评分和审核记录；已通过的申报可撤销。",
+		STUDENT: "查看本人申报的评分、审核意见和处理进度。",
+		COUNSELOR: "仅显示负责班级学生的申报；评分后提交学院。",
+		COLLEGE: "仅显示本学院学生的申报；可通过或退回处理。",
+		ADMIN: "查看全校申报和审核记录；已通过的申报可在详情撤销。",
 	}[role];
 	return (
 		<>
@@ -315,17 +332,34 @@ export function Claims({
 			<RemoteState {...claims} />
 			{claims.data && (
 				<TemplateDirectory
-					title={
-						{
-							ADMIN: "成果申报监督",
-							COLLEGE: "学院审核",
-							COUNSELOR: "辅导员评分",
-							STUDENT: "我的成果申报",
-						}[role]
-					}
 					description={`共 ${claims.data.total} 条记录。${directoryDescription}`}
 					data={claims.data.items}
 					columns={columns}
+					empty={
+						role === "STUDENT"
+							? {
+									title: "暂无成果申报",
+									description:
+										"提交成果和证明后，辅导员会评分并由学院审核。",
+								}
+							: role === "COUNSELOR"
+								? {
+										title: "当前没有申报记录",
+										description:
+											"学生提交成果后，会按负责班级显示在这里；可切换状态查看历史。",
+									}
+								: role === "COLLEGE"
+									? {
+											title: "当前没有申报记录",
+											description:
+												"辅导员评分并提交后，会按学院显示在这里；可切换状态查看历史。",
+										}
+									: {
+											title: "当前没有申报记录",
+											description:
+												"学生提交、辅导员评分后，会在这里显示；可切换状态查看历史。",
+										}
+					}
 					actions={createAction}
 					filters={
 						<form
@@ -373,8 +407,7 @@ export function Claims({
 							</p>
 							{role !== "STUDENT" && (
 								<p className="text-xs text-muted-foreground">
-									{row.student.name} · {row.student.studentNumber} ·{" "}
-									{row.student.className}
+									{studentLine(row.student, true)}
 								</p>
 							)}
 							<Button
@@ -521,8 +554,7 @@ export function Claims({
 					<SheetHeader>
 						<SheetTitle>{selected?.title}</SheetTitle>
 						<SheetDescription>
-							{selected?.student.name} · {selected?.student.studentNumber} ·{" "}
-							{selected?.student.className}
+							{selected && studentLine(selected.student, true)}
 						</SheetDescription>
 					</SheetHeader>
 					{selected && (
@@ -739,21 +771,19 @@ export function Claims({
 													<FieldLabel htmlFor="score-node">
 														计分项
 													</FieldLabel>
-													<NativeSelect
+													<SearchableSelect
 														id="score-node"
 														name="nodeId"
 														required
 														defaultValue={selected.scoreNodeId || ""}
-													>
-														<NativeSelectOption value="">
-															选择计分项
-														</NativeSelectOption>
-														{activityNodes.map((n) => (
-															<NativeSelectOption key={n.id} value={n.id}>
-																{n.name}（{n.minimum} 至 {n.maximum} 分）
-															</NativeSelectOption>
-														))}
-													</NativeSelect>
+														placeholder="选择计分项"
+														searchPlaceholder="搜索计分项"
+														options={activityNodes.map((n) => ({
+															value: n.id,
+															label: n.name,
+															description: `${n.minimum} 至 ${n.maximum} 分`,
+														}))}
+													/>
 												</Field>
 												<Field>
 													<FieldLabel htmlFor="score-value">

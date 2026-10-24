@@ -4,6 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { dateText, statusLabels } from "@/lib/business-labels";
 type WorkItem = Extract<WorkbenchData, { role: "ADMIN" }>["reviewQueue"][number];
+function workItemStatus(item: WorkItem) {
+  if (item.kind === "ACTIVITY" && item.status === "PENDING_COUNSELOR") return "待辅导员核对";
+  if (item.kind === "CLAIM" && item.status === "PENDING_COUNSELOR") return "待辅导员评分";
+  return statusLabels[item.status] || item.status;
+}
 // productivity/_components/tasks-section.tsx: retained divided rows, responsive title/status/time grouping.
 export function WorkbenchItems({
   items,
@@ -27,7 +32,7 @@ export function WorkbenchItems({
               <div className="flex min-w-0 flex-col gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="break-words font-medium text-sm">{item.title}</span>
-                  <Badge variant="outline">{statusLabels[item.status] || item.status}</Badge>
+                  <Badge variant="outline">{workItemStatus(item)}</Badge>
                 </div>
                 <p className="break-words text-sm text-muted-foreground">{item.description}</p>
               </div>

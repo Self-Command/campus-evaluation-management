@@ -43,7 +43,7 @@ export function AuthForm({
 						if (data.get("newPassword") !== data.get("confirmPassword"))
 							throw new Error("两次新密码不一致");
 						await requestJson("/api/password", {
-							oldPassword: data.get("password"),
+							currentPassword: data.get("password"),
 							newPassword: data.get("newPassword"),
 						});
 						await signOut({ callbackUrl: "/login?changed=1" });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { authorize } from "@/server/authorization";
 import { AccountError } from "@/server/accounts";
@@ -23,20 +24,17 @@ function rowsFromTable(
 	if (missing.length)
 		throw new AccountError(`名单表头缺少：${missing.join("、")}`);
 	const loginIndex = index.get("学号")!;
-	const scoreIndex = index.get("活动原始分") ?? -1;
 	return rows.map((row, line) => {
 		if (row[loginIndex]?.numeric)
 			throw new AccountError(`第${line + 2}行学号必须为文本单元格`);
 		const cell = (header: (typeof requiredHeaders)[number]) =>
 			row[index.get(header)!]?.value ?? "";
-		const score = scoreIndex >= 0 ? (row[scoreIndex]?.value ?? "") : "";
 		const parsed: ParticipationImportRow = {
 			login: cell("学号"),
 			name: cell("姓名"),
 			college: cell("学院"),
 			major: cell("专业"),
 			className: cell("班级"),
-			...(score ? { score } : {}),
 		};
 		return parsed;
 	});
@@ -51,7 +49,7 @@ export async function POST(request: Request) {
 	try {
 		if (!(await consumeLimit("participation-import", auth.user.id, 30)))
 			throw new AccountError("操作频繁，请稍后重试", 429);
-		const form = await boundedForm(request),
+		const form = await boundedForm(request, 5 * 1024 * 1024),
 			action = form.get("action");
 		const termId = z.string().min(1).max(100).parse(form.get("termId"));
 		let result: unknown;
@@ -64,9 +62,11 @@ export async function POST(request: Request) {
 		else {
 			const file = form.get("file");
 			if (!(file instanceof File)) throw new AccountError("请选择名单文件");
+			const bytes = Buffer.from(await file.arrayBuffer());
+			const fileHash = createHash("sha256").update(bytes).digest("hex");
 			const table = await parseAccountFile(
 				file.name,
-				Buffer.from(await file.arrayBuffer()),
+				bytes,
 				{ maxRows: 2000, maxBytes: 5 * 1024 * 1024 },
 			);
 			if (action === "columns")
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
 					rows: rowsFromTable(table.headers, table.rows),
 					note: form.get("note"),
 					reason: form.get("reason") || undefined,
-				});
+				}, { fileHash });
 			} else throw new AccountError("操作无效");
 		}
 		return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });

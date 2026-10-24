@@ -3,10 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import {
-	NativeSelect,
-	NativeSelectOption,
-} from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import type { OrganizationData } from "@/lib/organization-types";
 
 export function OrganizationFields({
@@ -42,28 +39,27 @@ export function OrganizationFields({
 		<>
 			<Field>
 				<FieldLabel htmlFor={`${prefix}-college`}>学院</FieldLabel>
-				<NativeSelect
+				<SearchableSelect
 					id={`${prefix}-college`}
 					name={collegeOnly ? "collegeId" : undefined}
 					required
 					value={collegeId}
-					onChange={(e) => {
-						setCollegeId(e.target.value);
+					onValueChange={(next) => {
+						setCollegeId(next);
 						setMajorId("");
 						setClassId("");
 						onChange?.();
 					}}
-				>
-					<NativeSelectOption value="">请选择学院</NativeSelectOption>
-					{data.colleges
+					placeholder="请选择学院"
+					searchPlaceholder="搜索学院名称"
+					options={data.colleges
 						.filter((c) => c.enabled || c.id === collegeId)
-						.map((c) => (
-							<NativeSelectOption key={c.id} value={c.id} disabled={!c.enabled}>
-								{c.name}
-								{!c.enabled ? "（已停用）" : ""}
-							</NativeSelectOption>
-						))}
-				</NativeSelect>
+						.map((c) => ({
+							value: c.id,
+							label: `${c.name}${!c.enabled ? "（已停用）" : ""}`,
+							disabled: !c.enabled,
+						}))}
+				/>
 				{!data.colleges.some((c) => c.enabled) && (
 					<FieldDescription>
 						暂无启用学院。
@@ -84,31 +80,26 @@ export function OrganizationFields({
 				<>
 					<Field>
 						<FieldLabel htmlFor={`${prefix}-major`}>专业</FieldLabel>
-						<NativeSelect
+						<SearchableSelect
 							id={`${prefix}-major`}
 							required
 							disabled={!college?.enabled}
 							value={majorId}
-							onChange={(e) => {
-								setMajorId(e.target.value);
+							onValueChange={(next) => {
+								setMajorId(next);
 								setClassId("");
 								onChange?.();
 							}}
-						>
-							<NativeSelectOption value="">请选择专业</NativeSelectOption>
-							{college?.majors
+							placeholder={college ? "请选择专业" : "请先选择学院"}
+							searchPlaceholder="搜索专业名称"
+							options={(college?.majors ?? [])
 								.filter((m) => m.enabled || m.id === majorId)
-								.map((m) => (
-									<NativeSelectOption
-										key={m.id}
-										value={m.id}
-										disabled={!m.enabled}
-									>
-										{m.name}
-										{!m.enabled ? "（已停用）" : ""}
-									</NativeSelectOption>
-								))}
-						</NativeSelect>
+								.map((m) => ({
+									value: m.id,
+									label: `${m.name}${!m.enabled ? "（已停用）" : ""}`,
+									disabled: !m.enabled,
+								}))}
+						/>
 						{college && !college.majors.some((m) => m.enabled) && (
 							<FieldDescription>
 								该学院暂无启用专业。
@@ -127,35 +118,35 @@ export function OrganizationFields({
 					</Field>
 					<Field>
 						<FieldLabel htmlFor={`${prefix}-class`}>班级</FieldLabel>
-						<NativeSelect
+						<SearchableSelect
 							id={`${prefix}-class`}
 							name="classId"
 							required
 							disabled={!major?.enabled || !college?.enabled}
 							value={classId}
-							onChange={(e) => {
-								setClassId(e.target.value);
+							onValueChange={(next) => {
+								setClassId(next);
 								onChange?.();
 							}}
-						>
-							<NativeSelectOption value="">请选择班级</NativeSelectOption>
-							{major?.classes
+							placeholder={major ? "请选择班级" : "请先选择专业"}
+							searchPlaceholder="搜索班级名称"
+							options={(major?.classes ?? [])
 								.filter((s) => s.enabled || s.id === classId)
-								.map((s) => (
-									<NativeSelectOption
-										key={s.id}
-										value={s.id}
-										disabled={!s.enabled || !s.counselor}
-									>
-										{s.name}
-										{!s.enabled
+								.map((s) => ({
+									value: s.id,
+									label: `${s.name}${
+										!s.enabled
 											? "（已停用）"
 											: !s.counselor
 												? "（待分配辅导员）"
-												: ""}
-									</NativeSelectOption>
-								))}
-						</NativeSelect>
+												: ""
+									}`,
+									description: s.counselor
+										? `辅导员：${s.counselor.name}`
+										: "尚未分配辅导员",
+									disabled: !s.enabled || !s.counselor,
+								}))}
+						/>
 						<FieldDescription>
 							责任辅导员：
 							{schoolClass?.counselor

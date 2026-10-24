@@ -1,0 +1,4 @@
+export const MAX_EXPORT_STUDENTS = 10_000;
+export const MAX_EXPORT_STUDENTS_TEXT = "10,000";
+export const EXPORT_BATCH_SIZE = 1_000;
+export const MAX_EXPORT_COLLEGES = 100;
