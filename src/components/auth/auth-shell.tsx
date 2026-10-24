@@ -55,25 +55,25 @@ export function AuthShell({
       </div>
       <header className="relative z-10 flex items-center justify-between gap-4 px-5 py-5 sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
-          <div className={`flex shrink-0 items-center justify-center rounded-xl p-1.5 ring-1 ${hasImage ? "bg-white/10 ring-white/20" : "bg-background/70 ring-foreground/10"}`}>
-            {brand.logoAssetId ? (
-              <Image
-                src={`/api/brand-assets/${brand.logoAssetId}`}
-                alt=""
-                width={brand.logoSize}
-                height={brand.logoSize}
-                unoptimized
-                style={{ width: brand.logoSize, height: brand.logoSize }}
-                className="object-contain"
-              />
-            ) : (
-              <GraduationCap className={`size-8 ${foreground}`} />
-            )}
-          </div>
-          <div className="grid min-w-0">
-            <span className={`truncate text-base font-semibold ${foreground}`}>{brand.siteName}</span>
-            <span className={`hidden truncate text-xs sm:block ${muted}`}>{brand.siteDescription}</span>
-          </div>
+          {brand.logoAssetId ? (
+            <Image
+              src={`/api/brand-assets/${brand.logoAssetId}`}
+              alt={brand.siteName}
+              width={brand.logoSize}
+              height={brand.logoSize}
+              unoptimized
+              style={{ width: brand.logoSize, height: brand.logoSize }}
+              className="shrink-0 object-contain"
+            />
+          ) : (
+            <>
+              <GraduationCap className={`size-8 shrink-0 ${foreground}`} />
+              <div className="grid min-w-0">
+                <span className={`truncate text-base font-semibold ${foreground}`}>{brand.siteName}</span>
+                <span className={`hidden truncate text-xs sm:block ${muted}`}>{brand.siteDescription}</span>
+              </div>
+            </>
+          )}
         </div>
         <ThemePicker
           siteDefaults={{ themePreset: brand.themePreset, themeMode: brand.defaultThemeMode }}

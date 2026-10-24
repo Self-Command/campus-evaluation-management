@@ -317,18 +317,20 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										{draft.logoAssetId ? (
 											<Image
 												src={`/api/brand-assets/${draft.logoAssetId}`}
-												alt=""
+												alt={draft.siteName}
 												width={28}
 												height={28}
 												unoptimized
 												className="size-7 object-contain"
 											/>
 										) : (
-											<Command className="size-5 shrink-0 text-primary" />
+											<>
+												<Command className="size-5 shrink-0 text-primary" />
+												<span className="truncate text-sm font-semibold">
+													{draft.siteName}
+												</span>
+											</>
 										)}
-										<span className="truncate text-sm font-semibold">
-											{draft.siteName}
-										</span>
 									</div>
 									<p className="mt-4 text-lg font-semibold">欢迎登录</p>
 									<p className="mt-1 text-xs text-muted-foreground">
