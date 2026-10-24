@@ -1,10 +1,9 @@
 "use client";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GraduationCap, LogOut, ShieldCheck, ChevronsUpDown } from "lucide-react";
 import { signOut } from "next-auth/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   Sidebar,
@@ -56,14 +55,15 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="h-auto min-h-12 py-2" render={<Link href={user.role === "COLLEGE" || user.role === "COUNSELOR" ? "/students" : "/"} />}>
               {brand.logoAssetId ? (
-                <Image
+                // The saved size is a height budget, not a fixed box: cap the
+                // height and let the natural width follow, otherwise max-width
+                // clamps the box and leaves empty bands above and below.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
                   src={`/api/brand-assets/${brand.logoAssetId}`}
                   alt={brand.siteName}
-                  width={brand.logoSize}
-                  height={brand.logoSize}
-                  unoptimized
-                  style={{ width: brand.logoSize, height: brand.logoSize }}
-                  className="shrink-0 object-contain group-data-[collapsible=icon]:max-h-8 group-data-[collapsible=icon]:max-w-8"
+                  style={{ "--brand-logo-height": `${brand.logoSize}px` } as CSSProperties}
+                  className="h-auto w-auto max-h-[var(--brand-logo-height)] max-w-full shrink-0 object-contain group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:object-cover group-data-[collapsible=icon]:object-left"
                 />
               ) : (
                 <>

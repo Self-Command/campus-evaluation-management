@@ -37,6 +37,10 @@ export async function publicSettings() {
     loginBackgroundAssetId: settings.loginBackgroundAssetId,
     loginNotice: settings.loginNotice,
     loginCardBlur: settings.loginCardBlur,
+    loginCardOpacity: settings.loginCardOpacity,
+    loginCardSaturation: settings.loginCardSaturation,
+    loginCardGlow: settings.loginCardGlow,
+    loginCardGlowTone: settings.loginCardGlowTone,
   };
 }
 

@@ -31,6 +31,11 @@ import {
 	type ThemeMode,
 	type ThemePreset,
 } from "@/lib/preferences/theme";
+import {
+	authGlassStyle,
+	authGlowToneOptions,
+	type AuthGlowTone,
+} from "@/lib/auth-glass";
 type SettingsData = {
 	siteName: string;
 	siteDescription: string;
@@ -40,6 +45,10 @@ type SettingsData = {
 	loginBackgroundAssetId: string | null;
 	loginNotice: string;
 	loginCardBlur: number;
+	loginCardOpacity: number;
+	loginCardSaturation: number;
+	loginCardGlow: number;
+	loginCardGlowTone: AuthGlowTone;
 	loginFailureLimitEnabled: boolean;
 	loginFailureMaxAttempts: number;
 	loginFailureLockMinutes: number;
@@ -52,6 +61,56 @@ type SettingsData = {
 	revision: number;
 	updatedAt: string | null;
 };
+const glassSliders = [
+	{
+		key: "loginCardBlur",
+		label: "高斯模糊",
+		id: "settings-login-card-blur",
+		min: 0,
+		max: 40,
+		unit: "px",
+		low: "0 清晰",
+		high: "40 最强",
+		description:
+			"模糊透过卡片的背景细节，数值越高毛玻璃越明显；0 仍保留半透明玻璃。默认 24。",
+	},
+	{
+		key: "loginCardOpacity",
+		label: "不透明度",
+		id: "settings-login-card-opacity",
+		min: 20,
+		max: 95,
+		unit: "%",
+		low: "20 通透",
+		high: "95 厚实",
+		description:
+			"卡片底色浓度，越低越能透出背景。背景图较花时建议调高，保证文字清晰。默认 80。",
+	},
+	{
+		key: "loginCardSaturation",
+		label: "饱和度",
+		id: "settings-login-card-saturation",
+		min: 100,
+		max: 200,
+		unit: "%",
+		low: "100 自然",
+		high: "200 浓郁",
+		description:
+			"提升透过玻璃的背景色彩浓度，140–160 更接近高级玻璃质感。默认 145。",
+	},
+	{
+		key: "loginCardGlow",
+		label: "光晕强度",
+		id: "settings-login-card-glow",
+		min: 0,
+		max: 100,
+		unit: "",
+		low: "0 内敛",
+		high: "100 明亮",
+		description:
+			"控制卡片外发光与渐变描边的强度；0 时保留细描边但关闭外发光。默认 65。",
+	},
+] as const;
 export function Settings() {
 	const remote = useRemote<SettingsData>("/api/admin/settings");
 	return (
@@ -133,20 +192,29 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					if (!draft[key].trim() || draft[key].trim().length > max)
 						issues[key] = `${label}需填写1至${max}个字符。`;
 				}
-				if (
-					!Number.isInteger(draft.logoSize) ||
-					draft.logoSize < 16 ||
-					draft.logoSize > 128
-				)
-					issues.logoSize = "Logo 显示尺寸需填写16至128的整数。";
+				if (!Number.isInteger(draft.logoSize) || draft.logoSize < 16)
+					issues.logoSize = "Logo 显示尺寸需填写不小于16的整数。";
 				if (draft.loginNotice.length > 200)
 					issues.loginNotice = "登录公告最多200个字符。";
+				for (const [key, label, min, max] of [
+					["loginCardBlur", "登录卡片模糊", 0, 40],
+					["loginCardOpacity", "登录卡片不透明度", 20, 95],
+					["loginCardSaturation", "登录卡片饱和度", 100, 200],
+					["loginCardGlow", "登录卡片光晕强度", 0, 100],
+				] as const) {
+					if (
+						!Number.isInteger(draft[key]) ||
+						draft[key] < min ||
+						draft[key] > max
+					)
+						issues[key] = `${label}需填写${min}至${max}的整数。`;
+				}
 				if (
-					!Number.isInteger(draft.loginCardBlur) ||
-					draft.loginCardBlur < 0 ||
-					draft.loginCardBlur > 40
+					!authGlowToneOptions.some(
+						(option) => option.value === draft.loginCardGlowTone,
+					)
 				)
-					issues.loginCardBlur = "登录卡片模糊需填写0至40的整数。";
+					issues.loginCardGlowTone = "请选择有效的光晕色调。";
 				for (const [key, label, max] of [
 					["loginFailureMaxAttempts", "连续失败次数", 100],
 					["loginFailureLockMinutes", "临时锁定分钟数", 1440],
@@ -196,7 +264,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								? "activity"
 								: first === "logoSize"
 								? "assets"
-								: first === "loginNotice" || first === "loginCardBlur"
+								: first === "loginNotice" || first.startsWith("loginCard")
 								? "login"
 								: first === "reason"
 								? tab
@@ -220,6 +288,10 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										logoSize: "settings-logo-size",
 										loginNotice: "settings-login-notice",
 										loginCardBlur: "settings-login-card-blur",
+										loginCardOpacity: "settings-login-card-opacity",
+										loginCardSaturation: "settings-login-card-saturation",
+										loginCardGlow: "settings-login-card-glow",
+										loginCardGlowTone: "settings-login-card-glow-tone",
 									} as Record<string, string>
 								)[first],
 							)
@@ -241,6 +313,10 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							loginBackgroundAssetId: draft.loginBackgroundAssetId,
 							loginNotice: draft.loginNotice.trim(),
 							loginCardBlur: draft.loginCardBlur,
+							loginCardOpacity: draft.loginCardOpacity,
+							loginCardSaturation: draft.loginCardSaturation,
+							loginCardGlow: draft.loginCardGlow,
+							loginCardGlowTone: draft.loginCardGlowTone,
 							loginFailureLimitEnabled: draft.loginFailureLimitEnabled,
 							loginFailureMaxAttempts: draft.loginFailureMaxAttempts,
 							loginFailureLockMinutes: draft.loginFailureLockMinutes,
@@ -322,50 +398,44 @@ function SettingsForm({ value }: { value: SettingsData }) {
 									<div className="auth-default-background absolute inset-0" />
 								)}
 								<div
-									className="relative w-full max-w-64 rounded-xl bg-card/80 p-4 text-left shadow-xl ring-1 ring-foreground/10"
-									style={{
-										backdropFilter:
-											draft.loginCardBlur > 0
-												? `blur(${draft.loginCardBlur}px) saturate(140%)`
-												: "saturate(140%)",
-										WebkitBackdropFilter:
-											draft.loginCardBlur > 0
-												? `blur(${draft.loginCardBlur}px) saturate(140%)`
-												: "saturate(140%)",
-									}}
+									className="auth-glass-scope relative w-full max-w-64"
+									data-auth-glow-tone={draft.loginCardGlowTone}
+									style={authGlassStyle(draft)}
 								>
-									<div className="flex min-w-0 items-center gap-2">
-										{draft.logoAssetId ? (
-											<Image
-												src={`/api/brand-assets/${draft.logoAssetId}`}
-												alt={draft.siteName}
-												width={28}
-												height={28}
-												unoptimized
-												className="size-7 object-contain"
-											/>
-										) : (
-											<>
-												<Command className="size-5 shrink-0 text-primary" />
-												<span className="truncate text-sm font-semibold">
-													{draft.siteName}
-												</span>
-											</>
-										)}
-									</div>
-									<p className="mt-4 text-lg font-semibold">欢迎登录</p>
-									<p className="mt-1 text-xs text-muted-foreground">
-										输入账号和密码进入工作台
-									</p>
-									{draft.loginNotice && (
-										<p className="mt-3 max-h-20 overflow-hidden whitespace-pre-wrap rounded-md border bg-muted/60 px-2 py-1.5 text-[11px] leading-relaxed">
-											{draft.loginNotice}
+									<div aria-hidden className="auth-glass-aurora" />
+									<div className="auth-glass-card relative z-10 w-full rounded-xl p-4 text-left">
+										<div className="flex min-w-0 items-center gap-2">
+											{draft.logoAssetId ? (
+												// eslint-disable-next-line @next/next/no-img-element
+												<img
+													src={`/api/brand-assets/${draft.logoAssetId}`}
+													alt={draft.siteName}
+													style={{ height: 28, width: "auto" }}
+													className="max-w-[70%] shrink-0 object-contain"
+												/>
+											) : (
+												<>
+													<Command className="size-5 shrink-0 text-primary" />
+													<span className="truncate text-sm font-semibold">
+														{draft.siteName}
+													</span>
+												</>
+											)}
+										</div>
+										<p className="mt-4 text-lg font-semibold">欢迎登录</p>
+										<p className="mt-1 text-xs text-muted-foreground">
+											输入账号和密码进入工作台
 										</p>
-									)}
-									<div aria-hidden className="mt-4 grid gap-2">
-										<div className="h-7 rounded-md border bg-background/70" />
-										<div className="h-7 rounded-md border bg-background/70" />
-										<div className="h-7 rounded-md bg-primary" />
+										{draft.loginNotice && (
+											<p className="mt-3 max-h-20 overflow-hidden whitespace-pre-wrap rounded-md border bg-muted/60 px-2 py-1.5 text-[11px] leading-relaxed">
+												{draft.loginNotice}
+											</p>
+										)}
+										<div aria-hidden className="mt-4 grid gap-2">
+											<div className="h-7 rounded-md border bg-background/70" />
+											<div className="h-7 rounded-md border bg-background/70" />
+											<div className="h-7 rounded-md bg-primary" />
+										</div>
 									</div>
 								</div>
 							</div>
@@ -388,14 +458,12 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								data-theme-preset={draft.themePreset}
 							>
 								{draft.logoAssetId ? (
-									<Image
+									// eslint-disable-next-line @next/next/no-img-element
+									<img
 										src={`/api/brand-assets/${draft.logoAssetId}`}
 										alt="站点标识"
-										width={draft.logoSize}
-										height={draft.logoSize}
-										unoptimized
-										style={{ width: draft.logoSize, height: draft.logoSize }}
-										className="object-contain"
+										style={{ height: draft.logoSize, width: "auto" }}
+										className="max-h-56 max-w-full object-contain"
 									/>
 								) : (
 									<Command className="size-12 text-primary" />
@@ -549,7 +617,6 @@ function SettingsForm({ value }: { value: SettingsData }) {
 									type="number"
 									inputMode="numeric"
 									min={16}
-									max={128}
 									step={1}
 									value={Number.isNaN(draft.logoSize) ? "" : draft.logoSize}
 									disabled={busy}
@@ -565,7 +632,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								/>
 								{invalid.logoSize && <FieldError>{invalid.logoSize}</FieldError>}
 								<FieldDescription>
-									侧栏、登录页与改密页统一使用该尺寸，可设置16至128像素；侧栏折叠时自动缩小。建议上传前裁掉图片四周的空白。
+									表示 Logo 的显示高度，宽度按原图比例自动计算，不设上限；过宽时会缩放到容器宽度，侧栏折叠时自动缩小。建议上传前裁掉图片四周的空白。
 								</FieldDescription>
 							</Field>
 							<Field>
@@ -709,38 +776,75 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								</FieldDescription>
 							</Field>
 							<Separator />
-							<Field data-invalid={!!invalid.loginCardBlur}>
-								<div className="flex flex-wrap items-center justify-between gap-2">
-									<FieldLabel htmlFor="settings-login-card-blur">
-										登录卡片高斯模糊
-									</FieldLabel>
-									<span className="text-muted-foreground text-sm tabular-nums">
-										{draft.loginCardBlur} px
-									</span>
-								</div>
-								<input
-									id="settings-login-card-blur"
-									type="range"
-									min={0}
-									max={40}
-									step={1}
-									value={draft.loginCardBlur}
+							<Field>
+								<FieldLabel>玻璃卡片效果</FieldLabel>
+								<FieldDescription>
+									登录卡片使用随主题变化的高级玻璃与渐变光晕，以下参数同步应用到登录页和首次改密页。
+								</FieldDescription>
+							</Field>
+							{glassSliders.map((item) => (
+								<Field key={item.key} data-invalid={!!invalid[item.key]}>
+									<div className="flex flex-wrap items-center justify-between gap-2">
+										<FieldLabel htmlFor={item.id}>{item.label}</FieldLabel>
+										<span className="text-muted-foreground text-sm tabular-nums">
+											{draft[item.key]}
+											{item.unit ? ` ${item.unit}` : ""}
+										</span>
+									</div>
+									<input
+										id={item.id}
+										type="range"
+										min={item.min}
+										max={item.max}
+										step={1}
+										value={draft[item.key]}
+										disabled={busy}
+										onChange={(e) =>
+											change(item.key, Number(e.target.value))
+										}
+										className="w-full cursor-pointer accent-primary disabled:cursor-not-allowed"
+										aria-invalid={!!invalid[item.key]}
+									/>
+									<div className="text-muted-foreground flex justify-between text-[11px]">
+										<span>{item.low}</span>
+										<span>{item.high}</span>
+									</div>
+									{invalid[item.key] && (
+										<FieldError>{invalid[item.key]}</FieldError>
+									)}
+									<FieldDescription>{item.description}</FieldDescription>
+								</Field>
+							))}
+							<Field data-invalid={!!invalid.loginCardGlowTone}>
+								<FieldLabel htmlFor="settings-login-card-glow-tone">
+									光晕色调
+								</FieldLabel>
+								<NativeSelect
+									id="settings-login-card-glow-tone"
+									value={draft.loginCardGlowTone}
 									disabled={busy}
+									aria-invalid={!!invalid.loginCardGlowTone}
 									onChange={(e) =>
-										change("loginCardBlur", Number(e.target.value))
+										change(
+											"loginCardGlowTone",
+											e.target.value as AuthGlowTone,
+										)
 									}
-									className="w-full cursor-pointer accent-primary disabled:cursor-not-allowed"
-									aria-invalid={!!invalid.loginCardBlur}
-								/>
-								<div className="text-muted-foreground flex justify-between text-[11px]">
-									<span>0 清晰</span>
-									<span>40 最强</span>
-								</div>
-								{invalid.loginCardBlur && (
-									<FieldError>{invalid.loginCardBlur}</FieldError>
+								>
+									{authGlowToneOptions.map((option) => (
+										<NativeSelectOption
+											key={option.value}
+											value={option.value}
+										>
+											{option.label} · {option.description}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
+								{invalid.loginCardGlowTone && (
+									<FieldError>{invalid.loginCardGlowTone}</FieldError>
 								)}
 								<FieldDescription>
-									高斯模糊强度，默认 24；卡片保持半透明毛玻璃质感，登录页与首次改密页同步生效。
+									主题色跟随所选界面主题与深浅模式；固定色调适合搭配背景图使用。
 								</FieldDescription>
 							</Field>
 							<Separator />

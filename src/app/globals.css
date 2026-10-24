@@ -320,3 +320,76 @@ body { font-size: 14px; line-height: 1.6; }
   opacity: 0.32;
   mask-image: radial-gradient(circle at center, black, transparent 78%);
 }
+
+/* Authentication glass card. The blur, tint, saturation and glow values are
+   inherited from site settings through custom properties. */
+.auth-glass-scope[data-auth-glow-tone="theme"] {
+  --auth-glow-a: var(--primary);
+  --auth-glow-b: var(--chart-2, var(--primary));
+}
+.auth-glass-scope[data-auth-glow-tone="aurora"] {
+  --auth-glow-a: oklch(0.78 0.16 165);
+  --auth-glow-b: oklch(0.72 0.16 285);
+}
+.auth-glass-scope[data-auth-glow-tone="sunset"] {
+  --auth-glow-a: oklch(0.8 0.15 70);
+  --auth-glow-b: oklch(0.7 0.19 20);
+}
+.auth-glass-scope[data-auth-glow-tone="ocean"] {
+  --auth-glow-a: oklch(0.78 0.13 220);
+  --auth-glow-b: oklch(0.7 0.15 275);
+}
+
+.auth-glass-aurora {
+  position: absolute;
+  inset: -0.7rem;
+  border-radius: calc(var(--radius) + 1rem);
+  background: conic-gradient(
+    from 120deg in oklab,
+    transparent 0%,
+    color-mix(in oklab, var(--auth-glow-a) 82%, transparent) 18%,
+    transparent 38%,
+    color-mix(in oklab, var(--auth-glow-b) 66%, transparent) 58%,
+    transparent 78%,
+    color-mix(in oklab, var(--auth-glow-a) 70%, transparent) 92%,
+    transparent 100%
+  );
+  filter: blur(26px) saturate(130%);
+  opacity: var(--auth-glow-halo, 0);
+  pointer-events: none;
+}
+
+.auth-glass-card {
+  position: relative;
+  background-color: color-mix(in srgb, var(--card) var(--auth-card-opacity, 80%), transparent);
+  /* Lightning CSS adds the -webkit- prefix; declaring it here makes the
+     compiler treat both declarations as aliases and drop the standard one. */
+  backdrop-filter: blur(var(--auth-card-blur, 24px)) saturate(var(--auth-card-saturation, 145%));
+  box-shadow:
+    0 32px 80px -40px rgb(0 0 0 / 0.7),
+    0 14px 30px -28px rgb(0 0 0 / 0.55),
+    inset 0 1px 0 color-mix(in oklab, white 24%, transparent);
+}
+
+.auth-glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg in oklab,
+    color-mix(in oklab, var(--auth-glow-a) 90%, white) 0%,
+    color-mix(in oklab, var(--auth-glow-a) 42%, transparent) 24%,
+    color-mix(in oklab, white 30%, transparent) 48%,
+    color-mix(in oklab, var(--auth-glow-b) 52%, transparent) 74%,
+    color-mix(in oklab, var(--auth-glow-b) 90%, white) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: var(--auth-glow-border, 0.75);
+  pointer-events: none;
+}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { authGlowToneValues } from "@/lib/auth-glass";
 
 // The saved value is a complete visual theme (see src/styles/presets/*.css).
 export const themePresetValues = ["default", "brutalist", "soft-pop", "tangerine", "vercel", "claude", "t3-chat", "supabase", "mono"] as const;
@@ -6,8 +7,14 @@ export const themePresetSchema = z.enum(themePresetValues);
 
 export const defaultAttachmentExtensions = ["png", "jpg", "jpeg", "webp", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "txt", "md"] as const;
 
-export const logoSizeSchema = z.number().int().min(16).max(128).default(28);
+// The logo height is deliberately unbounded: wide logos are fitted to the
+// container width, so an artificial pixel ceiling only makes marks look small.
+export const logoSizeSchema = z.number().int().min(16).default(28);
 export const loginCardBlurSchema = z.number().int().min(0).max(40).default(24);
+export const loginCardOpacitySchema = z.number().int().min(20).max(95).default(80);
+export const loginCardSaturationSchema = z.number().int().min(100).max(200).default(145);
+export const loginCardGlowSchema = z.number().int().min(0).max(100).default(65);
+export const loginCardGlowToneSchema = z.enum(authGlowToneValues).default("theme");
 export const defaultThemeModeValues = ["light", "dark", "system"] as const;
 export const defaultThemeModeSchema = z.enum(defaultThemeModeValues);
 
@@ -23,6 +30,10 @@ export const settingsSchema = z.object({
   loginBackgroundAssetId: z.string().max(100).nullable().default(null),
   loginNotice: z.string().trim().max(200).default(""),
   loginCardBlur: loginCardBlurSchema,
+  loginCardOpacity: loginCardOpacitySchema,
+  loginCardSaturation: loginCardSaturationSchema,
+  loginCardGlow: loginCardGlowSchema,
+  loginCardGlowTone: loginCardGlowToneSchema,
   loginFailureLimitEnabled: z.boolean().default(false),
   loginFailureMaxAttempts: z.number().int().min(1).max(100).default(5),
   loginFailureLockMinutes: z.number().int().min(1).max(1440).default(15),
