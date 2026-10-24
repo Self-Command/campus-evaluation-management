@@ -14,7 +14,7 @@ A campus-wide comprehensive evaluation system built for real higher-education op
 
 The system is designed around three promises: **correct scoring, scope-safe access, and a traceable record for every material change**.
 
-**Live demo**: <https://demo.spacedo.org> (all demo records are fictional acceptance data; credentials are initialized by the deployment owner)
+**Live demo**: <https://demo.spacedo.org> (dedicated demo database, currently empty; do not enter real student data — the initial administrator account is provided offline by the deployment owner)
 
 ## Contents
 
