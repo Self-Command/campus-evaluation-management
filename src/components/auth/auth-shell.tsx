@@ -4,6 +4,7 @@ import { GraduationCap } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ThemePicker } from "@/components/dashboard/theme-picker";
+import { BrandLogo } from "@/components/brand-logo";
 import { authGlassStyle, type AuthGlowTone } from "@/lib/auth-glass";
 import type { ThemeMode, ThemePreset } from "@/lib/preferences/theme";
 
@@ -11,6 +12,7 @@ type AuthBrand = {
   siteName: string;
   siteDescription: string;
   logoAssetId: string | null;
+  logoDarkAssetId: string | null;
   logoSize: number;
   loginBackgroundAssetId: string | null;
   loginNotice: string;
@@ -61,15 +63,15 @@ export function AuthShell({
       </div>
       <header className="relative z-10 flex items-center justify-between gap-4 px-5 py-4 sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
-          {brand.logoAssetId ? (
+          {brand.logoAssetId || brand.logoDarkAssetId ? (
             // Natural aspect ratio matters for wide wordmarks; next/image would
             // force the square width/height ratio declared at build time.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`/api/brand-assets/${brand.logoAssetId}`}
+            <BrandLogo
+              lightAssetId={brand.logoAssetId}
+              darkAssetId={brand.logoDarkAssetId}
               alt={brand.siteName}
               style={{ maxHeight: `min(${brand.logoSize}px, 18vh)`, width: "auto" }}
-              className="h-auto w-auto max-w-[min(62vw,26rem)] shrink-0 object-contain"
+              className="max-w-[min(62vw,26rem)] shrink-0"
             />
           ) : (
             <>

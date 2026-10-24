@@ -393,3 +393,15 @@ body { font-size: 14px; line-height: 1.6; }
   opacity: var(--auth-glow-border, 0.75);
   pointer-events: none;
 }
+
+/* Light/dark brand marks are both rendered so the pre-hydration theme boot
+   script can pick one without a network swap or hydration mismatch. */
+.theme-logo-dark {
+  display: none;
+}
+.dark .theme-logo-light {
+  display: none;
+}
+.dark .theme-logo-dark {
+  display: block;
+}

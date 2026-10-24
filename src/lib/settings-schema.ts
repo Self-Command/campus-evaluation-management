@@ -25,6 +25,7 @@ export const settingsSchema = z.object({
   themePreset: themePresetSchema,
   defaultThemeMode: defaultThemeModeSchema.default("light"),
   logoAssetId: z.string().max(100).nullable(),
+  logoDarkAssetId: z.string().max(100).nullable().default(null),
   logoSize: logoSizeSchema,
   faviconAssetId: z.string().max(100).nullable(),
   loginBackgroundAssetId: z.string().max(100).nullable().default(null),

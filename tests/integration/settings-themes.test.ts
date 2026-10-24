@@ -71,6 +71,26 @@ test("Logo 显示尺寸可保存回读，历史设置缺失时使用默认值", 
   await expect(saveSettings(sessionId, { ...defaultSettings, logoSize: 8, revision: larger.revision, reason: "非法 Logo 尺寸" })).rejects.toThrow();
 });
 
+test("浅色与深色 Logo 可分别保存并由公开设置返回", async () => {
+  await db.siteSettings.deleteMany({ where: { id: "site" } });
+  const light = await uploadBrandAsset(sessionId, png);
+  const dark = await uploadBrandAsset(sessionId, png);
+  const before = await readSiteSettings();
+  const saved = await saveSettings(sessionId, {
+    ...defaultSettings,
+    logoAssetId: light.id,
+    logoDarkAssetId: dark.id,
+    revision: before.revision,
+    reason: "配置浅色与深色 Logo",
+  });
+  expect(saved.logoAssetId).toBe(light.id);
+  expect(saved.logoDarkAssetId).toBe(dark.id);
+  const visible = await publicSettings();
+  expect(visible.logoAssetId).toBe(light.id);
+  expect(visible.logoDarkAssetId).toBe(dark.id);
+  await expect(saveSettings(sessionId, { ...defaultSettings, logoDarkAssetId: "missing-logo", revision: saved.revision, reason: "校验缺失深色 Logo" })).rejects.toThrow("品牌图片不存在");
+});
+
 test("公开设置只暴露品牌白名单，不泄露登录与附件策略", async () => {
   const value = await publicSettings();
   expect(Object.keys(value).sort()).toEqual([
@@ -84,6 +104,7 @@ test("公开设置只暴露品牌白名单，不泄露登录与附件策略", as
     "loginCardSaturation",
     "loginNotice",
     "logoAssetId",
+    "logoDarkAssetId",
     "logoSize",
     "pageTitle",
     "siteDescription",
@@ -138,7 +159,8 @@ test("默认深浅模式、登录公告、登录背景与玻璃参数可保存�
   await expect(saveSettings(sessionId, { ...defaultSettings, loginCardGlowTone: "rainbow", revision: saved.revision, reason: "非法色调" })).rejects.toThrow();
   await expect(saveSettings(sessionId, { ...defaultSettings, loginBackgroundAssetId: "missing-asset", revision: saved.revision, reason: "背景不存在" })).rejects.toThrow("品牌图片不存在");
   await db.siteSettings.deleteMany({ where: { id: "site" } });
-  const { defaultThemeMode, loginBackgroundAssetId, loginNotice, loginCardBlur, loginCardOpacity, loginCardSaturation, loginCardGlow, loginCardGlowTone, ...legacy } = defaultSettings;
+  const { defaultThemeMode, loginBackgroundAssetId, loginNotice, loginCardBlur, loginCardOpacity, loginCardSaturation, loginCardGlow, loginCardGlowTone, logoDarkAssetId, ...legacy } = defaultSettings;
+  void logoDarkAssetId;
   void defaultThemeMode;
   void loginBackgroundAssetId;
   void loginNotice;
@@ -157,6 +179,7 @@ test("默认深浅模式、登录公告、登录背景与玻璃参数可保存�
   expect(read.loginCardSaturation).toBe(145);
   expect(read.loginCardGlow).toBe(65);
   expect(read.loginCardGlowTone).toBe("theme");
+  expect(read.logoDarkAssetId).toBeNull();
 });
 
 test("可保存的主题值全覆盖，未知主题被拒绝", async () => {

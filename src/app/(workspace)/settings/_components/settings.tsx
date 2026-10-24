@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Command, Upload } from "lucide-react";
 import { TemplateEditor } from "@/components/dashboard/template-editor";
+import { BrandLogo } from "@/components/brand-logo";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
@@ -56,6 +57,7 @@ type SettingsData = {
 	activityAttachmentMaxSizeMb: number;
 	activityAttachmentAllowedExtensions: string[];
 	logoAssetId: string | null;
+	logoDarkAssetId: string | null;
 	logoSize: number;
 	faviconAssetId: string | null;
 	revision: number;
@@ -146,7 +148,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 	}
 	async function upload(
 		file: File | undefined,
-		key: "logoAssetId" | "faviconAssetId" | "loginBackgroundAssetId",
+		key: "logoAssetId" | "logoDarkAssetId" | "faviconAssetId" | "loginBackgroundAssetId",
 	) {
 		if (!file || uploading) return;
 		const background = key === "loginBackgroundAssetId";
@@ -324,6 +326,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							activityAttachmentMaxSizeMb: draft.activityAttachmentMaxSizeMb,
 							activityAttachmentAllowedExtensions: extensions,
 							logoAssetId: draft.logoAssetId,
+							logoDarkAssetId: draft.logoDarkAssetId,
 							logoSize: draft.logoSize,
 							faviconAssetId: draft.faviconAssetId,
 							reason,
@@ -405,13 +408,13 @@ function SettingsForm({ value }: { value: SettingsData }) {
 									<div aria-hidden className="auth-glass-aurora" />
 									<div className="auth-glass-card relative z-10 w-full rounded-xl p-4 text-left">
 										<div className="flex min-w-0 items-center gap-2">
-											{draft.logoAssetId ? (
-												// eslint-disable-next-line @next/next/no-img-element
-												<img
-													src={`/api/brand-assets/${draft.logoAssetId}`}
+											{draft.logoAssetId || draft.logoDarkAssetId ? (
+												<BrandLogo
+													lightAssetId={draft.logoAssetId}
+													darkAssetId={draft.logoDarkAssetId}
 													alt={draft.siteName}
 													style={{ height: 28, width: "auto" }}
-													className="max-w-[70%] shrink-0 object-contain"
+													className="max-w-[70%] shrink-0"
 												/>
 											) : (
 												<>
@@ -457,13 +460,13 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								className="flex min-h-80 flex-col items-center justify-center gap-5 rounded-b-xl bg-muted p-6 text-center"
 								data-theme-preset={draft.themePreset}
 							>
-								{draft.logoAssetId ? (
-									// eslint-disable-next-line @next/next/no-img-element
-									<img
-										src={`/api/brand-assets/${draft.logoAssetId}`}
+								{draft.logoAssetId || draft.logoDarkAssetId ? (
+									<BrandLogo
+										lightAssetId={draft.logoAssetId}
+										darkAssetId={draft.logoDarkAssetId}
 										alt="站点标识"
 										style={{ height: draft.logoSize, width: "auto" }}
-										className="max-h-56 max-w-full object-contain"
+										className="max-h-56 max-w-full"
 									/>
 								) : (
 									<Command className="size-12 text-primary" />
@@ -553,10 +556,23 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					</TabsContent>
 					<TabsContent className="mt-4" value="assets">
 						<FieldGroup>
-							{[
-								["logoAssetId", "站点 Logo"],
-								["faviconAssetId", "网站图标"],
-							].map(([key, label]) => (
+							{([
+								[
+									"logoAssetId",
+									"浅色模式 Logo",
+									"浅色界面使用；未设置深色 Logo 时，深色界面也使用它。",
+								],
+								[
+									"logoDarkAssetId",
+									"深色模式 Logo",
+									"深色界面使用，建议上传浅色或反白版本；未设置时回退到浅色 Logo。",
+								],
+								[
+									"faviconAssetId",
+									"网站图标",
+									"浏览器标签页图标，建议使用方形图片。",
+								],
+							] as const).map(([key, label, description]) => (
 								<Field key={key}>
 									<FieldLabel htmlFor={`settings-${key}`}>{label}</FieldLabel>
 									<Input
@@ -568,10 +584,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										onChange={(e) => {
 											const file = e.target.files?.[0];
 											e.target.value = "";
-											void upload(
-												file,
-												key as "logoAssetId" | "faviconAssetId",
-											);
+											void upload(file, key);
 										}}
 									/>
 									<div className="flex flex-wrap gap-2">
@@ -587,24 +600,24 @@ function SettingsForm({ value }: { value: SettingsData }) {
 											<Upload data-icon="inline-start" />
 											{uploading === key
 												? "正在上传…"
-												: draft[key as "logoAssetId"]
-													? `更换${label}图片`
-													: `选择${label}图片`}
+												: draft[key]
+													? `更换${label}`
+													: `上传${label}`}
 										</Button>
-										{draft[key as "logoAssetId"] && (
+										{draft[key] && (
 											<Button
 												type="button"
 												variant="outline"
 												size="sm"
 												disabled={busy}
-												onClick={() => change(key as "logoAssetId", null)}
+												onClick={() => change(key, null)}
 											>
-												恢复默认{label}
+												移除{label}
 											</Button>
 										)}
 									</div>
 									<FieldDescription>
-										PNG、JPEG或ICO，最大1MiB。上传后需保存设置。
+										{description} PNG、JPEG或ICO，最大1MiB，上传后需保存设置。
 									</FieldDescription>
 								</Field>
 							))}

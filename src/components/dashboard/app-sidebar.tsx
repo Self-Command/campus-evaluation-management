@@ -28,13 +28,14 @@ import {
 import { navigation } from "@/navigation/sidebar/sidebar-items";
 import { roleLabels, type AppRole } from "@/lib/business-labels";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
+import { BrandLogo } from "@/components/brand-logo";
 import { NavMain } from "./nav-main";
 export function AppSidebar({
   user,
   brand,
 }: {
   user: { name?: string | null; role: AppRole };
-  brand: { siteName: string; siteDescription: string; logoAssetId: string | null; logoSize: number };
+  brand: { siteName: string; siteDescription: string; logoAssetId: string | null; logoDarkAssetId: string | null; logoSize: number };
 }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const path = usePathname();
@@ -54,16 +55,16 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="h-auto min-h-12 py-2" render={<Link href={user.role === "COLLEGE" || user.role === "COUNSELOR" ? "/students" : "/"} />}>
-              {brand.logoAssetId ? (
+              {brand.logoAssetId || brand.logoDarkAssetId ? (
                 // The saved size is a height budget, not a fixed box: cap the
                 // height and let the natural width follow, otherwise max-width
                 // clamps the box and leaves empty bands above and below.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={`/api/brand-assets/${brand.logoAssetId}`}
+                <BrandLogo
+                  lightAssetId={brand.logoAssetId}
+                  darkAssetId={brand.logoDarkAssetId}
                   alt={brand.siteName}
                   style={{ "--brand-logo-height": `${brand.logoSize}px` } as CSSProperties}
-                  className="h-auto w-auto max-h-[var(--brand-logo-height)] max-w-full shrink-0 object-contain group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:object-cover group-data-[collapsible=icon]:object-left"
+                  className="max-h-[var(--brand-logo-height)] max-w-full shrink-0 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:object-cover group-data-[collapsible=icon]:object-left"
                 />
               ) : (
                 <>

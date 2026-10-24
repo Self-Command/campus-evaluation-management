@@ -32,6 +32,7 @@ export async function publicSettings() {
     themePreset: settings.themePreset,
     defaultThemeMode: settings.defaultThemeMode,
     logoAssetId: settings.logoAssetId,
+    logoDarkAssetId: settings.logoDarkAssetId,
     logoSize: settings.logoSize,
     faviconAssetId: settings.faviconAssetId,
     loginBackgroundAssetId: settings.loginBackgroundAssetId,
@@ -57,7 +58,7 @@ export async function saveSettings(sessionId: string, input: unknown) {
   return adminTransaction(sessionId, async (tx, actorId) => {
     const previous = await tx.siteSettings.findUnique({ where: { id: "site" } });
     if ((previous?.revision ?? 0) !== revision) throw new AccountError("系统设置已变化，请刷新后核对", 409);
-    const assetIds = [...new Set([content.logoAssetId, content.faviconAssetId, content.loginBackgroundAssetId].filter((i): i is string => !!i))];
+    const assetIds = [...new Set([content.logoAssetId, content.logoDarkAssetId, content.faviconAssetId, content.loginBackgroundAssetId].filter((i): i is string => !!i))];
     const assets = await tx.brandAsset.findMany({ where: { id: { in: assetIds } }, select: { id: true, mime: true } });
     if (assets.length !== assetIds.length) throw new AccountError("品牌图片不存在，请重新上传");
     if (content.loginBackgroundAssetId) {
@@ -140,7 +141,7 @@ export async function uploadBrandAsset(sessionId: string, bytes: Buffer, kind: B
 
 export async function getBrandAsset(id: string, sessionId?: string) {
   const settings = await readSiteSettings();
-  if (![settings.logoAssetId, settings.faviconAssetId, settings.loginBackgroundAssetId].includes(id)) {
+  if (![settings.logoAssetId, settings.logoDarkAssetId, settings.faviconAssetId, settings.loginBackgroundAssetId].includes(id)) {
     const current = sessionId ? await getCurrentSession(sessionId) : null;
     if (!current || current.user.mustChangePassword || current.user.role !== "ADMIN") throw new AccountError("图片不存在", 404);
   }
