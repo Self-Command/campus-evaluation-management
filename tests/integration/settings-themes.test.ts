@@ -75,6 +75,7 @@ test("公开设置只暴露品牌白名单，不泄露登录与附件策略", as
     "defaultThemeMode",
     "faviconAssetId",
     "loginBackgroundAssetId",
+    "loginCardBlur",
     "loginNotice",
     "logoAssetId",
     "logoSize",
@@ -88,7 +89,7 @@ test("公开设置只暴露品牌白名单，不泄露登录与附件策略", as
   expect("revision" in value).toBe(false);
 });
 
-test("默认深浅模式、登录公告与登录背景可保存回读，非法值与旧设置回退", async () => {
+test("默认深浅模式、登录公告、登录背景与卡片模糊可保存回读，非法值与旧设置回退", async () => {
   const background = await uploadBrandAsset(sessionId, png, "login-background");
   const before = await readSettings(sessionId);
   const saved = await saveSettings(sessionId, {
@@ -96,29 +97,36 @@ test("默认深浅模式、登录公告与登录背景可保存回读，非法�
     defaultThemeMode: "dark",
     loginNotice: "  测评已开放  ",
     loginBackgroundAssetId: background.id,
+    loginCardBlur: 32,
     revision: before.revision,
     reason: "配置登录页背景与公告",
   });
   expect(saved.defaultThemeMode).toBe("dark");
   expect(saved.loginNotice).toBe("测评已开放");
   expect(saved.loginBackgroundAssetId).toBe(background.id);
+  expect(saved.loginCardBlur).toBe(32);
   const visible = await publicSettings();
   expect(visible.defaultThemeMode).toBe("dark");
   expect(visible.loginBackgroundAssetId).toBe(background.id);
   expect(visible.loginNotice).toBe("测评已开放");
+  expect(visible.loginCardBlur).toBe(32);
   await expect(saveSettings(sessionId, { ...defaultSettings, defaultThemeMode: "sepia", revision: saved.revision, reason: "非法默认模式" })).rejects.toThrow();
   await expect(saveSettings(sessionId, { ...defaultSettings, loginNotice: "字".repeat(201), revision: saved.revision, reason: "公告过长" })).rejects.toThrow();
+  await expect(saveSettings(sessionId, { ...defaultSettings, loginCardBlur: 41, revision: saved.revision, reason: "模糊过强" })).rejects.toThrow();
+  await expect(saveSettings(sessionId, { ...defaultSettings, loginCardBlur: -1, revision: saved.revision, reason: "模糊非法" })).rejects.toThrow();
   await expect(saveSettings(sessionId, { ...defaultSettings, loginBackgroundAssetId: "missing-asset", revision: saved.revision, reason: "背景不存在" })).rejects.toThrow("品牌图片不存在");
   await db.siteSettings.deleteMany({ where: { id: "site" } });
-  const { defaultThemeMode, loginBackgroundAssetId, loginNotice, ...legacy } = defaultSettings;
+  const { defaultThemeMode, loginBackgroundAssetId, loginNotice, loginCardBlur, ...legacy } = defaultSettings;
   void defaultThemeMode;
   void loginBackgroundAssetId;
   void loginNotice;
+  void loginCardBlur;
   await db.siteSettings.create({ data: { id: "site", revision: 9, content: legacy } });
   const read = await readSiteSettings();
   expect(read.defaultThemeMode).toBe("light");
   expect(read.loginBackgroundAssetId).toBeNull();
   expect(read.loginNotice).toBe("");
+  expect(read.loginCardBlur).toBe(24);
 });
 
 test("可保存的主题值全覆盖，未知主题被拒绝", async () => {

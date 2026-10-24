@@ -39,6 +39,7 @@ type SettingsData = {
 	defaultThemeMode: ThemeMode;
 	loginBackgroundAssetId: string | null;
 	loginNotice: string;
+	loginCardBlur: number;
 	loginFailureLimitEnabled: boolean;
 	loginFailureMaxAttempts: number;
 	loginFailureLockMinutes: number;
@@ -140,6 +141,12 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					issues.logoSize = "Logo 显示尺寸需填写16至128的整数。";
 				if (draft.loginNotice.length > 200)
 					issues.loginNotice = "登录公告最多200个字符。";
+				if (
+					!Number.isInteger(draft.loginCardBlur) ||
+					draft.loginCardBlur < 0 ||
+					draft.loginCardBlur > 40
+				)
+					issues.loginCardBlur = "登录卡片模糊需填写0至40的整数。";
 				for (const [key, label, max] of [
 					["loginFailureMaxAttempts", "连续失败次数", 100],
 					["loginFailureLockMinutes", "临时锁定分钟数", 1440],
@@ -189,7 +196,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								? "activity"
 								: first === "logoSize"
 								? "assets"
-								: first === "loginNotice"
+								: first === "loginNotice" || first === "loginCardBlur"
 								? "login"
 								: first === "reason"
 								? tab
@@ -212,6 +219,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										extensions: "settings-attachment-extensions",
 										logoSize: "settings-logo-size",
 										loginNotice: "settings-login-notice",
+										loginCardBlur: "settings-login-card-blur",
 									} as Record<string, string>
 								)[first],
 							)
@@ -232,6 +240,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							defaultThemeMode: draft.defaultThemeMode,
 							loginBackgroundAssetId: draft.loginBackgroundAssetId,
 							loginNotice: draft.loginNotice.trim(),
+							loginCardBlur: draft.loginCardBlur,
 							loginFailureLimitEnabled: draft.loginFailureLimitEnabled,
 							loginFailureMaxAttempts: draft.loginFailureMaxAttempts,
 							loginFailureLockMinutes: draft.loginFailureLockMinutes,
@@ -312,7 +321,19 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								) : (
 									<div className="auth-default-background absolute inset-0" />
 								)}
-								<div className="relative w-full max-w-64 rounded-xl bg-card/95 p-4 text-left shadow-xl ring-1 ring-foreground/10 backdrop-blur">
+								<div
+									className="relative w-full max-w-64 rounded-xl bg-card/80 p-4 text-left shadow-xl ring-1 ring-foreground/10"
+									style={{
+										backdropFilter:
+											draft.loginCardBlur > 0
+												? `blur(${draft.loginCardBlur}px) saturate(140%)`
+												: "saturate(140%)",
+										WebkitBackdropFilter:
+											draft.loginCardBlur > 0
+												? `blur(${draft.loginCardBlur}px) saturate(140%)`
+												: "saturate(140%)",
+									}}
+								>
 									<div className="flex min-w-0 items-center gap-2">
 										{draft.logoAssetId ? (
 											<Image
@@ -685,6 +706,41 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								</FieldDescription>
 								<FieldDescription>
 									背景图公开可见，请勿上传含学生姓名、成绩或证件信息的图片。移除后登录页恢复主题渐变背景。
+								</FieldDescription>
+							</Field>
+							<Separator />
+							<Field data-invalid={!!invalid.loginCardBlur}>
+								<div className="flex flex-wrap items-center justify-between gap-2">
+									<FieldLabel htmlFor="settings-login-card-blur">
+										登录卡片高斯模糊
+									</FieldLabel>
+									<span className="text-muted-foreground text-sm tabular-nums">
+										{draft.loginCardBlur} px
+									</span>
+								</div>
+								<input
+									id="settings-login-card-blur"
+									type="range"
+									min={0}
+									max={40}
+									step={1}
+									value={draft.loginCardBlur}
+									disabled={busy}
+									onChange={(e) =>
+										change("loginCardBlur", Number(e.target.value))
+									}
+									className="w-full cursor-pointer accent-primary disabled:cursor-not-allowed"
+									aria-invalid={!!invalid.loginCardBlur}
+								/>
+								<div className="text-muted-foreground flex justify-between text-[11px]">
+									<span>0 清晰</span>
+									<span>40 最强</span>
+								</div>
+								{invalid.loginCardBlur && (
+									<FieldError>{invalid.loginCardBlur}</FieldError>
+								)}
+								<FieldDescription>
+									高斯模糊强度，默认 24；卡片保持半透明毛玻璃质感，登录页与首次改密页同步生效。
 								</FieldDescription>
 							</Field>
 							<Separator />

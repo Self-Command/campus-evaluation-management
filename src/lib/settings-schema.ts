@@ -7,6 +7,7 @@ export const themePresetSchema = z.enum(themePresetValues);
 export const defaultAttachmentExtensions = ["png", "jpg", "jpeg", "webp", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "txt", "md"] as const;
 
 export const logoSizeSchema = z.number().int().min(16).max(128).default(28);
+export const loginCardBlurSchema = z.number().int().min(0).max(40).default(24);
 export const defaultThemeModeValues = ["light", "dark", "system"] as const;
 export const defaultThemeModeSchema = z.enum(defaultThemeModeValues);
 
@@ -21,6 +22,7 @@ export const settingsSchema = z.object({
   faviconAssetId: z.string().max(100).nullable(),
   loginBackgroundAssetId: z.string().max(100).nullable().default(null),
   loginNotice: z.string().trim().max(200).default(""),
+  loginCardBlur: loginCardBlurSchema,
   loginFailureLimitEnabled: z.boolean().default(false),
   loginFailureMaxAttempts: z.number().int().min(1).max(100).default(5),
   loginFailureLockMinutes: z.number().int().min(1).max(1440).default(15),

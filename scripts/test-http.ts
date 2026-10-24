@@ -163,7 +163,7 @@ async function main() {
     check(accounts.total === 1 && accounts.items[0].id === selfId, "账号角色/状态过滤失败");
     const originalSettings = await admin.json("/api/admin/settings");
     const publicSettings = await anonymous.json("/api/settings/public");
-    check(Object.keys(publicSettings).sort().join(",") === "defaultThemeMode,faviconAssetId,loginBackgroundAssetId,loginNotice,logoAssetId,logoSize,pageTitle,siteDescription,siteName,themePreset", "公开设置未按白名单返回");
+    check(Object.keys(publicSettings).sort().join(",") === "defaultThemeMode,faviconAssetId,loginBackgroundAssetId,loginCardBlur,loginNotice,logoAssetId,logoSize,pageTitle,siteDescription,siteName,themePreset", "公开设置未按白名单返回");
     check(!("revision" in publicSettings) && !("loginFailureLimitEnabled" in publicSettings), "公开设置泄露修订或登录策略");
     const invalidBackground = await admin.fetch("/api/admin/brand-assets", { method: "POST", headers: { "x-file-name": encodeURIComponent("fake.png"), "x-asset-kind": "login-background" }, body: Buffer.from("not an image") });
     check(invalidBackground.status === 400, "伪装成PNG的文本不能作为登录背景");
@@ -172,13 +172,13 @@ async function main() {
     check(backgroundFile.status === 200, `登录背景图片上传失败：${backgroundFile.status} ${backgroundBody.slice(0, 160)}`);
     const backgroundAsset = JSON.parse(backgroundBody);
     function settingsPayload(settings: typeof originalSettings) {
-      return { siteName: settings.siteName, siteDescription: settings.siteDescription, pageTitle: settings.pageTitle, themePreset: settings.themePreset, defaultThemeMode: settings.defaultThemeMode, loginBackgroundAssetId: settings.loginBackgroundAssetId, loginNotice: settings.loginNotice, logoAssetId: settings.logoAssetId, logoSize: settings.logoSize, faviconAssetId: settings.faviconAssetId, loginFailureLimitEnabled: settings.loginFailureLimitEnabled, loginFailureMaxAttempts: settings.loginFailureMaxAttempts, loginFailureLockMinutes: settings.loginFailureLockMinutes, revision: settings.revision };
+      return { siteName: settings.siteName, siteDescription: settings.siteDescription, pageTitle: settings.pageTitle, themePreset: settings.themePreset, defaultThemeMode: settings.defaultThemeMode, loginBackgroundAssetId: settings.loginBackgroundAssetId, loginNotice: settings.loginNotice, loginCardBlur: settings.loginCardBlur, logoAssetId: settings.logoAssetId, logoSize: settings.logoSize, faviconAssetId: settings.faviconAssetId, loginFailureLimitEnabled: settings.loginFailureLimitEnabled, loginFailureMaxAttempts: settings.loginFailureMaxAttempts, loginFailureLockMinutes: settings.loginFailureLockMinutes, revision: settings.revision };
     }
     check(originalSettings.loginFailureLimitEnabled === false, "失败限制必须默认关闭");
     const notice = "HTTP登录公告：请使用学校分配的账号登录。";
-    const updatedSettings = await admin.json("/api/admin/settings", { ...settingsPayload(originalSettings), siteName: "HTTP持久化站点", pageTitle: "HTTP设置保存标题", siteDescription: "保存设置后回读", themePreset: "claude", defaultThemeMode: "dark", loginBackgroundAssetId: backgroundAsset.id, loginNotice: notice, loginFailureLimitEnabled: true, loginFailureMaxAttempts: 2, loginFailureLockMinutes: 1, reason: "验证真实保存及登录限制" }, "PUT");
+    const updatedSettings = await admin.json("/api/admin/settings", { ...settingsPayload(originalSettings), siteName: "HTTP持久化站点", pageTitle: "HTTP设置保存标题", siteDescription: "保存设置后回读", themePreset: "claude", defaultThemeMode: "dark", loginBackgroundAssetId: backgroundAsset.id, loginNotice: notice, loginCardBlur: 28, loginFailureLimitEnabled: true, loginFailureMaxAttempts: 2, loginFailureLockMinutes: 1, reason: "验证真实保存及登录限制" }, "PUT");
     const reread = await admin.json("/api/admin/settings");
-    check(reread.revision === originalSettings.revision + 1 && reread.siteName === updatedSettings.siteName && reread.themePreset === "claude" && reread.defaultThemeMode === "dark" && reread.loginBackgroundAssetId === backgroundAsset.id && reread.loginNotice === notice && reread.loginFailureMaxAttempts === 2 && reread.loginFailureLockMinutes === 1, "设置PUT后GET未持久化全部字段");
+    check(reread.revision === originalSettings.revision + 1 && reread.siteName === updatedSettings.siteName && reread.themePreset === "claude" && reread.defaultThemeMode === "dark" && reread.loginBackgroundAssetId === backgroundAsset.id && reread.loginNotice === notice && reread.loginCardBlur === 28 && reread.loginFailureMaxAttempts === 2 && reread.loginFailureLockMinutes === 1, "设置PUT后GET未持久化全部字段");
     const brandedLogin = await anonymous.page("/login");
     check(brandedLogin.includes("HTTP持久化站点") && brandedLogin.includes("HTTP设置保存标题") && brandedLogin.includes('data-theme-preset="claude"') && brandedLogin.includes('data-theme-mode="dark"') && brandedLogin.includes(notice) && brandedLogin.includes(`/api/brand-assets/${backgroundAsset.id}`), "登录页面未应用最新主题、公告或背景");
     check((await anonymous.fetch(`/api/brand-assets/${backgroundAsset.id}`)).status === 200, "已被引用的登录背景不能匿名读取");

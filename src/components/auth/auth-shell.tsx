@@ -13,6 +13,7 @@ type AuthBrand = {
   logoSize: number;
   loginBackgroundAssetId: string | null;
   loginNotice: string;
+  loginCardBlur: number;
   themePreset: ThemePreset;
   defaultThemeMode: ThemeMode;
 };
@@ -33,6 +34,9 @@ export function AuthShell({
   const hasImage = !!brand.loginBackgroundAssetId;
   const foreground = hasImage ? "text-white" : "text-foreground";
   const muted = hasImage ? "text-white/75" : "text-muted-foreground";
+  const cardFilter = brand.loginCardBlur > 0
+    ? `blur(${brand.loginCardBlur}px) saturate(140%)`
+    : "saturate(140%)";
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div aria-hidden className="absolute inset-0 z-0">
@@ -81,7 +85,10 @@ export function AuthShell({
         />
       </header>
       <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-8 sm:py-10">
-        <Card className="w-full max-w-[27rem] gap-5 rounded-2xl bg-card/95 py-6 shadow-2xl ring-1 ring-foreground/10 backdrop-blur-xl sm:py-7">
+        <Card
+          className="w-full max-w-[27rem] gap-5 rounded-2xl bg-card/80 py-6 shadow-2xl ring-1 ring-foreground/10 sm:py-7"
+          style={{ backdropFilter: cardFilter, WebkitBackdropFilter: cardFilter }}
+        >
           <CardHeader className="gap-1.5 px-6 text-center sm:px-8">
             <span className="text-xs font-medium tracking-[0.2em] text-muted-foreground">统一登录</span>
             <CardTitle className="text-2xl tracking-tight">{title}</CardTitle>

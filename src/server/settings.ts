@@ -36,6 +36,7 @@ export async function publicSettings() {
     faviconAssetId: settings.faviconAssetId,
     loginBackgroundAssetId: settings.loginBackgroundAssetId,
     loginNotice: settings.loginNotice,
+    loginCardBlur: settings.loginCardBlur,
   };
 }
 
