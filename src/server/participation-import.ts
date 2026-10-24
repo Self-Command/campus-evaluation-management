@@ -7,6 +7,7 @@ import { assertActivityManager, eligible } from "@/server/activity-policy";
 import { registerFact } from "@/server/activity-participants";
 import { historyEntry, jsonValue } from "@/server/claims";
 import { duplicateIdentityMessage, loadIdentityIndex } from "@/server/student-identity";
+import { recordAudit } from "@/server/audit";
 
 const rowSchema = z
 	.object({
@@ -522,8 +523,7 @@ export async function commitParticipationImport(
 					baselineRevision: freshActivity.rosterRevision,
 				},
 			});
-			await tx.auditEvent.create({
-				data: {
+			await recordAudit(tx, {
 					actorId,
 					action: "PARTICIPATION_IMPORT_COMMITTED",
 					targetId: id,
@@ -537,8 +537,7 @@ export async function commitParticipationImport(
 						templateVersion: batch.templateVersion,
 						requestId: batch.requestId,
 					},
-				},
-			});
+				});
 			return result;
 		},
 	);

@@ -9,6 +9,7 @@ import { AccountError } from "@/server/account-error";
 import { scopedTransaction, scopedStudentWhere } from "@/server/access-scope";
 import { configuredClass, classProfile, profileSelect, recordStudentAffiliation } from "@/server/organizations";
 import { duplicateIdentityMessage, identityClassKey, loadIdentityIndex, recordIdentityException, type IdentityCandidate } from "@/server/student-identity";
+import { recordAudit } from "@/server/audit";
 export { AccountError } from "@/server/account-error";
 
 const text = z.string().trim().min(1, "此项不能为空").max(80, "最多80个字符");
@@ -96,7 +97,7 @@ export async function createAccount(sessionId: string, input: unknown) {
           reason: data.duplicateReason,
         });
     }
-    await tx.auditEvent.create({ data: { actorId, action: "ACCOUNT_CREATED", targetId: user.id, details: JSON.parse(JSON.stringify({ login: user.login, role: user.role, name: user.name, profile: user.studentProfile, collegeId: user.collegeId, duplicateCandidates: identityCandidates.map(candidate => candidate.login), duplicateReason: data.duplicateReason ?? null })) } });
+    await recordAudit(tx, { actorId, action: "ACCOUNT_CREATED", targetId: user.id, details: JSON.parse(JSON.stringify({ login: user.login, role: user.role, name: user.name, profile: user.studentProfile, collegeId: user.collegeId, duplicateCandidates: identityCandidates.map(candidate => candidate.login), duplicateReason: data.duplicateReason ?? null })) });
     return { user, initialPassword: password };
   });
 }
@@ -296,8 +297,7 @@ async function removeAccountInTransaction(
     const hint = state.blockers.find(item => item.hint)?.hint;
     throw new AccountError(`不能删除：仍有${detail}。${hint ?? "请先处理关联数据"}`, 409);
   }
-  await tx.auditEvent.create({
-    data: {
+  await recordAudit(tx, {
       actorId,
       action: "ACCOUNT_DELETED",
       targetId: user.id,
@@ -307,8 +307,7 @@ async function removeAccountInTransaction(
         before: user,
         cleaned: { profileCount: state.profileCount, affiliationCount: state.affiliationCount, sessionCount: state.sessionCount },
       })),
-    },
-  });
+    });
   await tx.studentAffiliation.deleteMany({ where: { studentId: user.id } });
   await tx.duplicateIdentityException.deleteMany({ where: { OR: [{ studentIdA: user.id }, { studentIdB: user.id }] } });
   await tx.studentProfile.deleteMany({ where: { userId: user.id } });
@@ -405,7 +404,7 @@ export async function updateAccount(sessionId: string, id: string, input: unknow
     }
     if (authChanged) await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     const updated = await tx.user.findUniqueOrThrow({ where: { id }, select: publicSelect });
-    await tx.auditEvent.create({ data: { actorId, action: "ACCOUNT_UPDATED", targetId: id, details: JSON.parse(JSON.stringify({ reason, duplicateCandidates: identityCandidates.map(candidate => candidate.login), duplicateReason: account.duplicateReason ?? null, before: { name: previous.name, role: previous.role, collegeId: previous.collegeId, login: previous.login, disabled: previous.disabled, profile: previous.studentProfile }, after: { name: updated.name, role: updated.role, collegeId: updated.collegeId, login: updated.login, disabled: updated.disabled, profile: updated.studentProfile }, studentCleanup })) } });
+    await recordAudit(tx, { actorId, action: "ACCOUNT_UPDATED", targetId: id, details: JSON.parse(JSON.stringify({ reason, duplicateCandidates: identityCandidates.map(candidate => candidate.login), duplicateReason: account.duplicateReason ?? null, before: { name: previous.name, role: previous.role, collegeId: previous.collegeId, login: previous.login, disabled: previous.disabled, profile: previous.studentProfile }, after: { name: updated.name, role: updated.role, collegeId: updated.collegeId, login: updated.login, disabled: updated.disabled, profile: updated.studentProfile }, studentCleanup })) });
     return updated;
   });
 }
@@ -420,7 +419,7 @@ export async function resetAccountPassword(sessionId: string, id: string, input:
     if (user.revision !== revision) throw new AccountError("账号已被修改，请刷新后重试", 409);
     await tx.user.update({ where: { id }, data: { passwordHash, mustChangePassword: true, authVersion: { increment: 1 }, revision: { increment: 1 } } });
     await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
-    await tx.auditEvent.create({ data: { actorId, action: "PASSWORD_RESET", targetId: id, details: { reason } } });
+    await recordAudit(tx, { actorId, action: "PASSWORD_RESET", targetId: id, details: { reason } });
     return { login: user.login, initialPassword: password };
   });
 }

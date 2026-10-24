@@ -24,6 +24,7 @@ import {
 } from "@/lib/imports/templates";
 import type { ManagementBlocker } from "@/lib/management-types";
 import type { Prisma } from "@/generated/prisma/client";
+import { recordAudit } from "@/server/audit";
 
 export const studentImportFields = ["login", "name", "college", "major", "className"] as const;
 export const staffImportFields = ["login", "name", "collegeCode", "college"] as const;
@@ -719,8 +720,7 @@ export async function commitAccountImport(sessionId: string, id: string, input?:
           },
         });
         await recordStudentAffiliation(tx, user.id, schoolClass, actorId, `账号导入批次${id}`);
-        await tx.auditEvent.create({
-          data: {
+        await recordAudit(tx, {
             actorId,
             action: "ACCOUNT_IMPORTED",
             targetId: user.id,
@@ -733,8 +733,7 @@ export async function commitAccountImport(sessionId: string, id: string, input?:
               requestId: batch.requestId,
               reason: resolution?.reason ?? null,
             },
-          },
-        });
+          });
         createdByLine.set(row.line, {
           id: user.id,
           classKey: identityClassKey({
@@ -759,8 +758,7 @@ export async function commitAccountImport(sessionId: string, id: string, input?:
             passwordHash: secret.passwordHash,
           },
         });
-        await tx.auditEvent.create({
-          data: {
+        await recordAudit(tx, {
             actorId,
             action: "ACCOUNT_IMPORTED",
             targetId: user.id,
@@ -775,8 +773,7 @@ export async function commitAccountImport(sessionId: string, id: string, input?:
               requestId: batch.requestId,
               reason: resolution?.reason ?? null,
             },
-          },
-        });
+          });
         createdByLine.set(row.line, { id: user.id });
       }
       delivered.push({ login: secret.login, initialPassword: secret.initialPassword });
@@ -880,8 +877,7 @@ export async function commitAccountImport(sessionId: string, id: string, input?:
         committedAt: new Date(),
       },
     });
-    await tx.auditEvent.create({
-      data: {
+    await recordAudit(tx, {
         actorId,
         action: "ACCOUNT_IMPORT_COMMITTED",
         targetId: id,
@@ -892,8 +888,7 @@ export async function commitAccountImport(sessionId: string, id: string, input?:
           templateVersion: batch.templateVersion,
           requestId: batch.requestId,
         },
-      },
-    });
+      });
     return { ...result, credentials: delivered, replay: false };
   });
 }
@@ -1180,8 +1175,7 @@ export async function revokeAccountImport(sessionId: string, id: string, input: 
         revokeResult,
       },
     });
-    await tx.auditEvent.create({
-      data: {
+    await recordAudit(tx, {
         actorId,
         action: "ACCOUNT_IMPORT_REVOKED",
         targetId: id,
@@ -1190,8 +1184,7 @@ export async function revokeAccountImport(sessionId: string, id: string, input: 
           targetRole: check.targetRole,
           ...revokeResult,
         })),
-      },
-    });
+      });
     return {
       id,
       replay: false,

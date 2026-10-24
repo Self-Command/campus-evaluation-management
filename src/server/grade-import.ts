@@ -9,6 +9,7 @@ import { decimalSchema } from "@/lib/scoring/types";
 import { jsonValue } from "@/server/claims";
 import { inputHistoryEntry } from "@/server/input-review";
 import { duplicateIdentityMessage, loadIdentityIndex } from "@/server/student-identity";
+import { recordAudit } from "@/server/audit";
 
 const rowsSchema = z.array(z.object({
   login: z.string().trim().max(64),
@@ -155,14 +156,14 @@ export async function commitGradeImport(sessionId: string, termId: string, id: s
         confirmations: [],
         committedAt: new Date(),
       } });
-      await tx.auditEvent.create({ data: { actorId, action: "GRADE_IMPORT_SUBMITTED", targetId: id, details: { termId, nodeId: batch.nodeId, submitted, skipped: result.skipped, fileHash: batch.fileHash, templateVersion: batch.templateVersion, requestId: batch.requestId } } });
+      await recordAudit(tx, { actorId, action: "GRADE_IMPORT_SUBMITTED", targetId: id, details: { termId, nodeId: batch.nodeId, submitted, skipped: result.skipped, fileHash: batch.fileHash, templateVersion: batch.templateVersion, requestId: batch.requestId } });
       return { ...result, replay: false };
     }
     let written = 0;
     for (const row of changed) {
       const student = preview.known.get(row.login)!, previous = preview.previous.get(student.id);
       const saved = previous ? await tx.gradeInput.update({ where: { id: previous.id }, data: { value: row.value, revision: { increment: 1 } } }) : await tx.gradeInput.create({ data: { termId, studentId: student.id, nodeId: batch.nodeId, value: row.value } });
-      await tx.auditEvent.create({ data: { actorId, action: "GRADE_IMPORTED", targetId: saved.id, details: { termId, batchId: id, studentId: student.id, nodeId: batch.nodeId, before: row.before, after: row.value, reason: batch.reason } } });
+      await recordAudit(tx, { actorId, action: "GRADE_IMPORTED", targetId: saved.id, details: { termId, batchId: id, studentId: student.id, nodeId: batch.nodeId, before: row.before, after: row.value, reason: batch.reason } });
       written++;
     }
     const result = { written, skipped: preview.rows.length - written };
@@ -174,7 +175,7 @@ export async function commitGradeImport(sessionId: string, termId: string, id: s
       confirmations: [],
       committedAt: new Date(),
     } });
-    await tx.auditEvent.create({ data: { actorId, action: "GRADE_IMPORT_COMMITTED", targetId: id, details: { ...result, termId, fileHash: batch.fileHash, templateVersion: batch.templateVersion, requestId: batch.requestId } } });
+    await recordAudit(tx, { actorId, action: "GRADE_IMPORT_COMMITTED", targetId: id, details: { ...result, termId, fileHash: batch.fileHash, templateVersion: batch.templateVersion, requestId: batch.requestId } });
     return { ...result, replay: false };
   });
 }

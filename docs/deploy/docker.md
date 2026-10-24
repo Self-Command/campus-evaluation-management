@@ -7,7 +7,7 @@
 | 交付物 | 说明 |
 | --- | --- |
 | `ghcr.io/self-command/campus-evaluation-management:latest` | 最新正式标签 |
-| `ghcr.io/self-command/campus-evaluation-management:<version>` | 语义化版本，如 `0.2.5` |
+| `ghcr.io/self-command/campus-evaluation-management:<version>` | 语义化版本，如 `0.3.0` |
 | `ghcr.io/self-command/campus-evaluation-management:sha-<short>` | 对应提交的不可变标签 |
 | `campus-evaluation-image-amd64` | Actions 离线产物，含 `docker save` 压缩包与 SHA-256 |
 | `compose.yaml` | 应用 + PostgreSQL 编排文件 |
@@ -66,7 +66,7 @@ POSTGRES_USER=campus
 POSTGRES_PASSWORD=<24 位以上随机字符串>
 NEXTAUTH_SECRET=<32 字节以上随机值>
 NEXTAUTH_URL=https://evaluation.example.edu.cn
-APP_IMAGE=ghcr.io/self-command/campus-evaluation-management:0.2.5
+APP_IMAGE=ghcr.io/self-command/campus-evaluation-management:0.3.0
 APP_BIND_ADDRESS=127.0.0.1
 APP_PORT=3200
 RUN_MIGRATIONS=true
@@ -154,7 +154,7 @@ docker run -d --name campus-db \
 ```bash
 docker run --rm --network campus-evaluation \
   -e DATABASE_URL="postgresql://campus:${POSTGRES_PASSWORD}@campus-db:5432/campus" \
-  ghcr.io/self-command/campus-evaluation-management:0.2.5 migrate
+  ghcr.io/self-command/campus-evaluation-management:0.3.0 migrate
 ```
 
 启动应用：
@@ -176,7 +176,7 @@ docker run -d --name campus-app \
   -e TZ=Asia/Shanghai \
   -v campus-evidence:/data/evidence \
   -v campus-attachments:/data/activity-attachments \
-  ghcr.io/self-command/campus-evaluation-management:0.2.5
+  ghcr.io/self-command/campus-evaluation-management:0.3.0
 ```
 
 镜像自带健康检查。连接外部托管数据库时，删除 `campus-db` 相关步骤，并把 `DATABASE_URL` 指向实际数据库；托管数据库需允许应用服务器访问并启用 TLS（按供应商要求附加连接参数）。
@@ -252,7 +252,7 @@ server {
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     add_header X-Frame-Options SAMEORIGIN always;
 
-    client_max_body_size 25m;
+    client_max_body_size 70m;
     proxy_connect_timeout 10s;
     proxy_read_timeout 120s;
     proxy_send_timeout 120s;
@@ -316,6 +316,8 @@ certbot renew --deploy-hook "systemctl reload nginx"
 | `APP_TRUSTED_ORIGINS` | 否 | — | 额外可信来源，逗号分隔 |
 | `EVIDENCE_DIR` | 否 | `/data/evidence` | 证明目录 |
 | `ACTIVITY_ATTACHMENT_DIR` | 否 | `/data/activity-attachments` | 附件目录 |
+| `BACKUP_DIR` | 否 | `/data/backups`（Compose） | 应用内备份文件、上传暂存和恢复报告目录 |
+| `BACKUP_MAX_BYTES` | 否 | `2147483648` | 允许上传的备份大小上限，应用硬上限 2 GiB |
 
 生成密钥：
 
@@ -352,9 +354,23 @@ docker compose --env-file .env.docker logs --tail=100 app
 3. 将 `.env.docker` 的 `APP_IMAGE` 改为上一版本标签。
 4. 启动应用并检查 `ready`。
 
+若上次数据库恢复未完成，入口脚本会跳过自动迁移和管理员初始化，应用以维护模式启动；先按 10.3 处理恢复状态，不要直接删除状态文件或数据卷。
+
 ## 10. 备份与恢复
 
+系统内置“数据库备份”页面，管理员可创建、下载、上传备份，并在真实候选库预检后整库恢复。备份文件保存在 `BACKUP_DIR`（Compose 为 `backup-data` 卷），应用镜像已安装 PostgreSQL 18 客户端。内置恢复使用 `CREATE DATABASE`、`ALTER DATABASE ... RENAME` 和 `DROP DATABASE`，因此数据库账号需要 `CREATEDB` 权限并拥有目标数据库；Compose 内置数据库使用 `POSTGRES_USER`，默认满足。使用外部 PostgreSQL 时，请提前授予应用账号同等权限，否则预检会明确拒绝。
+
+内置备份与恢复的边界：
+
+- 备份是 PostgreSQL custom 格式 dump，只包含数据库，不含证明与活动附件文件。
+- 上传备份时浏览器按 8 MiB 分块发送，反向代理 `client_max_body_size` 至少 70m；单文件上限由 `BACKUP_MAX_BYTES` 控制，应用硬上限 2 GiB。
+- 恢复前必须通过候选库真实还原、迁移前缀/校验和、管理员可用性、行数与文件风险检查；预检后当前库再发生写入会使指纹失效，需要重新预检。
+- 恢复确认后站点进入维护模式，只有维护页和恢复状态接口可访问；恢复完成后清空会话、递增所有账号会话版本，所有用户必须重新登录。
+- 恢复失败或切换后校验失败时按状态机回滚；旧数据库、安全快照和恢复报告保留期由“日志与备份保留策略”控制。
+
 ### 10.1 数据库
+
+管理员可直接在页面创建备份并下载到独立存储。需要命令行备份时：
 
 ```bash
 install -d -m 0700 /srv/campus-evaluation/backups
@@ -373,6 +389,7 @@ Compose 项目名固定为 `campus-evaluation`，卷名为：
 - `campus-evaluation_db-data`
 - `campus-evaluation_evidence-data`
 - `campus-evaluation_attachments-data`
+- `campus-evaluation_backup-data`
 
 ```bash
 docker run --rm \
@@ -390,6 +407,15 @@ docker run --rm \
 
 ### 10.3 恢复
 
+优先使用页面内置恢复：
+
+1. 在“数据库备份”选择目标备份，填写恢复理由并输入当前密码，执行预检。
+2. 阅读影响报告：迁移前缀与校验和、各表行数、管理员账号、设置差异、附件缺失/孤儿风险。
+3. 输入确认短语和备份内可用管理员登录名，开始恢复；站点进入维护模式。
+4. 完成后使用备份时的管理员凭据重新登录，检查成绩、设置、附件下载与操作日志；确认无误后再通知用户。
+
+应用无法启动或需要整机迁移时，才使用命令行恢复：
+
 1. 停止应用写入：`docker compose --env-file .env.docker stop app`。
 2. 将当前数据库与卷再做一次快照，防止恢复失败后无法回退。
 3. 恢复数据库（示例；会覆盖现有对象，务必确认目标库）：
@@ -403,6 +429,8 @@ docker compose --env-file .env.docker exec -T db \
 4. 将附件与证明恢复到对应卷。恢复前确认卷没有被其他项目使用。
 5. 启动应用：`docker compose --env-file .env.docker start app`。
 6. 检查 `live`、`ready`、登录、学生成绩页和附件下载。
+
+如果上次内置恢复没有完成，入口脚本会读取 `BACKUP_DIR/restore-state.json`，在状态未终结时跳过自动迁移和管理员初始化，应用以维护模式启动。此时不要删除状态文件或数据卷；按恢复报告的人工指引处理，确认数据库可用后再由管理员完成或回滚恢复。
 
 不要在生产库直接执行 `prisma migrate reset`、`DROP DATABASE` 或删除数据卷。
 
@@ -433,7 +461,9 @@ docker compose --env-file .env.docker exec -T db \
 | `ready` 返回 503 | 数据库不可达、`User` 表不存在或存在未完成迁移；查看 `app` 与 `db` 日志 |
 | Nginx 502 | 应用未启动、绑定地址/端口不一致，或 `APP_PORT` 与 Nginx `proxy_pass` 不一致 |
 | 登录回调错误或登录后立即掉线 | `NEXTAUTH_URL` 与浏览器地址不一致；检查 `X-Forwarded-Proto` 和 HTTPS |
-| 上传返回 413 | Nginx `client_max_body_size` 小于应用限制；同时检查附件大小设置 |
+| 上传返回 413 | Nginx `client_max_body_size` 至少 70m；备份上传按 8 MiB 分块，附件单个上限由附件设置控制 |
+| 恢复后打开页面只显示维护页 | 上次恢复未终结；查看 `BACKUP_DIR/restore-state.json` 与恢复报告，完成后由管理员解除，不要直接删状态文件 |
+| 恢复预检提示缺少权限 | 外部 PostgreSQL 的应用账号需要 `CREATEDB` 且拥有目标数据库；内置 Compose 使用 `POSTGRES_USER`，通常无需额外授权 |
 | 附件 404 / 权限错误 | 卷未挂载、挂载点错误，或多副本未共享同一存储 |
 | 数据库密码含特殊字符导致连接失败 | 改用十六进制随机密码，或在 `DATABASE_URL` 中正确 URL 编码 |
 | `prisma: not found` | 使用了自定义 ENTRYPOINT/CMD 覆盖镜像入口；恢复镜像默认启动方式 |

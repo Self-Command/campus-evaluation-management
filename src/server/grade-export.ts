@@ -7,6 +7,7 @@ import { scopedStudentWhere } from "@/server/access-scope";
 import { buildClassSheet } from "@/lib/xlsx/class-sheet";
 import { buildMultiSheetWorkbook } from "@/lib/xlsx/workbook";
 import { loadLiveGradeStudents, loadPublishedGradeStudents, resolveExportSnapshot } from "@/server/grade-export-data";
+import { recordAudit } from "@/server/audit";
 
 // Authorized single-student detail workbook. Scope is resolved from the stored class /
 // counselor / college relations, never from request parameters. For a published/locked
@@ -48,8 +49,7 @@ export async function exportStudentGradeWorkbook(sessionId: string, termId: stri
       }],
     });
     const buffer = buildMultiSheetWorkbook([sheets.detail, sheets.rules]);
-    await tx.auditEvent.create({
-      data: {
+    await recordAudit(tx, {
         actorId,
         action: "GRADE_STATEMENT_EXPORTED",
         targetId: studentId,
@@ -60,8 +60,7 @@ export async function exportStudentGradeWorkbook(sessionId: string, termId: stri
           publicationSequence: snapshot.publicationSequence,
           sha256: createHash("sha256").update(buffer).digest("hex"),
         },
-      },
-    });
+      });
     const safe = (value: string) => value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
     const fileName = `成绩明细表_${safe(term.name)}_${safe(row.name)}_${safe(row.login)}_${snapshot.published ? "正式发布" : "当前阶段"}_${exportDateText()}.xlsx`;
     return { buffer, fileName, studentName: row.name, studentLogin: row.login, published: snapshot.published };

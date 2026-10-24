@@ -12,6 +12,7 @@ import { EXPORT_TRANSACTION_TIMEOUT_MS, assertExportCapacity } from "@/server/ex
 import { ranked } from "@/server/results";
 import { publicationSelect } from "@/server/publications";
 import { loadAllPublishedGradeStudents } from "@/server/grade-export-data";
+import { recordAudit } from "@/server/audit";
 
 const filterSchema = z.object({
   publicationId: z.string().max(100).optional(),
@@ -110,8 +111,7 @@ export async function exportRankingGradeWorkbook(sessionId: string, termId: stri
     })),
   });
   const buffer = buildMultiSheetWorkbook([sheets.detail, sheets.rules]);
-  await db.auditEvent.create({
-    data: {
+  await recordAudit(db, {
       actorId: job.actorId,
       action: "GRADE_DETAIL_EXPORTED",
       targetId: job.publication.id,
@@ -125,8 +125,7 @@ export async function exportRankingGradeWorkbook(sessionId: string, termId: stri
         publicationSequence: job.publication.sequence,
         sha256: createHash("sha256").update(buffer).digest("hex"),
       },
-    },
-  });
+    });
   const safe = (value: string) => value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
   const fileName = `成绩明细表_全校_${safe(job.termName)}_正式发布_${exportDateText()}.xlsx`;
   return { buffer, fileName, count: job.rows.length, batchLabel };

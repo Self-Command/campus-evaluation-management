@@ -5,6 +5,7 @@ import { adminTransaction, AccountError } from "@/server/accounts";
 import { getCurrentSession } from "@/server/auth";
 import { jsonValue } from "@/server/claims";
 import { settingsSchema, storedSettingsSchema, defaultSettings } from "@/lib/settings-schema";
+import { recordAudit } from "@/server/audit";
 
 export { settingsSchema, defaultSettings } from "@/lib/settings-schema";
 
@@ -68,7 +69,7 @@ export async function saveSettings(sessionId: string, input: unknown) {
     const saved = await tx.siteSettings.upsert({ where: { id: "site" }, create: { content: jsonValue(content), revision: 1 }, update: { content: jsonValue(content), revision: { increment: 1 } } });
     const oldPolicy = previous ? storedSettingsSchema.parse(previous.content) : defaultSettings;
     if (oldPolicy.loginFailureLimitEnabled !== content.loginFailureLimitEnabled || oldPolicy.loginFailureMaxAttempts !== content.loginFailureMaxAttempts || oldPolicy.loginFailureLockMinutes !== content.loginFailureLockMinutes) await tx.loginFailureState.deleteMany();
-    await tx.auditEvent.create({ data: { actorId, action: "SETTINGS_CHANGED", targetId: "site", details: { reason, before: previous?.content ?? defaultSettings, after: content, revision: saved.revision } } });
+    await recordAudit(tx, { actorId, action: "SETTINGS_CHANGED", targetId: "site", details: { reason, before: previous?.content ?? defaultSettings, after: content, revision: saved.revision } });
     return { ...content, revision: saved.revision, updatedAt: saved.updatedAt };
   });
 }
@@ -134,7 +135,7 @@ export async function uploadBrandAsset(sessionId: string, bytes: Buffer, kind: B
   return adminTransaction(sessionId, async (tx, actorId) => {
     if (await tx.brandAsset.count() >= 200) throw new AccountError("品牌图片数量已达上限，请复用已上传的图片", 409);
     const asset = await tx.brandAsset.create({ data: { mime, size: bytes.length, bytes: new Uint8Array(bytes), sha256: createHash("sha256").update(bytes).digest("hex") }, select: { id: true, mime: true, size: true } });
-    await tx.auditEvent.create({ data: { actorId, action: "BRAND_ASSET_UPLOADED", targetId: asset.id, details: { kind, mime, size: bytes.length } } });
+    await recordAudit(tx, { actorId, action: "BRAND_ASSET_UPLOADED", targetId: asset.id, details: { kind, mime, size: bytes.length } });
     return asset;
   });
 }

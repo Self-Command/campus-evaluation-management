@@ -5,6 +5,7 @@ import { termTransaction } from "@/server/terms";
 import { appendHistory, historyEntry } from "@/server/claims";
 import { canManageActivity } from "@/server/activity-policy";
 import { scopedStudentWhere } from "@/server/access-scope";
+import { recordAudit } from "@/server/audit";
 
 export const recognitionStatusSchema = z.enum([
 	"PENDING_COUNSELOR",
@@ -331,8 +332,7 @@ export async function reviewParticipation(
 					where: { id: termId },
 					data: { inputRevision: { increment: 1 } },
 				});
-			await tx.auditEvent.create({
-				data: {
+			await recordAudit(tx, {
 					actorId,
 					action: "PARTICIPATION_REVIEWED",
 					targetId: source.id,
@@ -345,8 +345,7 @@ export async function reviewParticipation(
 						activityId: source.participation.activityId,
 						studentId: source.participation.studentId,
 					},
-				},
-			});
+				});
 			return saved;
 		},
 	);
@@ -621,8 +620,7 @@ export async function changeParticipation(
 					where: { id: source.participationId },
 					data: { revision: { increment: 1 } },
 				});
-				await tx.auditEvent.create({
-					data: {
+				await recordAudit(tx, {
 						actorId,
 						action: "PARTICIPATION_CHANGED",
 						targetId: source.id,
@@ -633,8 +631,7 @@ export async function changeParticipation(
 							after: "PENDING_COUNSELOR",
 							reason: data.reason ?? null,
 						},
-					},
-				});
+					});
 				return saved;
 			}
 			if (!data.reason) throw new AccountError("请填写移除理由");
@@ -694,8 +691,7 @@ export async function changeParticipation(
 					where: { id: termId },
 					data: { inputRevision: { increment: 1 } },
 				});
-			await tx.auditEvent.create({
-				data: {
+			await recordAudit(tx, {
 					actorId,
 					action: "PARTICIPATION_CHANGED",
 					targetId: source.id,
@@ -705,8 +701,7 @@ export async function changeParticipation(
 						reason: data.reason,
 						approved,
 					},
-				},
-			});
+				});
 			return source;
 		},
 	);

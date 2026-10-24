@@ -10,6 +10,7 @@ import { EXPORT_TRANSACTION_TIMEOUT_MS, MAX_EXPORT_COLLEGES, MAX_EXPORT_STUDENTS
 import { buildClassSheet } from "@/lib/xlsx/class-sheet";
 import { buildMultiSheetWorkbook } from "@/lib/xlsx/workbook";
 import { loadLiveGradeStudents, loadPublishedGradeStudents, resolveExportSnapshot, type GradeExportStudent } from "@/server/grade-export-data";
+import { recordAudit } from "@/server/audit";
 
 // School-style detail export. Scope is resolved from the stored class / counselor /
 // college relations. A counselor can choose one or more of their classes, a college can
@@ -146,8 +147,7 @@ export async function exportClassGradeWorkbook(sessionId: string, termId: string
     })),
   });
   const buffer = buildMultiSheetWorkbook([sheets.detail, sheets.rules]);
-  await db.auditEvent.create({
-    data: {
+  await recordAudit(db, {
       actorId: job.actorId,
       action: "GRADE_DETAIL_EXPORTED",
       targetId: job.snapshot.publicationId ?? termId,
@@ -162,8 +162,7 @@ export async function exportClassGradeWorkbook(sessionId: string, termId: string
         publicationSequence: job.snapshot.publicationSequence,
         sha256: createHash("sha256").update(buffer).digest("hex"),
       },
-    },
-  });
+    });
   const fileName = `成绩明细表_${safe(job.scope.fileLabel)}_${job.snapshot.published ? "正式发布" : "当前阶段"}_${exportDateText()}.xlsx`;
   return { buffer, fileName, count: job.rows.length, published: job.snapshot.published, batchLabel: job.snapshot.batchLabel };
 }

@@ -14,6 +14,9 @@ import {
 	Trophy,
 	Send,
 	Building2,
+	ScrollText,
+	Database,
+	Paperclip,
 	type LucideIcon,
 } from "lucide-react";
 import type { AppRole } from "@/lib/business-labels";
@@ -271,8 +274,36 @@ export function navigation(role: AppRole): NavGroup[] {
 					},
 				]
 			: []),
+		...(role === "ADMIN"
+			? [
+					{
+						id: 4,
+						label: "安全与运维",
+						items: [
+							{
+								id: "audit-logs",
+								title: "操作日志",
+								url: "/audit-logs",
+								icon: ScrollText,
+							},
+							{
+								id: "backups",
+								title: "数据库备份",
+								url: "/backups",
+								icon: Database,
+							},
+							{
+								id: "attachments",
+								title: "附件管理",
+								url: "/attachments",
+								icon: Paperclip,
+							},
+						],
+					},
+				]
+			: []),
 		{
-			id: 4,
+			id: 5,
 			label: "个人与系统",
 			items: [
 				...(role === "STUDENT"

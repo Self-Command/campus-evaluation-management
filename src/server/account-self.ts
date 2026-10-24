@@ -2,6 +2,7 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { AccountError } from "@/server/accounts";
 import { profileSelect } from "@/server/organizations";
+import { recordAudit } from "@/server/audit";
 
 const select = { id: true, login: true, name: true, role: true, collegeId: true, college: { select: { id: true, code: true, name: true, enabled: true } }, mustChangePassword: true, revision: true, createdAt: true, studentProfile: { select: profileSelect } } as const;
 export async function selfAccount(sessionId: string, input?: unknown) {
@@ -15,7 +16,7 @@ export async function selfAccount(sessionId: string, input?: unknown) {
       if (session.user.revision !== data.revision) throw new AccountError("账号信息已变化，请刷新后核对", 409);
       if (data.name !== session.user.name) {
         await tx.user.update({ where: { id: session.userId }, data: { name: data.name, revision: { increment: 1 } } });
-        await tx.auditEvent.create({ data: { actorId: session.userId, action: "SELF_ACCOUNT_UPDATED", targetId: session.userId, details: { before: { name: session.user.name }, after: { name: data.name } } } });
+        await recordAudit(tx, { actorId: session.userId, action: "SELF_ACCOUNT_UPDATED", targetId: session.userId, details: { before: { name: session.user.name }, after: { name: data.name } } });
       }
     }
     return tx.user.findUniqueOrThrow({ where: { id: session.userId }, select });

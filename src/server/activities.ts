@@ -10,6 +10,7 @@ import type { Activity, Prisma } from "@/generated/prisma/client";
 import { activityAudience, assertActivityManager, audienceFields, audienceSchema, canManageActivity, classKey, emptyAudience, inspectAudience, normalizeAudience, studentEligibleWhere, studentFeedWhere } from "@/server/activity-policy";
 import { scopedStudentWhere } from "@/server/access-scope";
 import { bindActivityAttachments, listActivityAttachments, type AttachmentView } from "@/server/activity-attachments";
+import { recordAudit } from "@/server/audit";
 const phases = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"] as const;
 const activitySchema = z.object({ name: z.string().trim().min(1).max(120), organizer: z.string().trim().min(1).max(120), content: z.string().trim().min(1).max(20000), startsAt: z.iso.datetime(), endsAt: z.iso.datetime(), nodeId: z.string().min(1).max(100), points: decimalSchema, audience: audienceSchema.default(emptyAudience), collegeId: z.string().min(1).max(100).optional() });
 const ownEvidenceInclude = { sources: { include: { evidence: { select: { evidence: { select: { id: true, name: true, mime: true, size: true } } } } } } } as const;
@@ -151,8 +152,7 @@ export async function endActivity(
 					where: { id: activity.id },
 					data: { endedAt: now, revision: { increment: 1 } },
 				});
-				await tx.auditEvent.create({
-					data: {
+				await recordAudit(tx, {
 						actorId,
 						action: "ACTIVITY_ENDED",
 						targetId: activity.id,
@@ -161,8 +161,7 @@ export async function endActivity(
 							plannedEndsAt: activity.endsAt,
 							endedAt: now,
 						},
-					},
-				});
+					});
 				return activityView(saved, actor.role, null, { canManage: true });
 			}
 			if (!activity.endedAt)
@@ -175,8 +174,7 @@ export async function endActivity(
 				where: { id: activity.id },
 				data: { endedAt: null, revision: { increment: 1 } },
 			});
-			await tx.auditEvent.create({
-				data: {
+			await recordAudit(tx, {
 					actorId,
 					action: "ACTIVITY_REOPENED",
 					targetId: activity.id,
@@ -185,8 +183,7 @@ export async function endActivity(
 						plannedEndsAt: activity.endsAt,
 						reopenedAt: now,
 					},
-				},
-			});
+				});
 			return activityView(saved, actor.role, null, { canManage: true });
 		},
 	);
@@ -214,7 +211,7 @@ export async function saveActivity(sessionId: string, termId: string, input: unk
     const withdraw = !!previous?.publishedAt && (changed || scoringChanged);
     const saved = previous ? await tx.activity.update({ where: { id: previous.id }, data: { ...fields, ...audienceFields(audience), ...(withdraw ? { publishedAt: null, publishRevision: { increment: 1 } } : {}), revision: { increment: 1 } } }) : await tx.activity.create({ data: { ...fields, ...audienceFields(audience), termId, ownerId: actorId, collegeId } });
     if (data.attachmentIds.length) await bindActivityAttachments(tx, saved.id, actorId, data.attachmentIds);
-    await tx.auditEvent.create({ data: { actorId, action: previous ? "ACTIVITY_UPDATED" : "ACTIVITY_CREATED", targetId: saved.id, details: { termId, collegeId, revision: saved.revision, scopeChanged: changed, scoringChanged, publicationWithdrawn: withdraw, ...(changed ? { beforeAudience: activityAudience(previous), afterAudience: audience } : {}), ...(scoringChanged ? { beforeNodeId: previous!.nodeId, afterNodeId: saved.nodeId, beforePoints: previous!.points.toFixed(), afterPoints: saved.points.toFixed() } : {}), ...(withdraw ? { publishRevision: saved.publishRevision } : {}) } } });
+    await recordAudit(tx, { actorId, action: previous ? "ACTIVITY_UPDATED" : "ACTIVITY_CREATED", targetId: saved.id, details: { termId, collegeId, revision: saved.revision, scopeChanged: changed, scoringChanged, publicationWithdrawn: withdraw, ...(changed ? { beforeAudience: activityAudience(previous), afterAudience: audience } : {}), ...(scoringChanged ? { beforeNodeId: previous!.nodeId, afterNodeId: saved.nodeId, beforePoints: previous!.points.toFixed(), afterPoints: saved.points.toFixed() } : {}), ...(withdraw ? { publishRevision: saved.publishRevision } : {}) } });
     return activityView(saved, actor.role, null, { canManage: true, college, attachments: await listActivityAttachments(tx, saved.id) });
   });
 }
@@ -229,7 +226,7 @@ export async function reassignActivity(sessionId: string, termId: string, input:
     if (activity.collegeId === college.id) return activityView(activity, "ADMIN", null, { canManage: true, college });
     const before = activity.collegeId ? await tx.college.findUnique({ where: { id: activity.collegeId }, select: { id: true, name: true } }) : null;
     const saved = await tx.activity.update({ where: { id: activity.id }, data: { collegeId: college.id, revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "ACTIVITY_HOST_REASSIGNED", targetId: activity.id, details: { termId, reason: data.reason, before, after: { id: college.id, name: college.name }, rosterRevision: activity.rosterRevision } } });
+    await recordAudit(tx, { actorId, action: "ACTIVITY_HOST_REASSIGNED", targetId: activity.id, details: { termId, reason: data.reason, before, after: { id: college.id, name: college.name }, rosterRevision: activity.rosterRevision } });
     return activityView(saved, "ADMIN", null, { canManage: true, college });
   });
 }
@@ -249,7 +246,7 @@ export async function publishActivity(sessionId: string, termId: string, input: 
       audienceCount = inspected.count;
     } else if (!data.reason) throw new AccountError("请填写撤回发布的理由");
     const saved = await tx.activity.update({ where: { id: activity.id }, data: { confirmed: data.action === "publish" ? true : activity.confirmed, publishedAt: data.action === "publish" ? new Date() : null, publishRevision: { increment: 1 }, revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: data.action === "publish" ? "ACTIVITY_PUBLISHED" : "ACTIVITY_UNPUBLISHED", targetId: activity.id, details: { termId, publishRevision: saved.publishRevision, nodeId: saved.nodeId, points: saved.points.toFixed(), audience: activityAudience(activity), audienceCount, reason: data.reason ?? null } } });
+    await recordAudit(tx, { actorId, action: data.action === "publish" ? "ACTIVITY_PUBLISHED" : "ACTIVITY_UNPUBLISHED", targetId: activity.id, details: { termId, publishRevision: saved.publishRevision, nodeId: saved.nodeId, points: saved.points.toFixed(), audience: activityAudience(activity), audienceCount, reason: data.reason ?? null } });
     return activityView(saved, actor.role, null, { canManage: true });
   });
 }

@@ -9,6 +9,7 @@ import { Rational } from "@/lib/scoring/rational";
 import { jsonValue } from "@/server/claims";
 import { issueFlowToken, verifyFlowToken, stateDigest } from "@/server/flow-token";
 import { schemeReferences, schemeReferenceErrors } from "@/server/scheme-references";
+import { recordAudit } from "@/server/audit";
 
 const correctionSchema = z.object({ action: z.enum(["preview", "commit"]), kind: z.enum(["scheme", "activity", "project"]), revision: z.number().int().nonnegative().optional(), reason: z.string().trim().min(2).max(1000).optional(), token: z.string().max(4000).optional(), id: z.string().optional(), scheme: schemeSchema.optional(), nodeId: z.string().optional(), points: decimalSchema.optional() });
 async function impactedStudents(tx: Prisma.TransactionClient, term: Term) {
@@ -68,7 +69,7 @@ export async function correctScoring(sessionId: string, termId: string, input: u
     if (override.activity) { const { id, ...fields } = override.activity; await tx.activity.update({ where: { id }, data: { ...fields, revision: { increment: 1 } } }); }
     if (override.project) { const { id, ...fields } = override.project; await tx.recognitionProject.update({ where: { id }, data: { ...fields, revision: { increment: 1 } } }); }
     const updated = await tx.term.update({ where: { id: termId }, data: { ...(data.kind === "scheme" ? { scheme: jsonValue(nextTerm.scheme) } : {}), revision: { increment: 1 }, inputRevision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "SCORING_CORRECTED", targetId: data.id ?? termId, details: jsonValue({ termId, kind: data.kind, reason: data.reason, original, next: data.kind === "scheme" ? nextTerm.scheme : override, changes, beforeRevision: term.revision, afterRevision: updated.revision }) } });
+    await recordAudit(tx, { actorId, action: "SCORING_CORRECTED", targetId: data.id ?? termId, details: jsonValue({ termId, kind: data.kind, reason: data.reason, original, next: data.kind === "scheme" ? nextTerm.scheme : override, changes, beforeRevision: term.revision, afterRevision: updated.revision }) });
     return { revision: updated.revision, affectedStudents: changes.length, changes };
   });
 }

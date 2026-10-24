@@ -7,6 +7,8 @@ import { schoolScheme } from "@/lib/scoring/template";
 import { nodeSchema, schemeSchema } from "@/lib/scoring/types";
 import type { Prisma, TermPhase } from "@/generated/prisma/client";
 import { schemeReferences, schemeReferenceErrors } from "@/server/scheme-references";
+import { recordAudit } from "@/server/audit";
+import { termAuditAction } from "@/server/audit-actions";
 
 export async function termTransaction<T>(sessionId: string, termId: string, roles: string[], phases: TermPhase[], operation: (tx: Prisma.TransactionClient, term: Awaited<ReturnType<typeof db.term.findUniqueOrThrow>>, actorId: string) => Promise<T>, mode: "read" | "write" | "manage" = "write", options: { timeout?: number } = {}) {
   return db.$transaction(async tx => {
@@ -43,7 +45,7 @@ export async function createTerm(sessionId: string, input: unknown) {
     const scheme = source?.scheme ?? (data.template ? schoolScheme() : { nodes: [nodeSchema.parse({ id: "total", parentId: null, name: "综合测评成绩", kind: "ACTIVITY", order: 0, maximum: "9999999999" })], deductions: [] });
     validateScheme(scheme);
     const term = await tx.term.create({ data: { name: data.name, scheme } });
-    await tx.auditEvent.create({ data: { actorId, action: "TERM_CREATED", targetId: term.id, details: { name: term.name, sourceTermId: source?.id ?? null } } });
+    await recordAudit(tx, { actorId, action: "TERM_CREATED", targetId: term.id, details: { name: term.name, sourceTermId: source?.id ?? null } });
     return term;
   });
 }
@@ -110,7 +112,7 @@ export async function manageTerm(sessionId: string, termId: string, input: unkno
       if (await tx.term.count({ where: { id: { not: termId }, name: { equals: nextName, mode: "insensitive" }, disposition: "NORMAL" } })) throw new AccountError("已有同名正常周期，请先更正名称", 409);
     }
     const saved = await tx.term.update({ where: { id: termId }, data: { ...(data.action === "rename" ? { name: data.name } : { disposition, dispositionReason: data.reason, dispositionAt: new Date() }), revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: `TERM_${data.action.toUpperCase()}`, targetId: termId, details: { reason: data.reason, before: { name: term.name, disposition: term.disposition, revision: term.revision }, after: { name: saved.name, disposition: saved.disposition, revision: saved.revision }, usage } } });
+    await recordAudit(tx, { actorId, action: termAuditAction(data.action), targetId: termId, details: { reason: data.reason, before: { name: term.name, disposition: term.disposition, revision: term.revision }, after: { name: saved.name, disposition: saved.disposition, revision: saved.revision }, usage } });
     return { ...saved, usage, ...capabilities(saved, usage) };
   }, "manage");
 }
@@ -122,7 +124,7 @@ export async function saveScheme(sessionId: string, termId: string, input: unkno
     const errors = schemeReferenceErrors(scheme, await schemeReferences(tx, termId));
     if (errors.length) throw new AccountError(errors.join("；"), 409);
     const updated = await tx.term.update({ where: { id: termId }, data: { scheme, revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "SCHEME_SAVED", targetId: termId, details: { beforeRevision: term.revision, afterRevision: updated.revision } } });
+    await recordAudit(tx, { actorId, action: "SCHEME_SAVED", targetId: termId, details: { beforeRevision: term.revision, afterRevision: updated.revision } });
     return updated;
   });
 }
@@ -134,7 +136,7 @@ export async function activateTerm(sessionId: string, termId: string, input: unk
     const errors = schemeReferenceErrors(scheme, await schemeReferences(tx, termId));
     if (errors.length) throw new AccountError(errors.join("；"), 409);
     const updated = await tx.term.update({ where: { id: termId }, data: { phase: "ACTIVE", revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "TERM_ACTIVATED", targetId: termId, details: { revision: updated.revision } } });
+    await recordAudit(tx, { actorId, action: "TERM_ACTIVATED", targetId: termId, details: { revision: updated.revision } });
     return updated;
   });
 }

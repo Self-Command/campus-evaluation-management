@@ -7,6 +7,7 @@ import { jsonValue, claimPendingStatuses } from "@/server/claims";
 import type { Prisma, Term } from "@/generated/prisma/client";
 import { issueFlowToken, verifyFlowToken } from "@/server/flow-token";
 import { effectiveCheckingDeadline } from "@/server/publication-window";
+import { recordAudit } from "@/server/audit";
 
 const phases = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"] as const;
 const revisionSchema = z.number().int().nonnegative();
@@ -72,7 +73,7 @@ export async function publishResults(sessionId: string, termId: string, input: u
       return { publicationId: publication.id, studentId: payload.student.id, login: payload.student.login, name: payload.student.name, college: profile.college, major: profile.major, className: profile.className, total: payload.result.total!, resultHash: digest(meaning), payload: jsonValue(payload) };
     }) });
     await tx.term.update({ where: { id: termId }, data: { phase: "CHECKING", publishedResultSetId: publication.id, cohortPublicationId: publication.id, publicationSequence: publication.sequence, revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "RESULTS_PUBLISHED", targetId: publication.id, details: { termId, sequence: publication.sequence, studentCount: preview.studentCount, inputRevision: term.inputRevision, checkingEndsAt: data.checkingEndsAt, requireConfirmation: data.requireConfirmation } } });
+    await recordAudit(tx, { actorId, action: "RESULTS_PUBLISHED", targetId: publication.id, details: { termId, sequence: publication.sequence, studentCount: preview.studentCount, inputRevision: term.inputRevision, checkingEndsAt: data.checkingEndsAt, requireConfirmation: data.requireConfirmation } });
     return { id: publication.id, sequence: publication.sequence, publishedAt: publication.publishedAt, checkingEndsAt: publication.checkingEndsAt, studentCount: publication.studentCount, requireConfirmation: publication.requireConfirmation, replay: false };
   });
 }
@@ -92,7 +93,7 @@ export async function confirmResult(sessionId: string, termId: string, publicati
     if (result.confirmation) return result.confirmation;
     if (term.phase !== "CHECKING" || await effectiveCheckingDeadline(tx, result.publication) <= new Date()) throw new AccountError("核对时间已结束", 409);
     const confirmation = await tx.resultConfirmation.create({ data: { resultId: result.id, studentId: actorId, resultHash } });
-    await tx.auditEvent.create({ data: { actorId, action: "RESULT_CONFIRMED", targetId: result.id, details: { termId, publicationId, resultHash } } });
+    await recordAudit(tx, { actorId, action: "RESULT_CONFIRMED", targetId: result.id, details: { termId, publicationId, resultHash } });
     return confirmation;
   });
 }
@@ -157,7 +158,7 @@ export async function lockSettlement(sessionId: string, termId: string, input: u
     const payload = jsonValue({ format: 1, term: { id: term.id, name: term.name, revision: term.revision, inputRevision: term.inputRevision }, publication: { ...publication, requestHash: undefined }, effectiveCheckingEndsAt: await effectiveCheckingDeadline(tx, publication), extensions, rankingPolicy: "DISPLAY_TWO_DECIMALS_COMPETITION", results, appeals });
     const snapshot = await tx.settlementSnapshot.create({ data: { termId, publicationId: publication.id, actorId, requestId: data.requestId, payload, sha256: digest(payload) } });
     await tx.term.update({ where: { id: termId }, data: { phase: "LOCKED", revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "TERM_LOCKED", targetId: snapshot.id, details: { termId, publicationId: publication.id, sha256: snapshot.sha256 } } });
+    await recordAudit(tx, { actorId, action: "TERM_LOCKED", targetId: snapshot.id, details: { termId, publicationId: publication.id, sha256: snapshot.sha256 } });
     return { id: snapshot.id, sha256: snapshot.sha256, createdAt: snapshot.createdAt, replay: false };
   });
 }
@@ -168,7 +169,7 @@ export async function reopenTerm(sessionId: string, termId: string, input: unkno
     const snapshot = term.publishedResultSetId ? await tx.settlementSnapshot.findUnique({ where: { publicationId: term.publishedResultSetId } }) : null;
     const reopening = await tx.termReopen.create({ data: { termId, publicationId: term.publishedResultSetId, snapshotId: snapshot?.id, actorId, reason: data.reason, previousPhase: term.phase } });
     const updated = await tx.term.update({ where: { id: termId }, data: { phase: "ACTIVE", cohortPublicationId: term.publishedResultSetId, cohortPolicy: "PREVIOUS", publishedResultSetId: null, revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "TERM_REOPENED", targetId: reopening.id, details: { termId, reason: data.reason, previousPhase: term.phase, snapshotId: snapshot?.id ?? null } } });
+    await recordAudit(tx, { actorId, action: "TERM_REOPENED", targetId: reopening.id, details: { termId, reason: data.reason, previousPhase: term.phase, snapshotId: snapshot?.id ?? null } });
     return updated;
   });
 }
@@ -184,7 +185,7 @@ export async function extendChecking(sessionId: string, termId: string, input: u
     if (next <= previousDeadline || next <= new Date() || next.getTime() > Date.now() + 366 * 86400_000) throw new AccountError("新截止时间须晚于当前截止及现在，且在一年以内");
     const extension = await tx.publicationExtension.create({ data: { publicationId: publication.id, actorId, checkingEndsAt: next, reason: data.reason } });
     await tx.term.update({ where: { id: termId }, data: { revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "CHECKING_EXTENDED", targetId: extension.id, details: { termId, publicationId: publication.id, before: previousDeadline.toISOString(), after: next.toISOString(), reason: data.reason } } });
+    await recordAudit(tx, { actorId, action: "CHECKING_EXTENDED", targetId: extension.id, details: { termId, publicationId: publication.id, before: previousDeadline.toISOString(), after: next.toISOString(), reason: data.reason } });
     return { id: extension.id, publicationId: publication.id, effectiveCheckingEndsAt: next };
   });
 }
@@ -195,7 +196,7 @@ export async function setPublicationCohort(sessionId: string, termId: string, in
     if (!term.cohortPublicationId) throw new AccountError("首次发布使用当前有效学生名单，无历史名单可切换", 409);
     if (term.cohortPolicy === data.policy) return term;
     const updated = await tx.term.update({ where: { id: termId }, data: { cohortPolicy: data.policy, revision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "PUBLICATION_COHORT_CHANGED", targetId: termId, details: { before: term.cohortPolicy, after: data.policy, basis: term.cohortPublicationId, reason: data.reason } } });
+    await recordAudit(tx, { actorId, action: "PUBLICATION_COHORT_CHANGED", targetId: termId, details: { before: term.cohortPolicy, after: data.policy, basis: term.cohortPublicationId, reason: data.reason } });
     return updated;
   });
 }

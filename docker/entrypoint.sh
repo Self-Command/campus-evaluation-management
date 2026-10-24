@@ -31,11 +31,17 @@ case "${1:-}" in
         ;;
 esac
 
-if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+DB_SETUP_ALLOWED=1
+if ! node "$APP_DIR/docker/restore-guard.cjs"; then
+    DB_SETUP_ALLOWED=0
+    echo "[entrypoint] Database restore is unfinished; starting in maintenance mode without migrations or bootstrap."
+fi
+
+if [ "$DB_SETUP_ALLOWED" = "1" ] && [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
     run_migrations
 fi
 
-if [ -n "${BOOTSTRAP_ADMIN_LOGIN:-}" ] || [ -n "${BOOTSTRAP_ADMIN_PASSWORD:-}" ]; then
+if [ "$DB_SETUP_ALLOWED" = "1" ] && { [ -n "${BOOTSTRAP_ADMIN_LOGIN:-}" ] || [ -n "${BOOTSTRAP_ADMIN_PASSWORD:-}" ]; }; then
     bootstrap_admin
 fi
 

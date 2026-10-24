@@ -5,6 +5,7 @@ import { validateScheme } from "@/lib/scoring/validate";
 import { decimalSchema } from "@/lib/scoring/types";
 import { Rational } from "@/lib/scoring/rational";
 import type { Prisma } from "@/generated/prisma/client";
+import { recordAudit } from "@/server/audit";
 
 export const claimStatusSchema = z.enum(["PENDING_COUNSELOR", "PENDING_COLLEGE", "RETURNED", "RESCORING", "APPROVED", "ABANDONED", "REVOKED", "REJECTED"]);
 export const claimFilterSchema = z.enum(["PENDING", ...claimStatusSchema.options]);
@@ -56,7 +57,7 @@ export async function submitClaim(sessionId: string, termId: string, input: unkn
     if (!schoolClass.counselorId) throw new AccountError("所在班级尚未配置责任辅导员，请联系管理员后再申报", 409);
     const ids = await ownEvidence(tx, actorId, data.evidenceIds);
     const claim = await tx.personalClaim.create({ data: { termId, studentId: actorId, title: data.title, occurredOn: data.occurredOn, note: data.note, history: jsonValue([historyEntry(actorId, "SUBMITTED", { title: data.title, occurredOn: data.occurredOn, note: data.note, evidenceIds: ids })]), evidence: { create: ids.map(evidenceId => ({ evidenceId })) } } });
-    await tx.auditEvent.create({ data: { actorId, action: "CLAIM_SUBMITTED", targetId: claim.id, details: { termId } } });
+    await recordAudit(tx, { actorId, action: "CLAIM_SUBMITTED", targetId: claim.id, details: { termId } });
     return claim;
   });
 }
@@ -160,7 +161,7 @@ export async function changeClaim(sessionId: string, termId: string, id: string,
     const updated = await tx.personalClaim.update({ where: { id }, data: { ...fields, status: next, revision: { increment: 1 }, history: appendHistory(claim.history, historyEntry(actorId, data.action.toUpperCase(), { before: status, after: next, reason: data.reason, note: data.note, evidenceIds: ids, nodeId: data.nodeId, score: data.score })) } });
     if (ids.length) await tx.claimEvidence.createMany({ data: ids.map(evidenceId => ({ claimId: id, evidenceId })), skipDuplicates: true });
     if ((status === "APPROVED") !== (next === "APPROVED")) await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "CLAIM_CHANGED", targetId: id, details: { termId, action: data.action, before: status, after: next, reason: data.reason ?? null } } });
+    await recordAudit(tx, { actorId, action: "CLAIM_CHANGED", targetId: id, details: { termId, action: data.action, before: status, after: next, reason: data.reason ?? null } });
     return updated;
   });
 }

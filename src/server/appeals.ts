@@ -4,6 +4,7 @@ import { termTransaction } from "@/server/terms";
 import { ownEvidence } from "@/server/claims";
 import { publicationSelect } from "@/server/publications";
 import { effectiveCheckingDeadline } from "@/server/publication-window";
+import { recordAudit } from "@/server/audit";
 
 export async function createAppeal(sessionId: string, termId: string, input: unknown) {
   const data = z.object({ publicationId: z.string(), resultHash: z.string().regex(/^[a-f0-9]{64}$/), target: z.string().trim().min(1).max(120), reason: z.string().trim().min(2).max(2000), evidenceIds: z.array(z.string()).max(5).default([]) }).parse(input);
@@ -16,7 +17,7 @@ export async function createAppeal(sessionId: string, termId: string, input: unk
     if (existing) throw new AccountError("该结果项目已有处理中异议，请查看原记录", 409);
     const ids = await ownEvidence(tx, actorId, data.evidenceIds);
     const appeal = await tx.resultAppeal.create({ data: { termId, publicationId: data.publicationId, studentId: actorId, resultHash: data.resultHash, target: data.target, reason: data.reason, evidence: { create: ids.map(evidenceId => ({ evidenceId })) } } });
-    await tx.auditEvent.create({ data: { actorId, action: "APPEAL_CREATED", targetId: appeal.id, details: { termId, publicationId: data.publicationId, target: data.target } } });
+    await recordAudit(tx, { actorId, action: "APPEAL_CREATED", targetId: appeal.id, details: { termId, publicationId: data.publicationId, target: data.target } });
     return appeal;
   });
 }
@@ -47,7 +48,7 @@ export async function changeAppeal(sessionId: string, termId: string, id: string
       }
     }
     const updated = await tx.resultAppeal.update({ where: { id }, data: { status, revision: { increment: 1 }, resolution: data.resolution, reviewerId: actor.role === "ADMIN" ? actorId : undefined, resolvedPublicationId: status === "RESOLVED" ? data.resolvedPublicationId : undefined } });
-    await tx.auditEvent.create({ data: { actorId, action: "APPEAL_CHANGED", targetId: id, details: { termId, before: appeal.status, after: status, resolution: data.resolution ?? null, resolvedPublicationId: data.resolvedPublicationId ?? null } } });
+    await recordAudit(tx, { actorId, action: "APPEAL_CHANGED", targetId: id, details: { termId, before: appeal.status, after: status, resolution: data.resolution ?? null, resolvedPublicationId: data.resolvedPublicationId ?? null } });
     return updated;
   });
 }

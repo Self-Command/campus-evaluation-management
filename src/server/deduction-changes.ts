@@ -11,6 +11,7 @@ import {
   inputStudentScope, inputChangeFilter, inputPendingStatuses, scopedStudentIds,
   staffNames, appendHistory, jsonValue, inputHistoryEntry, type InputActor,
 } from "@/server/input-review";
+import { recordAudit } from "@/server/audit";
 
 const allPhases: TermPhase[] = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"];
 
@@ -80,7 +81,7 @@ export async function submitDeductionChange(sessionId: string, termId: string, i
         history: jsonValue([inputHistoryEntry(actorId, "SUBMITTED", { action: data.action, amount: data.amount ?? null, targetInputId: target?.id ?? null, reason: data.reason })]),
       },
     });
-    await tx.auditEvent.create({ data: { actorId, action: data.action === "CREATE" ? "DEDUCTION_CHANGE_SUBMITTED" : "DEDUCTION_REVOKE_SUBMITTED", targetId: change.id, details: jsonValue({ termId, studentId: data.studentId, projectId: project.id, nodeId: project.nodeId, coefficient: project.coefficient, amount: data.amount ?? null, targetInputId: target?.id ?? null, reason: data.reason }) } });
+    await recordAudit(tx, { actorId, action: data.action === "CREATE" ? "DEDUCTION_CHANGE_SUBMITTED" : "DEDUCTION_REVOKE_SUBMITTED", targetId: change.id, details: jsonValue({ termId, studentId: data.studentId, projectId: project.id, nodeId: project.nodeId, coefficient: project.coefficient, amount: data.amount ?? null, targetInputId: target?.id ?? null, reason: data.reason }) });
     return change;
   });
 }
@@ -112,7 +113,7 @@ export async function changeDeductionChange(sessionId: string, termId: string, i
         positive(change.amount.toFixed());
         const max = await tx.deductionInput.aggregate({ where: { termId, studentId: change.studentId, projectId: change.projectId }, _max: { occurrence: true } });
         const saved = await tx.deductionInput.create({ data: { termId, studentId: change.studentId, projectId: change.projectId, occurrence: (max._max.occurrence ?? -1) + 1, amount: change.amount, reason: change.reason } });
-        await tx.auditEvent.create({ data: { actorId, action: "DEDUCTION_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, projectId: change.projectId, nodeId: project.nodeId, coefficient: project.coefficient, amount: saved.amount.toFixed(), occurrence: saved.occurrence, reason: change.reason }) } });
+        await recordAudit(tx, { actorId, action: "DEDUCTION_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, projectId: change.projectId, nodeId: project.nodeId, coefficient: project.coefficient, amount: saved.amount.toFixed(), occurrence: saved.occurrence, reason: change.reason }) });
       } else {
         if (!change.targetInputId || change.targetRevision === null) throw new AccountError("撤销修订缺少目标事件", 409);
         const record = await tx.deductionInput.findUnique({ where: { id: change.targetInputId } });
@@ -120,7 +121,7 @@ export async function changeDeductionChange(sessionId: string, termId: string, i
         if (record.revoked) throw new AccountError("该扣分事件已撤销", 409);
         if (record.revision !== change.targetRevision) throw new AccountError("扣分事件已变化，请退回辅导员按最新记录重新提交", 409);
         const saved = await tx.deductionInput.update({ where: { id: record.id }, data: { revoked: true, revision: { increment: 1 } } });
-        await tx.auditEvent.create({ data: { actorId, action: "DEDUCTION_REVOKED_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, projectId: change.projectId, before: { amount: record.amount.toFixed(), revoked: record.revoked }, after: { revoked: saved.revoked }, reason: change.reason }) } });
+        await recordAudit(tx, { actorId, action: "DEDUCTION_REVOKED_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, projectId: change.projectId, before: { amount: record.amount.toFixed(), revoked: record.revoked }, after: { revoked: saved.revoked }, reason: change.reason }) });
       }
       await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
       fields.reviewerId = actorId; fields.reviewedAt = new Date(); fields.reviewReason = data.reason ?? null;
@@ -157,7 +158,7 @@ export async function changeDeductionChange(sessionId: string, termId: string, i
       where: { id },
       data: { ...fields, status: next, revision: { increment: 1 }, history: appendHistory(change.history, inputHistoryEntry(actorId, data.action.toUpperCase(), { before, after: next, reason: data.reason, amount: data.amount })) },
     });
-    await tx.auditEvent.create({ data: { actorId, action: "DEDUCTION_CHANGE_CHANGED", targetId: id, details: jsonValue({ termId, action: data.action, before, after: next, reason: data.reason ?? null }) } });
+    await recordAudit(tx, { actorId, action: "DEDUCTION_CHANGE_CHANGED", targetId: id, details: jsonValue({ termId, action: data.action, before, after: next, reason: data.reason ?? null }) });
     return updated;
   });
 }

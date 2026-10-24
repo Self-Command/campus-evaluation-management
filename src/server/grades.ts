@@ -5,6 +5,7 @@ import { validateScheme } from "@/lib/scoring/validate";
 import { decimalSchema } from "@/lib/scoring/types";
 import { Rational } from "@/lib/scoring/rational";
 import { inputStudent } from "@/server/input-student";
+import { recordAudit } from "@/server/audit";
 export async function saveGrade(sessionId: string, termId: string, input: unknown) {
   const data = z.object({ studentLogin: z.string().trim().min(1).max(64), nodeId: z.string().min(1), value: decimalSchema, revision: z.number().int().nonnegative().nullable(), reason: z.string().trim().min(2).max(1000) }).parse(input);
   return termTransaction(sessionId, termId, ["ADMIN"], ["ACTIVE"], async (tx, term, actorId) => {
@@ -19,7 +20,7 @@ export async function saveGrade(sessionId: string, termId: string, input: unknow
     if (previous && Rational.from(previous.value.toFixed()).compare(value) === 0) return previous;
     const saved = previous ? await tx.gradeInput.update({ where, data: { value: data.value, revision: { increment: 1 } } }) : await tx.gradeInput.create({ data: { termId, studentId: student.id, nodeId: node.id, value: data.value } });
     await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-    await tx.auditEvent.create({ data: { actorId, action: "GRADE_SAVED", targetId: saved.id, details: { termId, studentId: student.id, nodeId: node.id, before: previous?.value.toFixed() ?? null, after: saved.value.toFixed(), reason: data.reason } } });
+    await recordAudit(tx, { actorId, action: "GRADE_SAVED", targetId: saved.id, details: { termId, studentId: student.id, nodeId: node.id, before: previous?.value.toFixed() ?? null, after: saved.value.toFixed(), reason: data.reason } });
     return saved;
   });
 }

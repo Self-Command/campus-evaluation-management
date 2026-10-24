@@ -7,6 +7,7 @@ import { db } from "@/server/db";
 import { createHmac } from "node:crypto";
 import { consumeLoginCaptcha } from "@/server/login-captcha";
 import { storedSettingsSchema, defaultSettings } from "@/lib/settings-schema";
+import { recordAudit, recordAuditBestEffort, recordSecurityAuditBestEffort } from "@/server/audit";
 
 // NextAuth v4 publishes this provider as CJS exports.default. Native Node ESM
 // (local account tooling) receives that namespace; Next's bundler unwraps it.
@@ -38,8 +39,14 @@ export async function authenticateCredentials(raw: unknown) {
   const { login, password, role, captchaId, captcha } = parsed.data;
   // Never trust proxy headers for authentication throttling. This is only a
   // coarse flood guard; per-account failure limits are configured in 系统设置.
-  if (!(await consumeLimit("login-global", "local", 1200))) return null;
-  if (!(await consumeLoginCaptcha(captchaId, captcha))) throw new Error("CaptchaInvalid");
+  if (!(await consumeLimit("login-global", "local", 1200))) {
+    await recordSecurityAuditBestEffort(db, { action: "AUTH_LOGIN_FAILED", result: "DENIED", details: { login: login.slice(0, 3) + "***", reason: "登录请求过于频繁" } });
+    return null;
+  }
+  if (!(await consumeLoginCaptcha(captchaId, captcha))) {
+    await recordSecurityAuditBestEffort(db, { action: "AUTH_LOGIN_FAILED", result: "FAILURE", details: { login: login.slice(0, 3) + "***", reason: "验证码无效" } });
+    throw new Error("CaptchaInvalid");
+  }
   const key = createHmac("sha256", process.env.NEXTAUTH_SECRET!).update(`login-failure:${login.toLowerCase()}`).digest("hex");
   const user = await db.user.findUnique({ where: { login } });
   const dummy = "$2b$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW";
@@ -55,7 +62,10 @@ export async function authenticateCredentials(raw: unknown) {
     if (policy.loginFailureLimitEnabled) {
       const previous = await tx.loginFailureState.findUnique({ where: { key } });
       if (previous?.policyKey === policyKey) {
-        if (previous.lockedUntil && previous.lockedUntil > now) return { kind: "locked" } as const;
+        if (previous.lockedUntil && previous.lockedUntil > now) {
+          await recordAuditBestEffort(tx, { action: "AUTH_LOGIN_LOCKED", result: "DENIED", details: { login: login.slice(0, 3) + "***", lockedUntil: previous.lockedUntil.toISOString() } });
+          return { kind: "locked" } as const;
+        }
         failures = previous.lockedUntil ? 0 : previous.failures;
       }
     }
@@ -65,13 +75,17 @@ export async function authenticateCredentials(raw: unknown) {
         failures += 1;
         const lockedUntil = failures >= policy.loginFailureMaxAttempts ? new Date(now.getTime() + policy.loginFailureLockMinutes * 60_000) : null;
         await tx.loginFailureState.upsert({ where: { key }, create: { key, failures, policyKey, lockedUntil }, update: { failures, policyKey, lockedUntil } });
-        if (lockedUntil) return { kind: "locked" } as const;
+        if (lockedUntil) {
+          await recordAuditBestEffort(tx, { action: "AUTH_LOGIN_LOCKED", result: "DENIED", details: { login: login.slice(0, 3) + "***", lockedUntil: lockedUntil.toISOString(), attempts: failures } });
+          return { kind: "locked" } as const;
+        }
       }
+      await recordSecurityAuditBestEffort(tx, { action: "AUTH_LOGIN_FAILED", result: "FAILURE", details: { login: login.slice(0, 3) + "***", selectedRole: role ?? null, accountDisabled: current?.disabled ?? false } });
       return { kind: "invalid" } as const;
     }
     await tx.loginFailureState.deleteMany({ where: { key } });
     const created = await tx.authSession.create({ data: { userId: current.id, version: current.authVersion, expiresAt: new Date(Date.now() + 8 * 60 * 60_000) } });
-    await tx.auditEvent.create({ data: { actorId: current.id, action: "LOGIN", targetId: created.id } });
+    await recordAudit(tx, { action: "AUTH_LOGIN_SUCCEEDED", actorId: current.id, actor: { id: current.id, name: current.name, login: current.login, role: current.role }, targetId: created.id, targetLabel: current.login });
     return { kind: "success", id: current.id, name: current.name, sessionId: created.id } as const;
   });
   if (outcome.kind === "locked") throw new Error("LoginLocked");
@@ -84,7 +98,27 @@ export async function getCurrentSession(id: string) {
   return session;
 }
 export async function revokeSession(id: string) {
+  const session = await db.authSession.findUnique({ where: { id }, include: { user: true } });
   await db.authSession.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: new Date() } });
+  if (session && !session.revokedAt) await recordAuditBestEffort(db, {
+    action: "AUTH_LOGOUT",
+    actorId: session.userId,
+    actor: { id: session.user.id, name: session.user.name, login: session.user.login, role: session.user.role },
+    targetId: session.id,
+  });
+}
+
+export async function verifyAdminPassword(sessionId: string, password: string) {
+  const current = await getCurrentSession(sessionId);
+  if (!current || current.user.role !== "ADMIN" || current.user.mustChangePassword) return false;
+  const valid = await compare(password, current.user.passwordHash);
+  if (!valid) await recordAuditBestEffort(db, {
+    action: "AUTH_ADMIN_REAUTH_FAILED",
+    actorId: current.userId,
+    actor: { id: current.user.id, name: current.user.name, login: current.user.login, role: current.user.role },
+    result: "DENIED",
+  });
+  return valid;
 }
 export async function changePassword(sessionId: string, oldPassword: string, newPassword: string) {
   const current = await getCurrentSession(sessionId);
@@ -95,7 +129,7 @@ export async function changePassword(sessionId: string, oldPassword: string, new
     const updated = await tx.user.updateMany({ where: { id: current.userId, authVersion: current.version, passwordHash: current.user.passwordHash, disabled: false, sessions: { some: { id: sessionId, revokedAt: null, expiresAt: { gt: new Date() } } } }, data: { passwordHash, mustChangePassword: false, authVersion: { increment: 1 } } });
     if (!updated.count) return false;
     await tx.authSession.updateMany({ where: { userId: current.userId, revokedAt: null }, data: { revokedAt: new Date() } });
-    await tx.auditEvent.create({ data: { actorId: current.userId, action: "PASSWORD_CHANGED", targetId: current.userId } });
+    await recordAudit(tx, { action: "PASSWORD_CHANGED", actorId: current.userId, targetId: current.userId, targetLabel: current.user.login });
     return true;
   });
 }

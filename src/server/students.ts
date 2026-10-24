@@ -5,6 +5,7 @@ import { scopedTransaction, scopedStudentWhere } from "@/server/access-scope";
 import { profileSelect, configuredClass, classProfile, recordStudentAffiliation } from "@/server/organizations";
 import { duplicateIdentityMessage, identityClassKey, loadIdentityIndex, recordIdentityException } from "@/server/student-identity";
 import type { Prisma } from "@/generated/prisma/client";
+import { recordAudit } from "@/server/audit";
 
 export const studentFilters = z.object({
   q: z.string().trim().max(80).default(""),
@@ -102,7 +103,7 @@ export async function updateStudentProfile(sessionId: string, id: string, input:
         });
     }
     const updated = await tx.user.findUniqueOrThrow({ where: { id }, select: studentDirectorySelect });
-    await tx.auditEvent.create({ data: { actorId: actor.id, action: "STUDENT_PROFILE_UPDATED", targetId: id, details: JSON.parse(JSON.stringify({ reason: data.reason, duplicateCandidates: identityCandidates.map(candidate => candidate.login), duplicateReason: data.duplicateReason ?? null, before: { name: before.name, profile: before.studentProfile }, after: { name: updated.name, profile: updated.studentProfile } })) } });
+    await recordAudit(tx, { actorId: actor.id, action: "STUDENT_PROFILE_UPDATED", targetId: id, details: JSON.parse(JSON.stringify({ reason: data.reason, duplicateCandidates: identityCandidates.map(candidate => candidate.login), duplicateReason: data.duplicateReason ?? null, before: { name: before.name, profile: before.studentProfile }, after: { name: updated.name, profile: updated.studentProfile } })) });
     return updated;
   });
 }
@@ -132,8 +133,7 @@ export async function correctStudentNumber(sessionId: string, id: string, input:
     await tx.duplicateIdentityException.deleteMany({ where: { OR: [{ studentIdA: id }, { studentIdB: id }] } });
     await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     const after = await tx.user.findUniqueOrThrow({ where: { id }, select: studentDirectorySelect });
-    await tx.auditEvent.create({
-      data: {
+    await recordAudit(tx, {
         actorId,
         action: "STUDENT_NUMBER_CORRECTED",
         targetId: id,
@@ -142,8 +142,7 @@ export async function correctStudentNumber(sessionId: string, id: string, input:
           before: { login: before.login, studentNumber: before.studentProfile.studentNumber, profile: before.studentProfile },
           after: { login: after.login, studentNumber: after.studentProfile?.studentNumber, profile: after.studentProfile },
         })),
-      },
-    });
+      });
     return after;
   });
 }

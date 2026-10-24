@@ -39,10 +39,18 @@ ENV NODE_ENV=production \
     NODE_PATH=/usr/local/lib/node_modules \
     EVIDENCE_DIR=/data/evidence \
     ACTIVITY_ATTACHMENT_DIR=/data/activity-attachments \
+    BACKUP_DIR=/data/backups \
+    BACKUP_MAX_BYTES=2147483648 \
     HOME=/home/nextjs
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates dumb-init openssl \
+    && apt-get install -y --no-install-recommends ca-certificates curl dumb-init openssl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global --no-audit --no-fund prisma@7.10.1 bcryptjs@3.0.3 \
     && npm cache clean --force
@@ -55,10 +63,11 @@ COPY --from=builder --chown=nextjs:nextjs /app/.next-production/static ./.next-p
 COPY --from=builder --chown=nextjs:nextjs /app/public ./public
 COPY --chown=nextjs:nextjs prisma ./prisma
 COPY --chown=nextjs:nextjs docker/prisma.config.ts ./prisma.docker.config.ts
-COPY --chown=nextjs:nextjs docker/entrypoint.sh docker/wait-for-db.cjs docker/bootstrap-admin.cjs ./docker/
+COPY --chown=nextjs:nextjs docker/entrypoint.sh docker/wait-for-db.cjs docker/bootstrap-admin.cjs docker/restore-guard.cjs ./docker/
 
 RUN chmod 0755 /app/docker/entrypoint.sh \
-    && mkdir -p /data/evidence /data/activity-attachments \
+    && mkdir -p /data/evidence /data/activity-attachments /data/backups \
+    && chmod 0700 /data/backups \
     && chown -R nextjs:nextjs /data /app
 
 USER nextjs

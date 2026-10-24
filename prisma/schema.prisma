@@ -546,12 +546,48 @@ model LoginAttempt {
 }
 
 model AuditEvent {
-  id        String   @id @default(cuid())
-  actorId   String?
-  action    String
-  targetId  String?
-  details   Json?
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  actorId     String?
+  actorName   String?
+  actorLogin  String?
+  actorRole   String?
+  action      String
+  category    String   @default("SYSTEM")
+  targetType  String?
+  targetId    String?
+  targetLabel String?
+  reason      String?
+  result      String   @default("SUCCESS")
+  requestId   String?
+  route       String?
+  method      String?
+  ip          String?
+  userAgent   String?
+  details     Json?
+  createdAt   DateTime @default(now())
+  @@index([createdAt, id])
+  @@index([actorId, createdAt])
+  @@index([category, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@index([requestId])
+}
+
+model SystemPolicy {
+  id                           String    @id @default("system")
+  auditRetentionDays           Int       @default(180)
+  auditAutoPurgeEnabled        Boolean   @default(true)
+  backupRetentionCount         Int       @default(14)
+  backupSafetyRetentionDays    Int       @default(7)
+  previousDatabaseRetentionDays Int      @default(7)
+  restoreReportRetentionDays   Int       @default(180)
+  restoreCandidateTtlMinutes   Int       @default(30)
+  lastPurgeAt                  DateTime?
+  lastPurgeCount               Int?
+  lastPurgeResult              String?
+  lastRestoreAt                DateTime?
+  revision                     Int       @default(0)
+  updatedAt                    DateTime  @updatedAt
 }
 
 model RecognitionProject {

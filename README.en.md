@@ -72,6 +72,12 @@ The system is designed around three promises: **correct scoring, scope-safe acce
 - Material writes are transactional; imports are validated as a whole and provide batch history and guarded revocation.
 - `/api/health/live` and `/api/health/ready` separate process liveness from database readiness.
 
+### Audit, backup and attachment governance
+
+- Administrator audit logs cover login, accounts, organization, terms, activities, participation, claims, grades, deductions, publication, appeals, imports/exports and settings. Reasons are shown as first-class fields, with filtering, detail, CSV export and retention-based purge.
+- Database backups support creation, download, chunked upload, retention and a real restore preflight. A full restore enters maintenance mode, switches databases atomically after verification and rolls back on failure; all sessions are invalidated afterwards.
+- Attachment management groups files by activity (one row per activity), supports school / college / major / class scope for activity attachments and student evidence, and exports ZIP archives with manifests, hashes and per-file errors.
+
 ## Screenshots
 
 <table>
@@ -257,6 +263,8 @@ The development server runs at `http://127.0.0.1:3000`. See [development.md](doc
 | `APP_TRUSTED_ORIGINS` | No | — | Extra trusted origins, comma separated |
 | `EVIDENCE_DIR` | No | `/data/evidence` | Evidence volume |
 | `ACTIVITY_ATTACHMENT_DIR` | No | `/data/activity-attachments` | Activity attachment volume |
+| `BACKUP_DIR` | No | `/data/backups` (Compose) | In-app backups, upload staging and restore reports |
+| `BACKUP_MAX_BYTES` | No | `2147483648` | Maximum uploaded backup size; hard-capped at 2 GiB |
 
 > Never commit `.env.docker`. Generate secrets with `openssl rand -hex 24` and `openssl rand -base64 48`.
 
@@ -292,7 +300,7 @@ docker compose --env-file .env.docker exec -T db \
   > campus-$(date +%F).dump
 ```
 
-Evidence and attachments use separate named volumes and must be backed up together with the database. The [deployment guide](docs/deploy/docker.md) covers backup, restore, rollback and multi-replica migration.
+Administrators can also create, download and upload backups from the **Database backups** page. A full restore first materialises the dump in a candidate database, checks migrations and produces an impact report; after confirmation the site enters maintenance mode and switches databases atomically, rolling back on failure. Backups live on a dedicated `backup-data` volume, and the app image ships PostgreSQL 18 client tools. Database backups contain the database only; evidence and attachments use separate named volumes and must be backed up together with the database. During a restore the site only serves the maintenance page, and every user must sign in again afterwards. The [deployment guide](docs/deploy/docker.md) covers backup, restore, rollback and multi-replica migration.
 
 ## Security
 

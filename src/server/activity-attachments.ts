@@ -7,6 +7,7 @@ import { getCurrentSession } from "@/server/auth";
 import { AccountError } from "@/server/accounts";
 import { readSiteSettings } from "@/server/settings";
 import { canManageActivity } from "@/server/activity-policy";
+import { recordAudit } from "@/server/audit";
 
 export const attachmentRoot = () =>
 	resolve(/* turbopackIgnore: true */ process.env.ACTIVITY_ATTACHMENT_DIR ?? ".local/activity-attachments");
@@ -111,9 +112,19 @@ export async function uploadActivityAttachment(sessionId: string, rawName: strin
 	const path = join(/* turbopackIgnore: true */ attachmentRoot(), storageKey);
 	await writeFile(path, bytes, { flag: "wx" });
 	try {
-		const saved = await db.activityAttachment.create({
-			data: { activityId: activityId || null, uploaderId: current.userId, name, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), storageKey, kind: mime.startsWith("image/") ? "IMAGE" : "FILE" },
-			select: { id: true, name: true, mime: true, size: true, kind: true, createdAt: true },
+		const saved = await db.$transaction(async (tx) => {
+			const created = await tx.activityAttachment.create({
+				data: { activityId: activityId || null, uploaderId: current.userId, name, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), storageKey, kind: mime.startsWith("image/") ? "IMAGE" : "FILE" },
+				select: { id: true, name: true, mime: true, size: true, kind: true, createdAt: true },
+			});
+			await recordAudit(tx, {
+				actorId: current.userId,
+				action: "ACTIVITY_ATTACHMENT_UPLOADED",
+				targetId: created.id,
+				targetLabel: name,
+				details: { activityId: activityId || null, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") },
+			});
+			return created;
 		});
 		return attachmentView(saved);
 	} catch (error) {
@@ -153,6 +164,15 @@ export async function downloadActivityAttachment(sessionId: string, id: string) 
 	if (!/^[a-f0-9]{48}\.[a-z0-9]{1,10}$/.test(file.storageKey)) throw new AccountError("附件存储标识无效", 500);
 	const bytes = await readFile(/* turbopackIgnore: true */ join(/* turbopackIgnore: true */ attachmentRoot(), file.storageKey));
 	if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new AccountError("附件校验失败", 500);
+	if (current.user.role !== "STUDENT") {
+		await recordAudit(db, {
+			actorId: current.userId,
+			action: "ACTIVITY_ATTACHMENT_DOWNLOADED",
+			targetId: file.id,
+			targetLabel: file.name,
+			details: { activityId: file.activityId, mime: file.mime, size: file.size },
+		});
+	}
 	return { file, bytes };
 }
 export async function deleteActivityAttachment(sessionId: string, id: string) {
@@ -166,6 +186,15 @@ export async function deleteActivityAttachment(sessionId: string, id: string) {
 		allowed = !!activity && canManageActivity(activity, current.user);
 	}
 	if (!allowed) throw new AccountError("没有删除该附件的权限", 403);
-	await db.activityAttachment.delete({ where: { id } });
+	await db.$transaction(async (tx) => {
+		await tx.activityAttachment.delete({ where: { id } });
+		await recordAudit(tx, {
+			actorId: current.userId,
+			action: "ACTIVITY_ATTACHMENT_DELETED",
+			targetId: file.id,
+			targetLabel: file.name,
+			details: { activityId: file.activityId, mime: file.mime, size: file.size },
+		});
+	});
 	await unlink(/* turbopackIgnore: true */ join(/* turbopackIgnore: true */ attachmentRoot(), file.storageKey)).catch(() => {});
 }

@@ -3,6 +3,7 @@ import { AccountError } from "@/server/account-error";
 import { scopedTransaction } from "@/server/access-scope";
 import type { ManagementBlocker, OrganizationUsage } from "@/lib/management-types";
 import type { Prisma, User } from "@/generated/prisma/client";
+import { recordAudit } from "@/server/audit";
 
 export const classIdentityInclude = { major: { include: { college: true } }, counselor: { select: { id: true, name: true, login: true, role: true, disabled: true, collegeId: true } } } as const;
 export const profileSelect = { studentNumber: true, college: true, major: true, className: true, classId: true, schoolClass: { include: classIdentityInclude } } as const;
@@ -109,8 +110,8 @@ export async function saveOrganization(sessionId: string, input: unknown) {
       if (previous && previous.name !== data.name) await tx.studentProfile.updateMany({ where: { classId: targetId }, data: { className: data.name } });
     }
     const after = data.kind === "college" ? await tx.college.findUniqueOrThrow({ where: { id: targetId } }) : data.kind === "major" ? await tx.major.findUniqueOrThrow({ where: { id: targetId } }) : await tx.schoolClass.findUniqueOrThrow({ where: { id: targetId } });
-    await tx.auditEvent.create({ data: { actorId: actor.id, action: "ORGANIZATION_SAVED", targetId,
-      details: JSON.parse(JSON.stringify({ kind: data.kind, reason: data.reason ?? "新建组织", before, after })) } });
+    await recordAudit(tx, { actorId: actor.id, action: "ORGANIZATION_SAVED", targetId,
+      details: JSON.parse(JSON.stringify({ kind: data.kind, reason: data.reason ?? "新建组织", before, after })) });
     return organizationTree(tx, actor);
   });
 }
@@ -210,14 +211,12 @@ export async function deleteOrganization(sessionId: string, input: unknown) {
     const archivedAssignments = data.kind === "class"
       ? await tx.classCounselorAssignment.count({ where: { classId: target.id } })
       : 0;
-    await tx.auditEvent.create({
-      data: {
+    await recordAudit(tx, {
         actorId: actor.id,
         action: "ORGANIZATION_DELETED",
         targetId: target.id,
         details: JSON.parse(JSON.stringify({ kind: data.kind, reason: data.reason, confirmName: data.confirmName, before: target, archivedAssignments })),
-      },
-    });
+      });
     if (data.kind === "class") {
       await tx.classCounselorAssignment.deleteMany({ where: { classId: target.id } });
       await tx.schoolClass.delete({ where: { id: target.id } });

@@ -40,7 +40,7 @@ services:
       context: .
       target: runner
       args:
-        VERSION: ${APP_VERSION:-0.2.5}
+        VERSION: ${APP_VERSION:-0.3.0}
         REVISION: ${APP_REVISION:-local}
     restart: unless-stopped
     depends_on:
@@ -60,11 +60,15 @@ services:
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-系统管理员}
       APP_TRUSTED_ORIGINS: ${APP_TRUSTED_ORIGINS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      BACKUP_DIR: /data/backups
+      BACKUP_MAX_BYTES: ${BACKUP_MAX_BYTES:-2147483648}
       EVIDENCE_DIR: /data/evidence
       ACTIVITY_ATTACHMENT_DIR: /data/activity-attachments
     volumes:
       - evidence-data:/data/evidence
       - attachments-data:/data/activity-attachments
+      - backup-data:/data/backups
     healthcheck:
       test:
         [
@@ -94,6 +98,7 @@ volumes:
   db-data:
   evidence-data:
   attachments-data:
+  backup-data:
 
 networks:
   backend:

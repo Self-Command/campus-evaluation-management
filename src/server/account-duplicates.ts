@@ -8,6 +8,7 @@ import {
 	loadIdentityIndex,
 	recordIdentityException,
 } from "@/server/student-identity";
+import { recordAudit } from "@/server/audit";
 
 export type DuplicateBusinessCounts = {
 	grades: number;
@@ -383,8 +384,7 @@ export async function disableDuplicateAccount(sessionId: string, input: unknown)
 			actorId,
 			reason: data.reason,
 		});
-		await tx.auditEvent.create({
-			data: {
+		await recordAudit(tx, {
 				actorId,
 				action: "ACCOUNT_DUPLICATE_DISABLED",
 				targetId: target.id,
@@ -395,8 +395,7 @@ export async function disableDuplicateAccount(sessionId: string, input: unknown)
 					reason: data.reason,
 					businessCounts: counts,
 				},
-			},
-		});
+			});
 		return {
 			targetId: target.id,
 			keepId: keep.id,

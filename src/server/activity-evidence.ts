@@ -4,6 +4,7 @@ import { AccountError } from "@/server/accounts";
 import { termTransaction } from "@/server/terms";
 import { assertActivityManager, canManageActivity } from "@/server/activity-policy";
 import { appendHistory, historyEntry, jsonValue } from "@/server/claims";
+import { recordAudit } from "@/server/audit";
 
 export const activityEvidenceInclude = {
 	evidence: {
@@ -220,12 +221,11 @@ export async function saveActivityEvidence(
 					where: { id: term.id },
 					data: { inputRevision: { increment: 1 } },
 				});
-			await tx.auditEvent.create({
-				data: {
+			await recordAudit(tx, {
 					actorId,
 					action: active
 						? "ACTIVITY_EVIDENCE_REPLACED"
-						: "ACTIVITY_EVIDENCE_UPLOADED",
+						: "ACTIVITY_EVIDENCE_ADDED",
 					targetId: activity.id,
 					details: {
 						termId: term.id,
@@ -236,8 +236,7 @@ export async function saveActivityEvidence(
 						reason: data.reason ?? null,
 						reopened,
 					},
-				},
-			});
+				});
 			return {
 				...activityEvidenceView(created),
 				reopened,

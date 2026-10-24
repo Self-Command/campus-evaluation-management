@@ -6,6 +6,7 @@ import { getCurrentSession } from "@/server/auth";
 import { AccountError } from "@/server/accounts";
 import { scopedTransaction, scopedStudentWhere } from "@/server/access-scope";
 import { canManageActivity } from "@/server/activity-policy";
+import { recordAudit } from "@/server/audit";
 export const evidenceLimit = 5 * 1024 * 1024;
 // Evidence is runtime data on a separate volume, never a deployment build input.
 export const evidenceRoot = () => resolve(/* turbopackIgnore: true */ process.env.EVIDENCE_DIR ?? ".local/evidence");
@@ -47,6 +48,15 @@ export async function downloadEvidence(sessionId: string, id: string) {
   const bytes = await readFile(/* turbopackIgnore: true */ join(/* turbopackIgnore: true */ evidenceRoot(), file.storageKey));
   if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new AccountError("证明文件校验失败", 500);
   if (identify(bytes) !== file.mime) throw new AccountError("证明文件类型校验失败", 500);
+  if (actor.role !== "STUDENT") {
+    await recordAudit(tx, {
+      actorId: actor.id,
+      action: "EVIDENCE_DOWNLOADED",
+      targetId: file.id,
+      targetLabel: file.name,
+      details: { ownerId: file.ownerId, mime: file.mime, size: file.size },
+    });
+  }
   return { file, bytes };
   });
 }

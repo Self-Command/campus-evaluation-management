@@ -11,6 +11,7 @@ import {
   inputStudentScope, inputChangeFilter, inputPendingStatuses, scopedStudentIds,
   staffNames, appendHistory, jsonValue, inputHistoryEntry, type InputActor,
 } from "@/server/input-review";
+import { recordAudit } from "@/server/audit";
 
 const allPhases: TermPhase[] = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"];
 
@@ -67,7 +68,7 @@ export async function submitGradeChange(sessionId: string, termId: string, input
         history: jsonValue([inputHistoryEntry(actorId, "SUBMITTED", { value: data.value, reason: data.reason, baseValue: current?.value.toFixed() ?? null })]),
       },
     });
-    await tx.auditEvent.create({ data: { actorId, action: "GRADE_CHANGE_SUBMITTED", targetId: change.id, details: jsonValue({ termId, studentId: data.studentId, nodeId: node.id, value: data.value, reason: data.reason }) } });
+    await recordAudit(tx, { actorId, action: "GRADE_CHANGE_SUBMITTED", targetId: change.id, details: jsonValue({ termId, studentId: data.studentId, nodeId: node.id, value: data.value, reason: data.reason }) });
     return change;
   });
 }
@@ -105,7 +106,7 @@ export async function changeGradeChange(sessionId: string, termId: string, id: s
           ? await tx.gradeInput.update({ where: { id: current.id }, data: { value: change.value, revision: { increment: 1 } } })
           : await tx.gradeInput.create({ data: { termId, studentId: change.studentId, nodeId: change.nodeId, value: change.value } });
         await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-        await tx.auditEvent.create({ data: { actorId, action: "GRADE_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, nodeId: change.nodeId, before: current?.value.toFixed() ?? null, after: saved.value.toFixed(), reason: change.reason }) } });
+        await recordAudit(tx, { actorId, action: "GRADE_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, nodeId: change.nodeId, before: current?.value.toFixed() ?? null, after: saved.value.toFixed(), reason: change.reason }) });
         fields.reviewerId = actorId; fields.reviewedAt = new Date(); fields.reviewReason = data.reason ?? null;
         next = "APPROVED";
       }
@@ -138,7 +139,7 @@ export async function changeGradeChange(sessionId: string, termId: string, id: s
       where: { id },
       data: { ...fields, status: next, revision: { increment: 1 }, history: appendHistory(change.history, inputHistoryEntry(actorId, data.action.toUpperCase(), { before, after: next, reason: data.reason, value: data.value })) },
     });
-    await tx.auditEvent.create({ data: { actorId, action: "GRADE_CHANGE_CHANGED", targetId: id, details: jsonValue({ termId, action: data.action, before, after: next, reason: data.reason ?? null }) } });
+    await recordAudit(tx, { actorId, action: "GRADE_CHANGE_CHANGED", targetId: id, details: jsonValue({ termId, action: data.action, before, after: next, reason: data.reason ?? null }) });
     return updated;
   });
 }
