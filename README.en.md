@@ -76,7 +76,7 @@ The system is designed around three promises: **correct scoring, scope-safe acce
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/screenshots/login.jpg" alt="Sign in" /><br /><sub><b>Sign in</b>: role selection, captcha and forced password change</sub></td>
+    <td width="50%"><img src="docs/assets/screenshots/login.jpg" alt="Sign in" /><br /><sub><b>Sign in</b>: full-screen background, personal appearance, captcha and forced password change</sub></td>
     <td width="50%"><img src="docs/assets/screenshots/admin-dashboard.jpg" alt="Administrator dashboard" /><br /><sub><b>Administrator dashboard</b>: term, workload and school-wide progress</sub></td>
   </tr>
   <tr>

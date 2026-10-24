@@ -35,7 +35,7 @@ export function AppSidebar({
   brand,
 }: {
   user: { name?: string | null; role: AppRole };
-  brand: { siteName: string; siteDescription: string; logoAssetId: string | null };
+  brand: { siteName: string; siteDescription: string; logoAssetId: string | null; logoSize: number };
 }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const path = usePathname();
@@ -54,15 +54,16 @@ export function AppSidebar({
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href={user.role === "COLLEGE" || user.role === "COUNSELOR" ? "/students" : "/"} />}>
+            <SidebarMenuButton size="lg" className="h-auto min-h-12 py-2" render={<Link href={user.role === "COLLEGE" || user.role === "COUNSELOR" ? "/students" : "/"} />}>
               {brand.logoAssetId ? (
                 <Image
                   src={`/api/brand-assets/${brand.logoAssetId}`}
                   alt=""
-                  width={28}
-                  height={28}
+                  width={brand.logoSize}
+                  height={brand.logoSize}
                   unoptimized
-                  className="size-7 object-contain"
+                  style={{ width: brand.logoSize, height: brand.logoSize }}
+                  className="shrink-0 object-contain group-data-[collapsible=icon]:max-h-8 group-data-[collapsible=icon]:max-w-8"
                 />
               ) : (
                 <GraduationCap />

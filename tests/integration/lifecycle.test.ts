@@ -16,7 +16,7 @@ import { previewPublication, publishResults, confirmResult, previewSettlement, l
 import { createAppeal, changeAppeal, pageAppeals } from "@/server/appeals";
 import { getRankings } from "@/server/rankings";
 import { exportClassGradeWorkbook } from "@/server/class-grade-export";
-import { publicSettings, saveSettings, uploadBrandAsset, getBrandAsset } from "@/server/settings";
+import { readSiteSettings, saveSettings, uploadBrandAsset, getBrandAsset } from "@/server/settings";
 import { selfAccount } from "@/server/account-self";
 import { previewGradeImport, commitGradeImport } from "@/server/grade-import";
 import { Prisma } from "@/generated/prisma/client";
@@ -236,11 +236,13 @@ test("理由更正生成新版本，旧确认不迁移、异议要求实际更�
 });
 
 test("常用设置白名单/修订/品牌发布和本人账号设置权限", async () => {
-  const admin = identities.admin.session, settings = await publicSettings();
+  const admin = identities.admin.session, settings = await readSiteSettings();
   const image = await uploadBrandAsset(admin, png);
   await expect(getBrandAsset(image.id)).rejects.toThrow("不存在");
-  await expect(saveSettings(identities.student.session, { ...settings, reason: "越权设置" })).rejects.toThrow();
-  const current = { siteName: settings.siteName, siteDescription: settings.siteDescription, pageTitle: settings.pageTitle, themePreset: settings.themePreset, logoAssetId: settings.logoAssetId, faviconAssetId: settings.faviconAssetId, revision: settings.revision };
+  const { revision, updatedAt, ...content } = settings;
+  void updatedAt;
+  const current = { ...content, revision };
+  await expect(saveSettings(identities.student.session, { ...current, reason: "越权设置" })).rejects.toThrow("权限");
   const changed = await saveSettings(admin, { ...current, siteName: "综合测评", logoAssetId: image.id, reason: "更新学校站名" });
   expect(changed.revision).toBe(1); expect((await getBrandAsset(image.id)).size).toBe(png.length);
   await expect(saveSettings(admin, { ...current, reason: "过期编辑" })).rejects.toThrow("已变化");

@@ -11,13 +11,13 @@ import {
   type PreferenceValueMap,
 } from "./preferences-config";
 
-async function persistByMode(mode: PreferencePersistence, key: string, value: string): Promise<void> {
+async function persistByMode(mode: PreferencePersistence, key: string, value: string, days?: number): Promise<void> {
   switch (mode) {
     case "none":
       return;
 
     case "client-cookie":
-      setClientCookie(key, value);
+      setClientCookie(key, value, days);
       return;
 
     case "server-cookie":
@@ -31,5 +31,6 @@ async function persistByMode(mode: PreferencePersistence, key: string, value: st
 }
 
 export function persistPreference<K extends PreferenceKey>(key: K, value: PreferenceValueMap[K]): Promise<void> {
-  return persistByMode(getPreferencePersistence(key), key, value);
+  const days = key === "theme_mode" || key === "theme_preset" ? 365 : undefined;
+  return persistByMode(getPreferencePersistence(key), key, value, days);
 }

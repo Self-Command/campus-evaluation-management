@@ -21,7 +21,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html
       lang="zh-CN"
-      data-theme-mode="light"
+      data-theme-mode={settings.defaultThemeMode}
       data-theme-preset={settings.themePreset}
       data-content-layout="centered"
       data-navbar-style="sticky"
@@ -35,7 +35,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       </head>
       <body className="min-h-screen antialiased">
         <TooltipProvider>
-          <PreferencesStoreProvider initialValues={{ ...PREFERENCE_DEFAULTS, theme_preset: settings.themePreset }}>
+          <PreferencesStoreProvider initialValues={{ ...PREFERENCE_DEFAULTS, theme_mode: settings.defaultThemeMode, theme_preset: settings.themePreset }}>
             {children}
             <Toaster />
           </PreferencesStoreProvider>

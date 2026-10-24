@@ -76,7 +76,7 @@
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/screenshots/login.jpg" alt="登录页" /><br /><sub><b>统一登录</b>：身份选择、验证码与首次改密</sub></td>
+    <td width="50%"><img src="docs/assets/screenshots/login.jpg" alt="登录页" /><br /><sub><b>统一登录</b>：全屏背景、个人外观、验证码与首次改密</sub></td>
     <td width="50%"><img src="docs/assets/screenshots/admin-dashboard.jpg" alt="管理员工作台" /><br /><sub><b>管理员工作台</b>：周期、待办与全校办理进度</sub></td>
   </tr>
   <tr>

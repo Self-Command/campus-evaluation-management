@@ -298,3 +298,25 @@ body { font-size: 14px; line-height: 1.6; }
   height: 0;
   pointer-events: none;
 }
+
+/* Authentication fallback background: no external image request when the
+   administrator has not uploaded one. It follows the active theme tokens. */
+.auth-default-background {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(circle at 18% 12%, color-mix(in oklab, var(--primary) 24%, transparent), transparent 42%),
+    radial-gradient(circle at 82% 88%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 46%),
+    linear-gradient(145deg, color-mix(in oklab, var(--muted) 70%, transparent), transparent 55%);
+}
+.auth-default-background::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.32;
+  mask-image: radial-gradient(circle at center, black, transparent 78%);
+}

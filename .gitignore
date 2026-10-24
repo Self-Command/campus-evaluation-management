@@ -8,6 +8,7 @@ node_modules/
 /.workbuddy-ai/
 /.scratch/export-visual/
 /.scratch/joined.png
+/vibe_images/
 playwright-report/
 test-results/
 coverage/

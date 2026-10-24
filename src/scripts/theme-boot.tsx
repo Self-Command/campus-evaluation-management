@@ -31,6 +31,11 @@ export function ThemeBootScript() {
           }
         }
 
+        function readServerDefault(key, definition) {
+          var value = root.getAttribute(definition.attribute);
+          return definition.values.indexOf(value) >= 0 ? value : definition.defaultValue;
+        }
+
         function readPreference(key, definition) {
           var mode = definition.persistence;
           var value = null;
@@ -43,14 +48,14 @@ export function ThemeBootScript() {
             value = readCookie(key);
           }
 
-          return definition.values.indexOf(value) >= 0 ? value : definition.defaultValue;
+          return definition.values.indexOf(value) >= 0 ? value : readServerDefault(key, definition);
         }
 
         var preferences = {};
 
         Object.keys(REGISTRY).forEach(function(key) {
           var definition = REGISTRY[key];
-          var value = key === "theme_preset" ? root.getAttribute("data-theme-preset") || definition.defaultValue : readPreference(key, definition);
+          var value = readPreference(key, definition);
 
           preferences[key] = value;
           root.setAttribute(definition.attribute, value);

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>设置页原型 · 登录页配置</title>
+    <link rel="stylesheet" href="prototype.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark-sm">序</div>
+          <div class="sidebar-brand-copy">
+            <strong>序衡</strong>
+            <span>高校综合测评管理</span>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-label">概览</div>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" />
+            </svg>
+            工作台
+          </a>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-label">测评业务</div>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+            周期与制度
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m3 11 18-5v12L3 14v-3Z" />
+              <path d="M11.6 16.3a3 3 0 0 1-5.8-1.5" />
+            </svg>
+            活动管理
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="m8.5 12 2.5 2.5 4.5-5" />
+            </svg>
+            认定审核
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+              <path d="M14 2v6h6M9 13h6M9 17h6" />
+            </svg>
+            个人申报
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" />
+            </svg>
+            异议处理
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 3v18h18" />
+              <path d="M7 16v-5M12 16V8M17 16v-3" />
+            </svg>
+            结果与排名
+          </a>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-label">数据与账号</div>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            学生档案
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="9" cy="7" r="4" />
+              <path d="M2 21v-2a4 4 0 0 1 4-4h5" />
+              <circle cx="17" cy="17" r="3" />
+              <path d="M17 12v2M17 20v2M12.5 14.5l1.5 1M20 19l1.5 1M20 15l1.5-1M12.5 19.5l1.5-1" />
+            </svg>
+            账号管理
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M17 8l-5-5-5 5M12 3v12" />
+            </svg>
+            批量导入
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="2" width="16" height="20" rx="2" />
+              <path d="M9 22v-4h6v4M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01" />
+            </svg>
+            组织机构
+          </a>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-label">系统</div>
+          <a class="nav-item is-active">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+            </svg>
+            系统设置
+          </a>
+          <a class="nav-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2" />
+            </svg>
+            个人资料
+          </a>
+        </div>
+
+        <div class="sidebar-user">
+          <div class="avatar">管</div>
+          <div class="sidebar-user-copy">
+            <strong>系统管理员</strong>
+            <span>管理员</span>
+          </div>
+        </div>
+      </aside>
+
+      <div class="app-content">
+        <header class="app-header">
+          <div class="breadcrumb">
+            系统
+            <span>/</span>
+            <strong>系统设置</strong>
+          </div>
+          <div class="header-actions">
+            <button class="icon-btn" type="button" aria-label="切换深浅模式">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.42 1.42" />
+              </svg>
+            </button>
+            <div class="header-avatar">
+              <div class="avatar">管</div>
+              管理员
+            </div>
+          </div>
+        </header>
+
+        <main class="app-main">
+          <div class="page-head">
+            <div>
+              <p class="page-eyebrow">System settings</p>
+              <h1 class="page-title">系统设置</h1>
+              <p class="page-desc">管理站点品牌、登录页、主题默认值和登录安全。保存后立即生效。</p>
+            </div>
+          </div>
+
+          <div class="settings-toolbar">
+            <div class="field">
+              <label class="field-label" for="settings-reason">修改理由</label>
+              <input class="input" id="settings-reason" type="text" value="调整登录页背景与默认外观" />
+            </div>
+            <div class="toolbar-meta">
+              <span class="badge">当前版本 12 · 有未保存修改</span>
+              <button class="btn btn-primary btn-save" type="button">保存并生效</button>
+            </div>
+          </div>
+
+          <div class="tabs">
+            <div class="tab">品牌与标题</div>
+            <div class="tab">标识与主题</div>
+            <div class="tab is-active">登录页</div>
+            <div class="tab">登录安全</div>
+            <div class="tab">活动附件</div>
+          </div>
+
+          <div class="settings-grid">
+            <div class="editor-stack">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <h2 class="panel-title">登录页背景</h2>
+                    <p class="panel-desc">显示在登录页与首次改密页；未上传时使用主题渐变背景。</p>
+                  </div>
+                </div>
+                <div class="panel-body">
+                  <div class="upload-row">
+                    <div class="upload-thumb">
+                      <img src="assets/login-bg-campus.png" alt="登录页背景预览" />
+                    </div>
+                    <div class="upload-info">
+                      <div class="upload-title">login-bg-campus.png</div>
+                      <p class="upload-meta">PNG · 1792 × 1024 · 2.8 MB</p>
+                      <div class="upload-actions">
+                        <button class="btn btn-outline btn-sm" type="button">替换图片</button>
+                        <button class="btn btn-ghost btn-sm" type="button">移除背景</button>
+                      </div>
+                    </div>
+                  </div>
+                  <p class="help">建议横版 1920 × 1080 以上，支持 PNG、JPEG、WebP，最大 5MB。背景图公开可见，请勿上传含学生姓名、成绩或证件信息的图片。</p>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <h2 class="panel-title">登录公告</h2>
+                    <p class="panel-desc">显示在登录卡片顶部；留空则不显示。</p>
+                  </div>
+                </div>
+                <div class="panel-body">
+                  <div class="field-row">
+                    <label class="field-label" for="login-notice">公告内容</label>
+                    <span class="counter">31 / 200</span>
+                  </div>
+                  <textarea class="textarea" id="login-notice" rows="3">2026—2027学年第一学期综合测评已开放，请在截止前完成确认。</textarea>
+                  <p class="help">仅支持纯文本，不支持链接或 HTML。公告对所有访客可见，请勿填写学生个人信息。</p>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <h2 class="panel-title">默认外观</h2>
+                    <p class="panel-desc">管理员设置站点默认值，用户仍可在登录页和顶栏自行切换。</p>
+                  </div>
+                </div>
+                <div class="panel-body">
+                  <div class="appearance-row">
+                    <div class="appearance-copy">
+                      <strong>默认主题 · 跟随系统</strong>
+                      <span>所有未单独选择外观的访客和用户使用此设置。</span>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" type="button">在「标识与主题」中调整</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <aside class="preview-panel">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <h2 class="panel-title">登录页预览</h2>
+                    <p class="panel-desc">按当前草稿渲染。</p>
+                  </div>
+                  <span class="badge">桌面</span>
+                </div>
+                <div class="preview-frame">
+                  <img src="assets/login-bg-campus.png" alt="" />
+                  <div class="preview-brand">
+                    <div class="preview-brand-mark">序</div>
+                    <span class="preview-brand-name">序衡</span>
+                  </div>
+                  <div class="preview-mini-card">
+                    <p class="preview-mini-title">欢迎登录</p>
+                    <p class="preview-mini-desc">序衡 · 综合测评管理平台</p>
+                    <div class="preview-mini-field"></div>
+                    <div class="preview-mini-field"></div>
+                    <div class="preview-mini-field"></div>
+                    <div class="preview-mini-btn"></div>
+                  </div>
+                </div>
+                <div class="preview-note">预览按当前草稿渲染；保存后登录页与首次改密页同步生效。</div>
+                <div class="preview-note">
+                  <div class="preview-meta">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    背景与公告将公开显示
+                  </div>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

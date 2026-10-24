@@ -46,7 +46,7 @@ export default async function Layout({ children }: Readonly<{ children: ReactNod
               <span className="hidden text-xs text-muted-foreground sm:inline">{roleLabels[user.role]}</span>
             </div>
             <div className="flex items-center gap-2">
-              <HeaderControls />
+              <HeaderControls siteDefaults={{ themePreset: settings.themePreset, themeMode: settings.defaultThemeMode }} />
             </div>
           </div>
         </header>

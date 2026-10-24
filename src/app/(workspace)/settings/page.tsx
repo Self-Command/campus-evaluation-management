@@ -7,7 +7,7 @@ export default async function Page() {
   if (user.role !== "ADMIN") notFound();
   return (
     <>
-      <PageHeading title="系统设置" description="修改站点名称、说明、标识和主题，保存后全站生效。" />
+      <PageHeading title="系统设置" description="管理站点品牌、登录页、默认外观和登录安全。保存后立即生效。" />
       <Settings />
     </>
   );

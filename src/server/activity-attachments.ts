@@ -5,7 +5,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/server/db";
 import { getCurrentSession } from "@/server/auth";
 import { AccountError } from "@/server/accounts";
-import { publicSettings } from "@/server/settings";
+import { readSiteSettings } from "@/server/settings";
 import { canManageActivity } from "@/server/activity-policy";
 
 export const attachmentRoot = () =>
@@ -78,7 +78,7 @@ export function attachmentView(row: { id: string; name: string; mime: string; si
 	return { ...row, url: `/api/activity-attachments/${row.id}` };
 }
 export async function attachmentLimits() {
-	const settings = await publicSettings();
+	const settings = await readSiteSettings();
 	return {
 		maxFiles: settings.activityAttachmentMaxFiles,
 		maxBytes: settings.activityAttachmentMaxSizeMb * 1024 * 1024,

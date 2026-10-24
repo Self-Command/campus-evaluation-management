@@ -4,15 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 import { type StoreApi, useStore } from "zustand";
 
-import {
-  PREFERENCE_DEFAULTS,
-  PREFERENCE_KEYS,
-  PREFERENCE_REGISTRY,
-  type PreferenceKey,
-  type PreferenceValueMap,
-  parsePreference,
-} from "@/lib/preferences/preferences-config";
-import { applyPreference } from "@/lib/preferences/preference-runtime";
+import { PREFERENCE_DEFAULTS, PREFERENCE_KEYS, PREFERENCE_REGISTRY, type PreferenceKey, type PreferenceValueMap, parsePreference } from "@/lib/preferences/preferences-config";
 import { applyThemeMode, subscribeToSystemTheme } from "@/lib/preferences/theme-utils";
 
 import { createPreferencesStore, type PreferencesState } from "./preferences-store";
@@ -53,11 +45,6 @@ export function PreferencesStoreProvider({
       isSynced: true,
     });
   }, [store]);
-
-  useEffect(() => {
-    applyPreference("theme_preset", initialValues.theme_preset);
-    store.setState((state) => ({ values: { ...state.values, theme_preset: initialValues.theme_preset } }));
-  }, [store, initialValues.theme_preset]);
 
   useEffect(() => {
     let unsubscribeMedia: (() => void) | undefined;

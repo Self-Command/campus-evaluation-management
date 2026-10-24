@@ -66,16 +66,17 @@ const queueStatuses = [
 	["ABANDONED", "已撤回本次修改"],
 ] as const;
 
-export function GradeWorkspace({ term, role }: { term: { id: string; name: string; phase: string; disposition: string }; role: "ADMIN" | "COLLEGE" | "COUNSELOR" }) {
+export function GradeWorkspace({ term, role, initialLogin = "" }: { term: { id: string; name: string; phase: string; disposition: string }; role: "ADMIN" | "COLLEGE" | "COUNSELOR"; initialLogin?: string }) {
 	const readOnly = term.phase !== "ACTIVE" || term.disposition !== "NORMAL";
 	const [queueStatus, setQueueStatus] = useState<string>("PENDING");
 	const [queuePage, setQueuePage] = useState(1);
-	const [query, setQuery] = useState("");
-	const [draft, setDraft] = useState("");
+	const [query, setQuery] = useState(initialLogin);
+	const [draft, setDraft] = useState(initialLogin);
 	const [scope, setScope] = useState({ college: "", major: "", className: "" });
 	const [draftScope, setDraftScope] = useState(scope);
 	const [rosterPage, setRosterPage] = useState(1);
 	const [selectedId, setSelectedId] = useState("");
+	const [autoDismissed, setAutoDismissed] = useState(false);
 	const [node, setNode] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
@@ -83,14 +84,19 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 	const [sendingBack, setSendingBack] = useState<{ id: string; revision: number; label: string } | null>(null);
 	const [dirty, setDirty] = useState(false);
 	const [view, setView] = useState<"queue" | "roster">(
-		role === "COUNSELOR" ? "roster" : "queue",
+		initialLogin || role === "COUNSELOR" ? "roster" : "queue",
 	);
 	useUnsavedChanges(dirty);
 
 	const queue = useRemote<Queue>(`/api/grade-changes?${new URLSearchParams({ termId: term.id, status: queueStatus, page: String(queuePage) })}`);
 	const roster = useRemote<Roster>(`/api/grades/roster?${new URLSearchParams({ termId: term.id, q: query, ...scope, page: String(rosterPage) })}`);
-	const detail = useRemote<Detail>(selectedId ? `/api/grades/${selectedId}?termId=${term.id}` : null);
-	const current = detail.data?.nodes.find(item => item.id === node) || null;
+	const autoMatch = !autoDismissed && initialLogin
+		? roster.data?.items.find(item => item.login === initialLogin)
+		: undefined;
+	const activeStudentId = selectedId || autoMatch?.id || "";
+	const detail = useRemote<Detail>(activeStudentId ? `/api/grades/${activeStudentId}?termId=${term.id}` : null);
+	const selectedNodeId = node || detail.data?.nodes[0]?.id || "";
+	const current = detail.data?.nodes.find(item => item.id === selectedNodeId) || null;
 
 	function refresh(message: string) {
 		setSuccess(message);
@@ -152,11 +158,11 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 		}
 	}
 	function openStudent(id: string) {
+		setAutoDismissed(true);
 		setSelectedId(id);
 		setError("");
 		setSuccess("");
-		const first = roster.data?.nodes[0]?.id || "";
-		setNode(first);
+		setNode("");
 	}
 	const queueColumns: ColumnDef<DataTableFeatures, QueueItem>[] = [
 		{ id: "student", header: "学生", cell: ({ row }) => (
@@ -367,7 +373,7 @@ export function GradeWorkspace({ term, role }: { term: { id: string; name: strin
 			)}
 				</TabsContent>
 			</Tabs>
-			<Sheet open={!!selectedId} onOpenChange={(open) => { if (!open && (!dirty || window.confirm("放弃尚未提交的输入？"))) { setSelectedId(""); setDirty(false); } }}>
+			<Sheet open={!!activeStudentId} onOpenChange={(open) => { if (!open && (!dirty || window.confirm("放弃尚未提交的输入？"))) { setAutoDismissed(true); setSelectedId(""); setNode(""); setDirty(false); } }}>
 				<SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
 					<SheetHeader>
 						<SheetTitle>{detail.data?.student.name ?? "学生成绩"}</SheetTitle>

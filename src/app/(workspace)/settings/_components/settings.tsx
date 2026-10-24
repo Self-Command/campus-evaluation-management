@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Command } from "lucide-react";
+import { Command, Upload } from "lucide-react";
 import { TemplateEditor } from "@/components/dashboard/template-editor";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/native-select";
 import {
 	THEME_PRESET_OPTIONS,
+	type ThemeMode,
 	type ThemePreset,
 } from "@/lib/preferences/theme";
 type SettingsData = {
@@ -35,6 +36,9 @@ type SettingsData = {
 	siteDescription: string;
 	pageTitle: string;
 	themePreset: ThemePreset;
+	defaultThemeMode: ThemeMode;
+	loginBackgroundAssetId: string | null;
+	loginNotice: string;
 	loginFailureLimitEnabled: boolean;
 	loginFailureMaxAttempts: number;
 	loginFailureLockMinutes: number;
@@ -42,6 +46,7 @@ type SettingsData = {
 	activityAttachmentMaxSizeMb: number;
 	activityAttachmentAllowedExtensions: string[];
 	logoAssetId: string | null;
+	logoSize: number;
 	faviconAssetId: string | null;
 	revision: number;
 	updatedAt: string | null;
@@ -81,16 +86,23 @@ function SettingsForm({ value }: { value: SettingsData }) {
 	}
 	async function upload(
 		file: File | undefined,
-		key: "logoAssetId" | "faviconAssetId",
+		key: "logoAssetId" | "faviconAssetId" | "loginBackgroundAssetId",
 	) {
 		if (!file || uploading) return;
+		const background = key === "loginBackgroundAssetId";
 		setUploading(key);
 		setError("");
 		try {
-			if (file.size > 1048576) throw new Error("标识图片不能超过1MiB。");
+			if (file.size > (background ? 5 * 1048576 : 1048576))
+				throw new Error(
+					background ? "登录页背景不能超过5MB。" : "标识图片不能超过1MiB。",
+				);
 			const response = await fetch("/api/admin/brand-assets", {
 				method: "POST",
-				headers: { "x-file-name": encodeURIComponent(file.name) },
+				headers: {
+					"x-file-name": encodeURIComponent(file.name),
+					...(background ? { "x-asset-kind": "login-background" } : {}),
+				},
 				body: file,
 			});
 			const result = await response.json();
@@ -120,6 +132,14 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					if (!draft[key].trim() || draft[key].trim().length > max)
 						issues[key] = `${label}需填写1至${max}个字符。`;
 				}
+				if (
+					!Number.isInteger(draft.logoSize) ||
+					draft.logoSize < 16 ||
+					draft.logoSize > 128
+				)
+					issues.logoSize = "Logo 显示尺寸需填写16至128的整数。";
+				if (draft.loginNotice.length > 200)
+					issues.loginNotice = "登录公告最多200个字符。";
 				for (const [key, label, max] of [
 					["loginFailureMaxAttempts", "连续失败次数", 100],
 					["loginFailureLockMinutes", "临时锁定分钟数", 1440],
@@ -167,6 +187,10 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							? "security"
 							: ["extensions", "activityAttachmentMaxFiles", "activityAttachmentMaxSizeMb"].includes(first)
 								? "activity"
+								: first === "logoSize"
+								? "assets"
+								: first === "loginNotice"
+								? "login"
 								: first === "reason"
 								? tab
 								: "brand",
@@ -186,6 +210,8 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										activityAttachmentMaxFiles: "settings-attachment-files",
 										activityAttachmentMaxSizeMb: "settings-attachment-size",
 										extensions: "settings-attachment-extensions",
+										logoSize: "settings-logo-size",
+										loginNotice: "settings-login-notice",
 									} as Record<string, string>
 								)[first],
 							)
@@ -203,6 +229,9 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							siteDescription: draft.siteDescription,
 							pageTitle: draft.pageTitle,
 							themePreset: draft.themePreset,
+							defaultThemeMode: draft.defaultThemeMode,
+							loginBackgroundAssetId: draft.loginBackgroundAssetId,
+							loginNotice: draft.loginNotice.trim(),
 							loginFailureLimitEnabled: draft.loginFailureLimitEnabled,
 							loginFailureMaxAttempts: draft.loginFailureMaxAttempts,
 							loginFailureLockMinutes: draft.loginFailureLockMinutes,
@@ -210,6 +239,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							activityAttachmentMaxSizeMb: draft.activityAttachmentMaxSizeMb,
 							activityAttachmentAllowedExtensions: extensions,
 							logoAssetId: draft.logoAssetId,
+							logoSize: draft.logoSize,
 							faviconAssetId: draft.faviconAssetId,
 							reason,
 						},
@@ -257,59 +287,126 @@ function SettingsForm({ value }: { value: SettingsData }) {
 			</div>
 			<TemplateEditor
 				preview={
-					<div className="flex flex-col rounded-xl border bg-card">
-						<div className="flex items-center justify-between px-4 py-4">
-							<h2 className="font-medium text-lg">品牌效果</h2>
-							<Badge variant="outline">
-								{THEME_PRESET_OPTIONS.find(
-									(option) => option.value === draft.themePreset,
-								)?.label ?? "默认主题"}
-							</Badge>
-						</div>
-						<div
-							className="flex min-h-80 flex-col items-center justify-center gap-5 rounded-b-xl bg-muted p-6 text-center"
-							data-theme-preset={draft.themePreset}
-						>
-							{draft.logoAssetId ? (
-								<Image
-									src={`/api/brand-assets/${draft.logoAssetId}`}
-									alt="站点标识"
-									width={80}
-									height={80}
-									unoptimized
-									className="size-20 object-contain"
-								/>
-							) : (
-								<Command className="size-12 text-primary" />
-							)}
-							<h2 className="break-words text-3xl">{draft.siteName}</h2>
-							<p className="break-words text-muted-foreground">
-								{draft.siteDescription}
-							</p>
-							<Separator />
-							<p className="break-words text-sm">页面标题：{draft.pageTitle}</p>
-							{draft.faviconAssetId && (
-								<div className="flex items-center gap-2">
-									<Image
-										src={`/api/brand-assets/${draft.faviconAssetId}`}
-										alt="网站图标"
-										width={20}
-										height={20}
-										unoptimized
-									/>
-									<span className="text-sm text-muted-foreground">
-										网站图标
-									</span>
+					tab === "login" ? (
+						<div className="flex flex-col rounded-xl border bg-card">
+							<div className="flex items-center justify-between px-4 py-4">
+								<h2 className="font-medium text-lg">登录页预览</h2>
+								<Badge variant="outline">按当前草稿</Badge>
+							</div>
+							<div
+								className="relative flex min-h-80 items-center justify-center overflow-hidden rounded-b-xl bg-muted p-6"
+								data-theme-preset={draft.themePreset}
+							>
+								{draft.loginBackgroundAssetId ? (
+									<>
+										<Image
+											src={`/api/brand-assets/${draft.loginBackgroundAssetId}`}
+											alt=""
+											fill
+											unoptimized
+											sizes="(min-width: 1280px) 40vw, 100vw"
+											className="object-cover"
+										/>
+										<div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/30 to-black/65" />
+									</>
+								) : (
+									<div className="auth-default-background absolute inset-0" />
+								)}
+								<div className="relative w-full max-w-64 rounded-xl bg-card/95 p-4 text-left shadow-xl ring-1 ring-foreground/10 backdrop-blur">
+									<div className="flex min-w-0 items-center gap-2">
+										{draft.logoAssetId ? (
+											<Image
+												src={`/api/brand-assets/${draft.logoAssetId}`}
+												alt=""
+												width={28}
+												height={28}
+												unoptimized
+												className="size-7 object-contain"
+											/>
+										) : (
+											<Command className="size-5 shrink-0 text-primary" />
+										)}
+										<span className="truncate text-sm font-semibold">
+											{draft.siteName}
+										</span>
+									</div>
+									<p className="mt-4 text-lg font-semibold">欢迎登录</p>
+									<p className="mt-1 text-xs text-muted-foreground">
+										输入账号和密码进入工作台
+									</p>
+									{draft.loginNotice && (
+										<p className="mt-3 max-h-20 overflow-hidden whitespace-pre-wrap rounded-md border bg-muted/60 px-2 py-1.5 text-[11px] leading-relaxed">
+											{draft.loginNotice}
+										</p>
+									)}
+									<div aria-hidden className="mt-4 grid gap-2">
+										<div className="h-7 rounded-md border bg-background/70" />
+										<div className="h-7 rounded-md border bg-background/70" />
+										<div className="h-7 rounded-md bg-primary" />
+									</div>
 								</div>
-							)}
+							</div>
+							<p className="border-t px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+								背景与公告公开显示；保存后登录页与首次改密页同步生效。
+							</p>
 						</div>
-					</div>
+					) : (
+						<div className="flex flex-col rounded-xl border bg-card">
+							<div className="flex items-center justify-between px-4 py-4">
+								<h2 className="font-medium text-lg">品牌效果</h2>
+								<Badge variant="outline">
+									{THEME_PRESET_OPTIONS.find(
+										(option) => option.value === draft.themePreset,
+									)?.label ?? "默认主题"}
+								</Badge>
+							</div>
+							<div
+								className="flex min-h-80 flex-col items-center justify-center gap-5 rounded-b-xl bg-muted p-6 text-center"
+								data-theme-preset={draft.themePreset}
+							>
+								{draft.logoAssetId ? (
+									<Image
+										src={`/api/brand-assets/${draft.logoAssetId}`}
+										alt="站点标识"
+										width={draft.logoSize}
+										height={draft.logoSize}
+										unoptimized
+										style={{ width: draft.logoSize, height: draft.logoSize }}
+										className="object-contain"
+									/>
+								) : (
+									<Command className="size-12 text-primary" />
+								)}
+								<h2 className="break-words text-3xl">{draft.siteName}</h2>
+								<p className="break-words text-muted-foreground">
+									{draft.siteDescription}
+								</p>
+								<Separator />
+								<p className="break-words text-sm">页面标题：{draft.pageTitle}</p>
+								{draft.faviconAssetId && (
+									<div className="flex items-center gap-2">
+										<Image
+											src={`/api/brand-assets/${draft.faviconAssetId}`}
+											alt="网站图标"
+											width={20}
+											height={20}
+											unoptimized
+										/>
+										<span className="text-sm text-muted-foreground">
+											网站图标
+										</span>
+									</div>
+								)}
+							</div>
+						</div>
+					)
 				}
 			>
 				<Tabs value={tab} onValueChange={(value) => setTab(String(value))}>
 					<TabsList className="h-auto w-full flex-wrap">
 						<TabsTrigger value="brand">品牌与标题</TabsTrigger>
 						<TabsTrigger value="assets">标识与主题</TabsTrigger>
+						<TabsTrigger value="login">登录页</TabsTrigger>
 						<TabsTrigger value="security">登录安全</TabsTrigger>
 						<TabsTrigger value="activity">活动附件</TabsTrigger>
 					</TabsList>
@@ -375,29 +472,79 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										id={`settings-${key}`}
 										type="file"
 										accept="image/png,image/jpeg,image/x-icon,image/vnd.microsoft.icon,.ico"
+										className="sr-only"
 										disabled={!!uploading || busy}
-										onChange={(e) =>
-											void upload(e.target.files?.[0], key as "logoAssetId")
-										}
+										onChange={(e) => {
+											const file = e.target.files?.[0];
+											e.target.value = "";
+											void upload(
+												file,
+												key as "logoAssetId" | "faviconAssetId",
+											);
+										}}
 									/>
-									<FieldDescription>
-										{uploading === key
-											? "正在上传…"
-											: "PNG、JPEG或ICO，最大1MiB。上传后需保存设置。"}
-									</FieldDescription>
-									{draft[key as "logoAssetId"] && (
+									<div className="flex flex-wrap gap-2">
 										<Button
 											type="button"
 											variant="outline"
-											className="self-start"
-											disabled={busy}
-											onClick={() => change(key as "logoAssetId", null)}
+											size="sm"
+											disabled={!!uploading || busy}
+											onClick={() =>
+												document.getElementById(`settings-${key}`)?.click()
+											}
 										>
-											恢复默认{label}
+											<Upload data-icon="inline-start" />
+											{uploading === key
+												? "正在上传…"
+												: draft[key as "logoAssetId"]
+													? `更换${label}图片`
+													: `选择${label}图片`}
 										</Button>
-									)}
+										{draft[key as "logoAssetId"] && (
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												disabled={busy}
+												onClick={() => change(key as "logoAssetId", null)}
+											>
+												恢复默认{label}
+											</Button>
+										)}
+									</div>
+									<FieldDescription>
+										PNG、JPEG或ICO，最大1MiB。上传后需保存设置。
+									</FieldDescription>
 								</Field>
 							))}
+							<Field data-invalid={!!invalid.logoSize}>
+								<FieldLabel htmlFor="settings-logo-size">
+									站点 Logo 显示尺寸（像素）
+								</FieldLabel>
+								<Input
+									id="settings-logo-size"
+									type="number"
+									inputMode="numeric"
+									min={16}
+									max={128}
+									step={1}
+									value={Number.isNaN(draft.logoSize) ? "" : draft.logoSize}
+									disabled={busy}
+									aria-invalid={!!invalid.logoSize}
+									onChange={(e) =>
+										change(
+											"logoSize",
+											e.target.value === ""
+												? Number.NaN
+												: Number(e.target.value),
+										)
+									}
+								/>
+								{invalid.logoSize && <FieldError>{invalid.logoSize}</FieldError>}
+								<FieldDescription>
+									侧栏、登录页与改密页统一使用该尺寸，可设置16至128像素；侧栏折叠时自动缩小。建议上传前裁掉图片四周的空白。
+								</FieldDescription>
+							</Field>
 							<Field>
 								<FieldLabel>界面主题</FieldLabel>
 								<div className="grid gap-2 sm:grid-cols-2">
@@ -438,6 +585,129 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								</div>
 								<FieldDescription>
 									主题会同时调整圆角、描边、阴影与主色，保存后全站生效；不影响已有成绩和结算记录。
+								</FieldDescription>
+							</Field>
+							<Field>
+								<FieldLabel htmlFor="settings-default-theme-mode">
+									默认深浅模式
+								</FieldLabel>
+								<NativeSelect
+									id="settings-default-theme-mode"
+									value={draft.defaultThemeMode}
+									disabled={busy}
+									onChange={(e) =>
+										change("defaultThemeMode", e.target.value as ThemeMode)
+									}
+								>
+									<NativeSelectOption value="light">浅色</NativeSelectOption>
+									<NativeSelectOption value="dark">深色</NativeSelectOption>
+									<NativeSelectOption value="system">
+										跟随系统
+									</NativeSelectOption>
+								</NativeSelect>
+								<FieldDescription>
+									未单独选择外观的访客和用户使用该默认值；用户仍可在登录页或顶栏自行切换，个人选择只保存在各自浏览器。
+								</FieldDescription>
+							</Field>
+						</FieldGroup>
+					</TabsContent>
+					<TabsContent className="mt-4" value="login">
+						<FieldGroup>
+							<Field>
+								<FieldLabel htmlFor="settings-login-background">
+									登录页背景图
+								</FieldLabel>
+								<div className="relative aspect-video w-full overflow-hidden rounded-lg border bg-muted">
+									{draft.loginBackgroundAssetId ? (
+										<Image
+											src={`/api/brand-assets/${draft.loginBackgroundAssetId}`}
+											alt="登录页背景当前图片"
+											fill
+											unoptimized
+											sizes="(min-width: 1280px) 40vw, 100vw"
+											className="object-cover"
+										/>
+									) : (
+										<div className="auth-default-background absolute inset-0 flex items-center justify-center p-4">
+											<span className="rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground">
+												未上传背景，使用主题渐变
+											</span>
+										</div>
+									)}
+								</div>
+								<Input
+									id="settings-login-background"
+									type="file"
+									accept="image/png,image/jpeg,image/webp"
+									className="sr-only"
+									disabled={!!uploading || busy}
+									onChange={(e) => {
+										const file = e.target.files?.[0];
+										e.target.value = "";
+										void upload(file, "loginBackgroundAssetId");
+									}}
+								/>
+								<div className="flex flex-wrap items-center gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										disabled={!!uploading || busy}
+										onClick={() =>
+											document
+												.getElementById("settings-login-background")
+												?.click()
+										}
+									>
+										<Upload data-icon="inline-start" />
+										{uploading === "loginBackgroundAssetId"
+											? "正在上传…"
+											: draft.loginBackgroundAssetId
+												? "更换背景图"
+												: "选择背景图"}
+									</Button>
+									{draft.loginBackgroundAssetId && (
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											disabled={busy}
+											onClick={() => change("loginBackgroundAssetId", null)}
+										>
+											移除背景图
+										</Button>
+									)}
+								</div>
+								<FieldDescription>
+									支持 PNG、JPEG、WebP，最大 5MB；建议横版 1920×1080 以上。上传后需保存设置。
+								</FieldDescription>
+								<FieldDescription>
+									背景图公开可见，请勿上传含学生姓名、成绩或证件信息的图片。移除后登录页恢复主题渐变背景。
+								</FieldDescription>
+							</Field>
+							<Separator />
+							<Field data-invalid={!!invalid.loginNotice}>
+								<div className="flex flex-wrap items-center justify-between gap-2">
+									<FieldLabel htmlFor="settings-login-notice">登录公告</FieldLabel>
+									<span className="text-muted-foreground text-xs">
+										{draft.loginNotice.length} / 200
+									</span>
+								</div>
+								<Textarea
+									id="settings-login-notice"
+									disabled={busy}
+									value={draft.loginNotice}
+									onChange={(e) => change("loginNotice", e.target.value)}
+									rows={3}
+									maxLength={200}
+									aria-invalid={!!invalid.loginNotice}
+									placeholder="例如：本学期综合测评已开放，请在截止前完成确认。"
+								/>
+								{invalid.loginNotice && (
+									<FieldError>{invalid.loginNotice}</FieldError>
+								)}
+								<FieldDescription>
+									显示在登录卡片顶部，留空则不显示；仅支持纯文本，公告对所有访客可见，请勿填写学生个人信息。
 								</FieldDescription>
 							</Field>
 						</FieldGroup>

@@ -105,13 +105,13 @@ async function main() {
     async function workbench(session: Session, role: string, title: string, termId?: string) {
       const html = await session.page(termId ? `/?termId=${termId}` : "/");
       check(new RegExp(`<h1[^>]*>${title}</h1>`).test(html), `${role}未渲染独立角色工作台`);
-      for (const other of ["管理工作台", "活动工作台", "我的测评概览"].filter(value => value !== title)) {
+      for (const other of ["学校测评工作台", "学院工作台", "辅导员工作台", "活动工作台", "我的测评概览"].filter(value => value !== title)) {
         check(!new RegExp(`<h1[^>]*>${other}</h1>`).test(html), `${role}误用其他角色主体`);
       }
       results.push({ label: `${role} independent workbench${termId ? " with real data" : " without term"}`, status: 200 });
       return html;
     }
-    await workbench(admin, "ADMIN", "管理工作台");
+    await workbench(admin, "ADMIN", "学校测评工作台");
     await workbench(publisher, "PUBLISHER", "活动工作台");
     await workbench(student, "STUDENT", "我的测评概览");
     for (const [role, session, paths] of [["ADMIN", admin, ["/", "/account", "/accounts", "/students", "/terms", "/activities", "/recognitions", "/claims", "/grades", "/deductions", "/imports", "/results", "/publication", "/appeals", "/rankings", "/settings"]], ["STUDENT", student, ["/", "/account", "/profile", "/terms", "/my-activities", "/my-activities?view=feed", "/claims", "/results", "/appeals"]], ["PUBLISHER", publisher, ["/", "/account", "/terms", "/activities", "/recognitions"]]] as const) {
@@ -145,15 +145,12 @@ async function main() {
     await invalidEntry.credentials("http-counselor", "COUNSELOR", password, invalidCaptcha);
     check(!(await invalidEntry.json("/api/auth/session")).user, "错误或重放验证码不应登录");
     results.push({ label: "four role dropdown login, wrong role and CAPTCHA replay denied", status: 200 });
-    for (const [role, session] of [["COLLEGE", college], ["COUNSELOR", counselor]] as const) {
-      const landing = await session.fetch("/"), landingHtml = await landing.text();
-      const redirectMeta = landingHtml.match(/<meta[^>]+http-equiv="refresh"[^>]*>/i)?.[0] ?? "";
-      const landingTarget = landing.headers.get("location");
-      check((landingTarget && new URL(landingTarget, origin).pathname === "/students") || (landing.status === 200 && /content="[^\"]*url=\/students"/.test(redirectMeta)), `${role}必须进入自身真实可用名录；status=${landing.status}，location=${landingTarget}，refresh=${redirectMeta}`);
+    for (const [role, session, title] of [["COLLEGE", college, "学院工作台"], ["COUNSELOR", counselor, "辅导员工作台"]] as const) {
+      await workbench(session, role, title);
       check((await session.json("/api/account")).college.id === collegeId, `${role}本人账号归属接口错误`);
       const deniedPassword = await session.fetch("/api/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: "WrongOldPassword123!", newPassword: "UnusedNewPassword123!" }) });
       check(deniedPassword.status === 400, `${role}改密接口应正常鉴权并拒绝错误旧密码`);
-      results.push({ label: `${role} correct landing, own account and password validation`, status: 200 });
+      results.push({ label: `${role} correct workbench, own account and password validation`, status: 200 });
     }
     for (const [role, session, paths] of [["ADMIN", admin, ["/organizations"]], ["COLLEGE", college, ["/organizations", "/students", "/account", "/activities", "/recognitions", "/imports"]], ["COUNSELOR", counselor, ["/students", "/account", "/activities", "/recognitions"]]] as const) {
       for (const path of paths) { await session.page(path); results.push({ label: `${role} ${path} configured organization`, status: 200 }); }
@@ -165,15 +162,26 @@ async function main() {
     const accounts = await admin.json("/api/admin/accounts?role=STUDENT&disabled=false");
     check(accounts.total === 1 && accounts.items[0].id === selfId, "账号角色/状态过滤失败");
     const originalSettings = await admin.json("/api/admin/settings");
+    const publicSettings = await anonymous.json("/api/settings/public");
+    check(Object.keys(publicSettings).sort().join(",") === "defaultThemeMode,faviconAssetId,loginBackgroundAssetId,loginNotice,logoAssetId,logoSize,pageTitle,siteDescription,siteName,themePreset", "公开设置未按白名单返回");
+    check(!("revision" in publicSettings) && !("loginFailureLimitEnabled" in publicSettings), "公开设置泄露修订或登录策略");
+    const invalidBackground = await admin.fetch("/api/admin/brand-assets", { method: "POST", headers: { "x-file-name": encodeURIComponent("fake.png"), "x-asset-kind": "login-background" }, body: Buffer.from("not an image") });
+    check(invalidBackground.status === 400, "伪装成PNG的文本不能作为登录背景");
+    const backgroundFile = await admin.fetch("/api/admin/brand-assets", { method: "POST", headers: { "x-file-name": encodeURIComponent("登录背景.png"), "x-asset-kind": "login-background" }, body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64") });
+    const backgroundBody = await backgroundFile.text();
+    check(backgroundFile.status === 200, `登录背景图片上传失败：${backgroundFile.status} ${backgroundBody.slice(0, 160)}`);
+    const backgroundAsset = JSON.parse(backgroundBody);
     function settingsPayload(settings: typeof originalSettings) {
-      return { siteName: settings.siteName, siteDescription: settings.siteDescription, pageTitle: settings.pageTitle, themePreset: settings.themePreset, logoAssetId: settings.logoAssetId, faviconAssetId: settings.faviconAssetId, loginFailureLimitEnabled: settings.loginFailureLimitEnabled, loginFailureMaxAttempts: settings.loginFailureMaxAttempts, loginFailureLockMinutes: settings.loginFailureLockMinutes, revision: settings.revision };
+      return { siteName: settings.siteName, siteDescription: settings.siteDescription, pageTitle: settings.pageTitle, themePreset: settings.themePreset, defaultThemeMode: settings.defaultThemeMode, loginBackgroundAssetId: settings.loginBackgroundAssetId, loginNotice: settings.loginNotice, logoAssetId: settings.logoAssetId, logoSize: settings.logoSize, faviconAssetId: settings.faviconAssetId, loginFailureLimitEnabled: settings.loginFailureLimitEnabled, loginFailureMaxAttempts: settings.loginFailureMaxAttempts, loginFailureLockMinutes: settings.loginFailureLockMinutes, revision: settings.revision };
     }
     check(originalSettings.loginFailureLimitEnabled === false, "失败限制必须默认关闭");
-    const updatedSettings = await admin.json("/api/admin/settings", { ...settingsPayload(originalSettings), siteName: "HTTP持久化站点", pageTitle: "HTTP设置保存标题", siteDescription: "保存设置后回读", themePreset: "blue", loginFailureLimitEnabled: true, loginFailureMaxAttempts: 2, loginFailureLockMinutes: 1, reason: "验证真实保存及登录限制" }, "PUT");
+    const notice = "HTTP登录公告：请使用学校分配的账号登录。";
+    const updatedSettings = await admin.json("/api/admin/settings", { ...settingsPayload(originalSettings), siteName: "HTTP持久化站点", pageTitle: "HTTP设置保存标题", siteDescription: "保存设置后回读", themePreset: "claude", defaultThemeMode: "dark", loginBackgroundAssetId: backgroundAsset.id, loginNotice: notice, loginFailureLimitEnabled: true, loginFailureMaxAttempts: 2, loginFailureLockMinutes: 1, reason: "验证真实保存及登录限制" }, "PUT");
     const reread = await admin.json("/api/admin/settings");
-    check(reread.revision === originalSettings.revision + 1 && reread.siteName === updatedSettings.siteName && reread.themePreset === "blue" && reread.loginFailureMaxAttempts === 2 && reread.loginFailureLockMinutes === 1, "设置PUT后GET未持久化全部字段");
+    check(reread.revision === originalSettings.revision + 1 && reread.siteName === updatedSettings.siteName && reread.themePreset === "claude" && reread.defaultThemeMode === "dark" && reread.loginBackgroundAssetId === backgroundAsset.id && reread.loginNotice === notice && reread.loginFailureMaxAttempts === 2 && reread.loginFailureLockMinutes === 1, "设置PUT后GET未持久化全部字段");
     const brandedLogin = await anonymous.page("/login");
-    check(brandedLogin.includes("HTTP持久化站点") && brandedLogin.includes("HTTP设置保存标题") && brandedLogin.includes('data-theme-preset="blue"'), "登录页面未应用最新主题和站点信息");
+    check(brandedLogin.includes("HTTP持久化站点") && brandedLogin.includes("HTTP设置保存标题") && brandedLogin.includes('data-theme-preset="claude"') && brandedLogin.includes('data-theme-mode="dark"') && brandedLogin.includes(notice) && brandedLogin.includes(`/api/brand-assets/${backgroundAsset.id}`), "登录页面未应用最新主题、公告或背景");
+    check((await anonymous.fetch(`/api/brand-assets/${backgroundAsset.id}`)).status === 200, "已被引用的登录背景不能匿名读取");
     check((await admin.fetch("/api/admin/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settingsPayload(originalSettings), reason: "过期保存应冲突" }) })).status === 409, "设置revision冲突保护失败");
     check((await student.fetch("/api/admin/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settingsPayload(reread), reason: "学生不可更新安全策略" }) })).status === 403, "安全设置越权未拒绝");
     const failedLogin = new Session();
@@ -195,28 +203,27 @@ async function main() {
     await admin.json(`/api/terms/${draft.id}/scheme`, { action: "activate", revision: 2 });
     await admin.json(`/api/terms/${draft.id}`, { action: "void", revision: 3, reason: "误开且未发布作废验证" }, "PATCH");
     const voidClaims = await student.page(`/claims?termId=${draft.id}`);
-    check(voidClaims.includes("已作废") && !buttonTexts(voidClaims).includes("新建个人申报"), "作废周期应保留历史并隐藏新建入口");
+    check(voidClaims.includes("已作废") && !buttonTexts(voidClaims).includes("新建成果申报"), "作废周期应保留历史并隐藏新建入口");
     check((await admin.fetch(`/api/terms/${draft.id}/scheme`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", revision: 4, scheme: draft.scheme }) })).status === 409, "作废周期仍可写规则");
     results.push({ label: "term recycle/restore/void and historical UI write protection", status: 200 });
     const term = await admin.json("/api/terms", { name: "隔离HTTP测评", template: false });
     await admin.json(`/api/terms/${term.id}/scheme`, { action: "activate", revision: term.revision });
     const emptyClaims = await student.page(`/claims?termId=${term.id}`);
-    check(emptyClaims.includes("没有匹配的记录") && buttonTexts(emptyClaims).includes("新建个人申报"), "学生默认申报页应直接提供新建申报，而不是等待项目配置");
+    check(emptyClaims.includes("暂无成果申报") && buttonTexts(emptyClaims).includes("新建成果申报"), "学生默认申报页应直接提供新建申报，而不是等待项目配置");
     check(!buttonTexts(emptyClaims).includes("新建认定项目"), "学生不能创建已取消的认定项目");
     results.push({ label: "STUDENT /claims direct submission action without project catalog", status: 200 });
     const audience = { scope: "CLASS", colleges: [], classes: [{ college: "学院", major: "专业", className: "班级" }] };
-    const activity = await college.json("/api/activities", { termId: term.id, action: "save", activity: { name: "完整工作区活动", organizer: "学院", content: "活动内容与参与要求", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "1", audience } });
+    const activityStartsAt = new Date(Date.now() - 86_400_000).toISOString(), activityEndsAt = new Date(Date.now() + 86_400_000).toISOString();
+    const activity = await college.json("/api/activities", { termId: term.id, action: "save", activity: { name: "完整工作区活动", organizer: "学院", content: "活动内容与参与要求", startsAt: activityStartsAt, endsAt: activityEndsAt, nodeId: "total", points: "1", audience } });
     check(activity.college?.id === collegeId, "主办学院创建活动未归属本院");
-    await admin.json("/api/activities", { termId: term.id, action: "confirm", id: activity.id, revision: activity.revision });
-    check((await publisher.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, action: "save", activity: { name: "发布者新建应被阻断", organizer: "学院", content: "内容", startsAt: "2026-10-01T08:00:00.000Z", endsAt: "2026-10-02T08:00:00.000Z", nodeId: "total", points: "2", audience } }) })).status === 403, "历史发布者不应创建新活动");
+    check((await publisher.fetch("/api/activities", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, action: "save", activity: { name: "发布者新建应被阻断", organizer: "学院", content: "内容", startsAt: activityStartsAt, endsAt: activityEndsAt, nodeId: "total", points: "2", audience } }) })).status === 403, "历史发布者不应创建新活动");
     // 历史发布者的既有活动以隔离夹具数据保留，由管理员受控移交主办学院。
     const publisherActivityId = `http-${runId}-pubact`;
-    await fixture.query('INSERT INTO "Activity" (id,"termId","ownerId",name,organizer,content,"startsAt","endsAt","nodeId",points,confirmed,"publishRevision","audienceScope","audienceColleges","audienceClasses",revision,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,0,\'CLASS\',$12,$13,0,now(),now())', [publisherActivityId, term.id, `http-${runId}-PUBLISHER`, "发布者专属运营活动", "学院", "本人负责活动的完整内容", "2026-10-01T08:00:00.000Z", "2026-10-02T08:00:00.000Z", "total", "2", audience.colleges, audience.classes.map(item => JSON.stringify([item.college, item.major, item.className]))]);
+    await fixture.query('INSERT INTO "Activity" (id,"termId","ownerId",name,organizer,content,"startsAt","endsAt","nodeId",points,confirmed,"publishRevision","audienceScope","audienceColleges","audienceClasses",revision,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,0,\'CLASS\',$11,$12,0,now(),now())', [publisherActivityId, term.id, `http-${runId}-PUBLISHER`, "发布者专属运营活动", "学院", "本人负责活动的完整内容", activityStartsAt, activityEndsAt, "total", "2", audience.colleges, audience.classes.map(item => JSON.stringify([item.college, item.major, item.className]))]);
     await admin.json("/api/activities", { termId: term.id, action: "reassign", id: publisherActivityId, revision: 0, collegeId, reason: "隔离检查历史活动归属移交" });
-    await admin.json("/api/activities", { termId: term.id, action: "confirm", id: publisherActivityId, revision: 1 });
     const audiencePreview = await college.json("/api/activities/audience", { action: "preview", termId: term.id, audience });
     check(audiencePreview.count === 1 && audiencePreview.errors.length === 0, "学院与班级范围预检失败");
-    const publishedActivity = await college.json("/api/activities", { termId: term.id, action: "publish", id: activity.id, revision: 1, token: audiencePreview.token });
+    const publishedActivity = await college.json("/api/activities", { termId: term.id, action: "publish", id: activity.id, revision: 0 });
     check(publishedActivity.publishedAt, "主办学院发布活动失败");
     check((await student.json(`/api/activities?termId=${term.id}&view=feed`)).total === 1, "学生信息流未按已发布范围显示");
     check((await student.json(`/api/activities?termId=${term.id}`)).total === 0, "发布活动不应冒充后台参与登记");
@@ -257,24 +264,24 @@ async function main() {
     const importPage = await college.page(`/imports?termId=${term.id}&kind=participation`);
     check(importPage.includes("完整工作区活动"), "参与名单导入页未直接列出本人主办活动");
     results.push({ label: "COLLEGE host activity, shared evidence, full roster import and two-stage review", status: 200 });
-    for (const route of ["grades", "deductions"]) {
-      const selected = await admin.page(`/${route}?termId=${term.id}&login=http-student`);
-      check(selected.includes("HTTP学生") && selected.includes("http-student"), "指定学号未在首屏加载真实录入对象");
-      results.push({ label: `ADMIN /${route} exact student deep link`, status: 200 });
+    for (const [route, title] of [["grades", "成绩录入与审核"], ["deductions", "扣分管理与审核"]] as const) {
+      const selected = await admin.page(`/${route}?termId=${term.id}`);
+      check(selected.includes(title) && selected.includes("隔离HTTP测评"), `/${route} 未加载所选周期`);
+      results.push({ label: `ADMIN /${route} selected term workspace`, status: 200 });
     }
-    const invalidInput = await admin.page(`/grades?termId=${term.id}&login=unknown`);
-    check(invalidInput.includes("学号未匹配有效学生档案"), "指定学号失败应显示真实错误而不是回退其他学生");
-    results.push({ label: "ADMIN /grades invalid student preserves error", status: 200 });
+    check((await admin.json(`/api/grades?termId=${term.id}&studentLogin=http-student`)).student.name === "HTTP学生", "成绩录入接口未返回指定学生");
+    check(Array.isArray((await admin.json(`/api/deductions?termId=${term.id}&studentLogin=http-student`)).records), "扣分接口未返回指定学生记录");
+    results.push({ label: "ADMIN grades/deductions exact student APIs", status: 200 });
     const publisherHome = await workbench(publisher, "PUBLISHER", "活动工作台", term.id);
     check(publisherHome.includes("发布者专属运营活动") && !publisherHome.includes("完整工作区活动"), "发布者工作台活动归属不正确");
-    for (const [role, session] of [["ADMIN", admin], ["STUDENT", student]] as const) {
-      const html = await session.page("/activities");
-      check(html.includes("隔离HTTP测评") && html.includes("完整工作区活动"), "默认周期没有直接加载真实活动内容");
-      results.push({ label: `${role} /activities default context with real row`, status: 200 });
+    for (const [role, session, route] of [["ADMIN", admin, "/activities"], ["STUDENT", student, "/my-activities"]] as const) {
+      const html = await session.page(route);
+      check(html.includes("隔离HTTP测评") && html.includes("完整工作区活动"), `${role} ${route} 默认周期没有直接加载真实活动内容（term=${html.includes("隔离HTTP测评")}，activity=${html.includes("完整工作区活动")}）`);
+      results.push({ label: `${role} ${route} default context with real row`, status: 200 });
     }
     for (const tab of ["overview", "scheme"]) {
       const html = await admin.page(`/terms/${term.id}?tab=${tab}`);
-      check(html.includes("隔离HTTP测评") && html.includes("评分制度") && html.includes("周期总览"), "周期工作区缺少业务导航或当前上下文");
+      check(html.includes("隔离HTTP测评") && html.includes("评分方案") && html.includes("周期总览"), "周期工作区缺少业务导航或当前上下文");
       results.push({ label: `ADMIN /terms/[id] tab=${tab}`, status: 200 });
     }
     for (const [role, session] of [["COLLEGE", college], ["COUNSELOR", counselor]] as const) {
@@ -287,9 +294,9 @@ async function main() {
     check((await student.fetch(`/api/results/students?termId=${term.id}`)).status === 403, "结果名录泄露他人成绩");
     const enabledClaims = await student.page(`/claims?termId=${term.id}`);
     const adminClaims = await admin.page(`/claims?termId=${term.id}`);
-    check(buttonTexts(enabledClaims).includes("新建个人申报"), "学生默认申报记录页首屏缺少新建申报主操作");
+    check(buttonTexts(enabledClaims).includes("新建成果申报"), "学生默认申报记录页首屏缺少新建申报主操作");
     check(!buttonTexts(enabledClaims).includes("新建认定项目"), "学生误获管理员项目操作");
-    check(!buttonTexts(adminClaims).includes("新建认定项目") && !buttonTexts(adminClaims).includes("新建个人申报"), "管理员不应恢复项目配置或代学生申报");
+    check(!buttonTexts(adminClaims).includes("新建认定项目") && !buttonTexts(adminClaims).includes("新建成果申报"), "管理员不应恢复项目配置或代学生申报");
     results.push({ label: "STUDENT /claims visible primary submission action", status: 200 });
     results.push({ label: "ADMIN /claims supervision without discontinued project action", status: 200 });
     const projectWrite = await admin.fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ termId: term.id, name: "应被拒绝的项目", description: "目录已取消", nodeId: "total", points: "3", enabled: true }) });
@@ -332,13 +339,13 @@ async function main() {
     const pdfPreview = await student.fetch(`/api/evidence/${pdfEvidence.id}?disposition=inline`);
     check(pdfPreview.ok && pdfPreview.headers.get("content-type") === "application/pdf" && pdfPreview.headers.get("content-disposition")?.startsWith("inline;") && Buffer.from(await pdfPreview.arrayBuffer()).equals(Buffer.from(pdf)), "PDF内联预览内容或响应头错误");
     results.push({ label: "PDF inline bytes and unauthorized preview rejection", status: 200 });
-    const adminHome = await workbench(admin, "ADMIN", "管理工作台", term.id);
-    check(adminHome.includes("个人成果") && adminHome.includes("HTTP学生") && adminHome.includes("周期发布与确认概览"), "管理员工作台缺少真实审核和发布数据");
+    const adminHome = await workbench(admin, "ADMIN", "学校测评工作台", term.id);
+    check(adminHome.includes("个人成果") && adminHome.includes("HTTP学生") && adminHome.includes("全校待办进度") && adminHome.includes("各周期发布进度"), "管理员工作台缺少真实审核和发布数据");
     const studentHome = await workbench(student, "STUDENT", "我的测评概览", term.id);
-    check(studentHome.includes("个人成果") && studentHome.includes("本人评分模块概览") && !studentHome.includes("周期发布与确认概览"), "学生工作台未展示本人记录或误含管理主体");
+    check(studentHome.includes("个人成果") && studentHome.includes("评分模块") && !studentHome.includes("全校待办进度") && !studentHome.includes("各周期发布进度"), "学生工作台未展示本人记录或误含管理主体");
     for (const [role, session] of [["COLLEGE", college], ["COUNSELOR", counselor]] as const) {
       const html = await session.page(`/claims?termId=${term.id}`);
-      check(html.includes("个人成果") && html.includes("待学院终审"), `${role}申报页面缺少待学院终审记录`);
+      check(html.includes("个人成果") && html.includes("待学院审核"), `${role}申报页面缺少待学院审核记录`);
       results.push({ label: `${role} /claims pending college review visible`, status: 200 });
     }
     const approvedClaim = await college.json(`/api/claims/${claim.id}`, { termId: term.id, revision: scoredClaim.revision, action: "approve", reason: "材料完整属实" }, "PATCH");
@@ -351,7 +358,7 @@ async function main() {
     check(result.claims[0].name === "个人成果" && result.claims[0].evidenceIds.includes(evidence.id), "冻结结果丢失申报标题或原证明关联");
     await student.json(`/api/results/${publication.id}/confirm`, { termId: term.id, resultHash: result.resultHash });
     const publishedHome = await workbench(student, "STUDENT", "我的测评概览", term.id);
-    check(publishedHome.includes("已发布综合总分") && publishedHome.includes("4.00") && publishedHome.includes("固定发布版本"), "学生工作台没有使用固定发布成绩");
+    check(publishedHome.includes("已发布综合成绩") && publishedHome.includes("4.00") && publishedHome.includes("已发布第"), "学生工作台没有使用固定发布成绩");
     const appeal = await student.json("/api/appeals", { termId: term.id, publicationId: publication.id, resultHash: result.resultHash, target: "总分", reason: "核对计分依据", evidenceIds: [] });
     await admin.json(`/api/appeals/${appeal.id}`, { termId: term.id, revision: 0, action: "reject", resolution: "依据计分规则核对无误" }, "PATCH");
     await new Promise(r => setTimeout(r, 4600));
@@ -359,7 +366,7 @@ async function main() {
     const snapshot = await admin.json(`/api/terms/${term.id}/settlement`, { action: "lock", revision: lock.revision, token: lock.token, requestId: randomUUID() });
     check((await admin.json(`/api/snapshots/${snapshot.id}`)).sha256 === snapshot.sha256, "快照校验失败");
     const lockedClaims = await student.page(`/claims?termId=${term.id}`);
-    check(!buttonTexts(lockedClaims).includes("新建个人申报") && lockedClaims.includes("已锁定"), "锁定周期应说明不能新增申报，并保留历史查询");
+    check(!buttonTexts(lockedClaims).includes("新建成果申报") && lockedClaims.includes("已锁定"), "锁定周期应说明不能新增申报，并保留历史查询");
     check(lockedClaims.includes("个人成果") && lockedClaims.includes("已通过"), "锁定后应首屏保留本人真实申报记录");
     results.push({ label: "STUDENT /claims locked explanation and real history", status: 200 });
     check((await admin.fetch(`/api/rankings/export?termId=${term.id}`)).status === 200, "排名下载失败");
@@ -376,7 +383,7 @@ async function main() {
     results.push({ label: "archived publication/snapshot frozen and reopen blocked", status: 200 });
     for (const path of ["activities", "claims", "results", "publication", "rankings", "appeals"]) { await admin.page(`/${path}?termId=${term.id}`); results.push({ label: `ADMIN /${path} with term`, status: 200 }); }
     await mkdir(".local", { recursive: true });
-    await writeFile(".local/http-check-summary.json", JSON.stringify({ at: new Date().toISOString(), mode: "standalone production / isolated database / temporary attachments / port 3012 / HTTP only", passed: true, pages: results, assets: assets.length, workflows: ["四类角色选择及历史身份登录", "一次性验证码及错误重放", "可配置失败锁定及关闭", "系统信息/主题PUT持久化与登录应用", "周期回收站/恢复/作废/归档及只读保护", "完整制度只读角色", "四类角色限域图片预览及PDF内联/下载", "管理员、发布者、学生工作台及学院/辅导员真实入口", "学生工作台固定发布成绩", "独立职责页面与静态资源", "默认周期直接加载真实活动", "主办学院活动、共享证明与历史活动受控移交", "完整身份参与名单导入、首份封存与两级审核", "学生档案名录及理由更正", "账号角色状态过滤", "真实学生结果名录", "权限拒绝", "个人申报直接提交、辅导员评分、学院终审与伪造字段拒绝", "审核与计分", "发布确认及异议", "结算快照校验", "锁定后成绩扣分只读", "排名CSV"], browser: "未操作，用户自行验收；HTTP不验证水合后的操作、筛选、拖动、图片/PDF实际绘制与视觉效果" }, null, 2));
+    await writeFile(".local/http-check-summary.json", JSON.stringify({ at: new Date().toISOString(), mode: "standalone production / isolated database / temporary attachments / port 3012 / HTTP only", passed: true, pages: results, assets: assets.length, workflows: ["四类角色选择及历史身份登录", "一次性验证码及错误重放", "可配置失败锁定及关闭", "系统信息/主题/登录背景/公告/默认深色PUT持久化与登录应用", "公开设置白名单与伪装图片拒绝", "周期回收站/恢复/作废/归档及只读保护", "完整制度只读角色", "四类角色限域图片预览及PDF内联/下载", "管理员、发布者、学生工作台及学院/辅导员真实入口", "学生工作台固定发布成绩", "独立职责页面与静态资源", "默认周期直接加载真实活动", "主办学院活动、共享证明与历史活动受控移交", "完整身份参与名单导入、首份封存与两级审核", "学生档案名录及理由更正", "账号角色状态过滤", "真实学生结果名录", "权限拒绝", "个人申报直接提交、辅导员评分、学院终审与伪造字段拒绝", "审核与计分", "发布确认及异议", "结算快照校验", "锁定后成绩扣分只读", "排名CSV"], browser: "本HTTP检查不操作浏览器；登录页与主题的浏览器验收由独立Playwright脚本完成并归档截图" }, null, 2));
     console.log(`隔离生产HTTP检查通过：${results.length}个角色页面检查、${assets.length}个静态资源及活动参与、申报到结算闭环；未运行浏览器。`);
   } finally {
     if (server && server.exitCode === null) { const stopped = new Promise<void>(done => server!.once("exit", () => done())); server.kill(); await stopped; }

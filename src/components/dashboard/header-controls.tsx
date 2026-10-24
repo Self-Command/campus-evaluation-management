@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-export function HeaderControls() {
+import { Separator } from "@/components/ui/separator";
+import { ThemePreferences } from "@/components/dashboard/theme-picker";
+import type { ThemeMode, ThemePreset } from "@/lib/preferences/theme";
+export function HeaderControls({ siteDefaults }: { siteDefaults: { themePreset: ThemePreset; themeMode: ThemeMode } }) {
   const values = usePreferencesStore((s) => s.values);
   const set = usePreferencesStore((s) => s.setPreference);
   const icons = { light: Moon, dark: Sun, system: Monitor };
@@ -16,7 +19,7 @@ export function HeaderControls() {
         <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="界面外观" />}>
           <PanelTop />
         </PopoverTrigger>
-        <PopoverContent align="end">
+        <PopoverContent align="end" className="max-h-[min(36rem,calc(100dvh-5rem))] w-80 overflow-y-auto">
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="content-layout">内容布局</FieldLabel>
@@ -42,6 +45,8 @@ export function HeaderControls() {
               </NativeSelect>
             </Field>
           </FieldGroup>
+          <Separator />
+          <ThemePreferences siteDefaults={siteDefaults} />
         </PopoverContent>
       </Popover>
       <Button

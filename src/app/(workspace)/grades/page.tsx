@@ -28,7 +28,7 @@ const copy = {
 export default async function Page({
 	searchParams,
 }: {
-	searchParams: Promise<{ termId?: string }>;
+	searchParams: Promise<{ termId?: string; login?: string }>;
 }) {
 	const user = await pageSession();
 	if (user.role !== "ADMIN" && user.role !== "COLLEGE" && user.role !== "COUNSELOR") notFound();
@@ -67,6 +67,7 @@ export default async function Page({
 					key={term.id}
 					term={{ id: term.id, name: term.name, phase: term.phase, disposition: term.disposition }}
 					role={user.role}
+					initialLogin={p.login?.trim().slice(0, 80) ?? ""}
 				/>
 			) : (
 				<MeasurementEmpty admin={user.role === "ADMIN"} />

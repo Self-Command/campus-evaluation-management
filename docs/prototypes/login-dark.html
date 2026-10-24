@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>登录页原型 · 深色</title>
+    <link rel="stylesheet" href="prototype.css" />
+  </head>
+  <body>
+    <div class="auth-page">
+      <div class="auth-bg" aria-hidden="true">
+        <img src="assets/login-bg-campus.png" alt="" />
+      </div>
+      <div class="auth-overlay" aria-hidden="true"></div>
+
+      <header class="auth-header">
+        <div class="auth-brand">
+          <div class="brand-mark">序</div>
+          <div class="brand-copy">
+            <p class="brand-name">序衡</p>
+            <p class="brand-sub">高校综合测评管理</p>
+          </div>
+        </div>
+
+        <div class="theme-trigger-wrap">
+          <button class="theme-trigger" type="button" aria-expanded="false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.42 1.42" />
+            </svg>
+            <span>外观</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="auth-main">
+        <section class="auth-card" aria-labelledby="login-title">
+          <div class="auth-card-head">
+            <div class="auth-eyebrow">统一登录</div>
+            <h1 class="auth-title" id="login-title">欢迎登录</h1>
+            <p class="auth-desc">序衡 · 综合测评管理平台</p>
+          </div>
+
+          <div class="auth-notice">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4M12 8h.01" />
+            </svg>
+            <span>2026—2027学年第一学期综合测评已开放，请在截止前完成确认。</span>
+          </div>
+
+          <form class="auth-form">
+            <div class="field">
+              <label class="field-label" for="login-role">登录身份</label>
+              <div class="select-wrap">
+                <select class="select" id="login-role">
+                  <option>学生</option>
+                  <option>辅导员</option>
+                  <option>二级学院</option>
+                  <option>管理员</option>
+                </select>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="login-account">学号或账号</label>
+              <input class="input" id="login-account" type="text" placeholder="请输入学号或账号" autocomplete="username" />
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="login-password">密码</label>
+              <div class="input-wrap">
+                <input class="input" id="login-password" type="password" placeholder="••••••••" autocomplete="current-password" />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="login-captcha">图片验证码</label>
+              <input class="input" id="login-captcha" type="text" placeholder="请输入图片中的五位英文字母" autocomplete="off" />
+              <div class="captcha-row">
+                <div class="captcha-image" aria-hidden="true">
+                  <svg viewBox="0 0 144 42" role="img">
+                    <defs>
+                      <pattern id="captcha-noise" width="7" height="7" patternUnits="userSpaceOnUse">
+                        <circle cx="1" cy="1" r="0.55" fill="#d4d4d8" />
+                      </pattern>
+                    </defs>
+                    <rect width="144" height="42" fill="#f4f4f5" />
+                    <rect width="144" height="42" fill="url(#captcha-noise)" opacity="0.7" />
+                    <path d="M4 11c18 2 31-5 47 1s39 2 55-4 27 3 34 1" fill="none" stroke="#cdcdd2" stroke-width="0.7" />
+                    <path d="M2 31c16-5 30 4 45-1s33 1 47 3 32-4 48-1" fill="none" stroke="#d8d8dd" stroke-width="0.7" />
+                    <g font-family="Georgia, 'Times New Roman', serif" font-size="20" font-weight="700" fill="#3f3f46">
+                      <text x="13" y="29" transform="rotate(-7 13 29)">A</text>
+                      <text x="38" y="30" transform="rotate(5 38 30)">X</text>
+                      <text x="63" y="28" transform="rotate(-4 63 28)">K</text>
+                      <text x="90" y="30" transform="rotate(7 90 30)">M</text>
+                      <text x="116" y="28" transform="rotate(-5 116 28)">P</text>
+                    </g>
+                  </svg>
+                </div>
+                <button class="btn btn-outline" type="button">换一张</button>
+                <span class="captcha-hint">不区分大小写</span>
+              </div>
+            </div>
+
+            <button class="btn-primary" type="submit">
+              登录
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </button>
+          </form>
+
+          <p class="auth-help">账号由学校统一分配。如忘记密码，请联系管理员重置。</p>
+        </section>
+      </main>
+
+      <footer class="auth-footer">
+        <span>序衡 · 高校综合测评管理</span>
+        <span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+          安全登录
+        </span>
+      </footer>
+    </div>
+  </body>
+</html>

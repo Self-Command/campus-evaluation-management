@@ -7,7 +7,7 @@ import { pageActivities, saveActivity } from "@/server/activities";
 import { pageRecognitions } from "@/server/recognitions";
 import { authenticateCredentials } from "@/server/auth";
 import { correctScoring } from "@/server/corrections";
-import { publicSettings, saveSettings } from "@/server/settings";
+import { readSiteSettings, saveSettings } from "@/server/settings";
 import { previewPublication, publishResults, previewSettlement, lockSettlement, reopenTerm, listSnapshots } from "@/server/publications";
 import { getStudentResult } from "@/server/results";
 import { nodeSchema } from "@/lib/scoring/types";
@@ -22,8 +22,11 @@ const terms: string[] = [];
 const password = `Fixture!${randomUUID()}7a`;
 const admin = () => identities.ADMIN!.session;
 let originalSettings: Awaited<ReturnType<typeof db.siteSettings.findUnique>>;
-function settingContent(value: Awaited<ReturnType<typeof publicSettings>>) {
-  return { siteName: value.siteName, siteDescription: value.siteDescription, pageTitle: value.pageTitle, themePreset: value.themePreset, logoAssetId: value.logoAssetId, faviconAssetId: value.faviconAssetId, loginFailureLimitEnabled: value.loginFailureLimitEnabled, loginFailureMaxAttempts: value.loginFailureMaxAttempts, loginFailureLockMinutes: value.loginFailureLockMinutes };
+function settingContent(value: Awaited<ReturnType<typeof readSiteSettings>>) {
+  const { revision, updatedAt, ...content } = value;
+  void revision;
+  void updatedAt;
+  return content;
 }
 async function challenge(answer = "ABCDE", expiresAt = new Date(Date.now() + 300_000)) {
   const id = randomUUID();
@@ -35,7 +38,7 @@ async function loginAttempt(login: string, input: { password?: string; role?: st
   return authenticateCredentials({ login, password, role: "COUNSELOR", ...input, ...await challenge() });
 }
 async function policy(enabled: boolean, attempts = 2, minutes = 3) {
-  const current = await publicSettings();
+  const current = await readSiteSettings();
   return saveSettings(admin(), { ...settingContent(current), revision: current.revision, loginFailureLimitEnabled: enabled, loginFailureMaxAttempts: attempts, loginFailureLockMinutes: minutes, reason: "隔离核对登录失败限制" });
 }
 async function period(name: string, sourceTermId?: string) {
@@ -168,18 +171,18 @@ test("主题和站点信息连续保存后可回读，冲突只一方成功且�
   const previous = await db.siteSettings.findUnique({ where: { id: "site" } });
   try {
     for (const themePreset of ["soft-pop", "tangerine", "default"] as const) {
-      const current = await publicSettings();
+      const current = await readSiteSettings();
       const saved = await saveSettings(admin(), { ...settingContent(current), revision: current.revision, siteName: `验收${themePreset}`, pageTitle: `标题${themePreset}`, siteDescription: `信息${themePreset}`, themePreset, reason: "核对信息及主题保存" });
-      const read = await publicSettings();
+      const read = await readSiteSettings();
       expect(read.themePreset).toBe(themePreset); expect(read.siteName).toBe(saved.siteName); expect(read.revision).toBe(current.revision + 1);
     }
-    const current = await publicSettings();
+    const current = await readSiteSettings();
     const payload = { ...settingContent(current), revision: current.revision, reason: "同时保存设置" };
     const outcomes = await Promise.allSettled([saveSettings(admin(), { ...payload, pageTitle: "并发一" }), saveSettings(admin(), { ...payload, pageTitle: "并发二" })]);
     expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
-    const stored = await publicSettings();
+    const stored = await readSiteSettings();
     await expect(saveSettings(identities.COUNSELOR!.session, { ...settingContent(stored), revision: stored.revision, reason: "禁止越权修改" })).rejects.toThrow("权限");
-    expect((await publicSettings()).revision).toBe(stored.revision);
+    expect((await readSiteSettings()).revision).toBe(stored.revision);
   } finally {
     if (previous) await db.siteSettings.update({ where: { id: "site" }, data: { content: previous.content!, revision: previous.revision, updatedAt: previous.updatedAt } });
     else await db.siteSettings.deleteMany({ where: { id: "site" } });
@@ -252,7 +255,7 @@ test("成功清零并发失败不能绕过阈值，调整或关闭策略即时�
   await policy(true, 5, 10);
   expect(await loginAttempt(user.login)).toMatchObject({ id: user.id });
   expect((await db.authSession.findUniqueOrThrow({ where: { id: session.id } })).revokedAt).toBeNull();
-  const saved = await publicSettings();
+  const saved = await readSiteSettings();
   for (const invalid of [{ loginFailureMaxAttempts: 0 }, { loginFailureMaxAttempts: 101 }, { loginFailureLockMinutes: 0 }, { loginFailureLockMinutes: 1441 }, { loginFailureMaxAttempts: 2.5 }]) {
     await expect(saveSettings(admin(), { ...settingContent(saved), ...invalid, revision: saved.revision, reason: "拒绝非法限制参数" })).rejects.toThrow();
   }
