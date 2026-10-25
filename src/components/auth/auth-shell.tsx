@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useCallback, useState, type ReactNode } from "react";
 import Image from "next/image";
 import { GraduationCap } from "lucide-react";
 
@@ -39,26 +41,35 @@ export function AuthShell({
   footerNote?: ReactNode;
 }) {
   const hasImage = !!brand.loginBackgroundAssetId;
-  const foreground = hasImage ? "text-white" : "text-foreground";
-  const muted = hasImage ? "text-white/75" : "text-muted-foreground";
+  const [backgroundState, setBackgroundState] = useState<"none" | "loading" | "loaded" | "failed">(hasImage ? "loading" : "none");
+  const imageRef = useCallback((node: HTMLImageElement | null) => {
+    if (!node?.complete) return;
+    setBackgroundState(node.naturalWidth > 0 ? "loaded" : "failed");
+  }, []);
+  const imageLoaded = backgroundState === "loaded";
+  const imageFailed = backgroundState === "failed";
+  const foreground = imageLoaded ? "text-white" : "text-foreground";
+  const muted = imageLoaded ? "text-white/75" : "text-muted-foreground";
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div aria-hidden className="absolute inset-0 z-0">
-        {hasImage ? (
+        <div className="auth-default-background absolute inset-0" />
+        {hasImage && !imageFailed && (
           <>
             <Image
+              ref={imageRef}
               src={`/api/brand-assets/${brand.loginBackgroundAssetId}`}
               alt=""
               fill
               priority
               unoptimized
               sizes="100vw"
-              className="object-cover"
+              className={`object-cover transition-opacity duration-500 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+              onLoad={() => setBackgroundState("loaded")}
+              onError={() => setBackgroundState("failed")}
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/30 to-black/65" />
+            <div className={`absolute inset-0 bg-gradient-to-b from-black/55 via-black/30 to-black/65 transition-opacity duration-500 ${imageLoaded ? "opacity-100" : "opacity-0"}`} />
           </>
-        ) : (
-          <div className="auth-default-background absolute inset-0" />
         )}
       </div>
       <header className="relative z-10 flex items-center justify-between gap-4 px-5 py-4 sm:px-8">
@@ -85,7 +96,7 @@ export function AuthShell({
         </div>
         <ThemePicker
           siteDefaults={{ themePreset: brand.themePreset, themeMode: brand.defaultThemeMode }}
-          imageBackground={hasImage}
+          imageBackground={imageLoaded}
         />
       </header>
       <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-4 sm:py-6">

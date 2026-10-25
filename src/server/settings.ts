@@ -140,14 +140,16 @@ export async function uploadBrandAsset(sessionId: string, bytes: Buffer, kind: B
   });
 }
 
-export async function getBrandAsset(id: string, sessionId?: string) {
+export async function getBrandAsset(id: string, session?: () => Promise<string | undefined>) {
   const settings = await readSiteSettings();
-  if (![settings.logoAssetId, settings.logoDarkAssetId, settings.faviconAssetId, settings.loginBackgroundAssetId].includes(id)) {
+  const publicAsset = [settings.logoAssetId, settings.logoDarkAssetId, settings.faviconAssetId, settings.loginBackgroundAssetId].includes(id);
+  if (!publicAsset) {
+    const sessionId = session ? await session() : undefined;
     const current = sessionId ? await getCurrentSession(sessionId) : null;
     if (!current || current.user.mustChangePassword || current.user.role !== "ADMIN") throw new AccountError("图片不存在", 404);
   }
   const asset = await db.brandAsset.findUnique({ where: { id } });
   if (!asset) throw new AccountError("图片不存在", 404);
   if (createHash("sha256").update(asset.bytes).digest("hex") !== asset.sha256) throw new AccountError("图片校验失败", 500);
-  return asset;
+  return { ...asset, publicAsset };
 }

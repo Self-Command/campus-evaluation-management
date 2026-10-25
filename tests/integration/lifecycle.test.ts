@@ -244,7 +244,25 @@ test("常用设置白名单/修订/品牌发布和本人账号设置权限", asy
   const current = { ...content, revision };
   await expect(saveSettings(identities.student.session, { ...current, reason: "越权设置" })).rejects.toThrow("权限");
   const changed = await saveSettings(admin, { ...current, siteName: "综合测评", logoAssetId: image.id, reason: "更新学校站名" });
-  expect(changed.revision).toBe(1); expect((await getBrandAsset(image.id)).size).toBe(png.length);
+  expect(changed.revision).toBe(1);
+  let publicSessionLookups = 0;
+  const publicImage = await getBrandAsset(image.id, async () => {
+    publicSessionLookups += 1;
+    return undefined;
+  });
+  expect(publicImage.size).toBe(png.length);
+  expect(publicImage.publicAsset).toBe(true);
+  expect(publicSessionLookups).toBe(0);
+  const privateImage = await uploadBrandAsset(admin, png);
+  await expect(getBrandAsset(privateImage.id)).rejects.toThrow("不存在");
+  let privateSessionLookups = 0;
+  const privateAsset = await getBrandAsset(privateImage.id, async () => {
+    privateSessionLookups += 1;
+    return admin;
+  });
+  expect(privateAsset.size).toBe(png.length);
+  expect(privateAsset.publicAsset).toBe(false);
+  expect(privateSessionLookups).toBe(1);
   await expect(saveSettings(admin, { ...current, reason: "过期编辑" })).rejects.toThrow("已变化");
   await expect(saveSettings(admin, { ...current, revision: 1, themePreset: "<script>", reason: "非法主题" })).rejects.toThrow();
   const own = await selfAccount(identities.student.session);
