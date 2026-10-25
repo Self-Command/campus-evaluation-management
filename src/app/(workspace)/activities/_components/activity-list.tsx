@@ -269,7 +269,7 @@ export function ActivityList({
 					setOpen(value);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+				<DialogContent className="sm:max-w-4xl">
 					<DialogHeader>
 						<DialogTitle>创建活动</DialogTitle>
 						<DialogDescription>

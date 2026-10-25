@@ -797,7 +797,7 @@ export function SchemeEditor({
 					if (!correctBusy) setCorrectOpen(open);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-5xl">
+				<DialogContent className="sm:max-w-5xl">
 					<DialogHeader>
 						<DialogTitle>评分方案更正</DialogTitle>
 						<DialogDescription>
@@ -945,7 +945,7 @@ export function SchemeEditor({
 							if (!busy && !correctBusy) setMobileEdit(open);
 						}}
 					>
-						<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+						<DialogContent className="sm:max-w-2xl">
 							<DialogHeader>
 								<DialogTitle>
 									{node.name} · {editable ? "模块设置" : "规则明细"}

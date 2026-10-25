@@ -42,7 +42,7 @@ export function ScoringCorrection({
 					onOpenChange(value);
 			}}
 		>
-			<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-5xl">
+			<DialogContent className="sm:max-w-5xl">
 				<DialogHeader>
 					<DialogTitle>
 						{kind === "activity" ? "活动计分更正" : "认定项目计分更正"}

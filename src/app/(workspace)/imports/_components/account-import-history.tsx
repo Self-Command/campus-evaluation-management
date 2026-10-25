@@ -473,7 +473,7 @@ export function AccountImportHistory() {
 					if (!open) setDetailId(null);
 				}}
 			>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+				<DialogContent className="sm:max-w-4xl">
 					<DialogHeader>
 						<DialogTitle>批次详情</DialogTitle>
 						<DialogDescription>
@@ -591,7 +591,7 @@ export function AccountImportHistory() {
 					if (!open && !busy) setRevokeOpen(false);
 				}}
 			>
-				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+				<DialogContent className="sm:max-w-xl">
 					<DialogHeader>
 						<DialogTitle>整批撤销账号导入？</DialogTitle>
 						<DialogDescription>

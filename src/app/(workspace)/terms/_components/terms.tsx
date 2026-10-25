@@ -415,7 +415,7 @@ export function Terms({
 					}
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+				<DialogContent className="sm:max-w-2xl">
 					<DialogHeader>
 						<DialogTitle>{target?.name} · 周期管理</DialogTitle>
 						<DialogDescription>

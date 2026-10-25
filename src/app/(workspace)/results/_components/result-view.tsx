@@ -198,7 +198,7 @@ export function ResultView({
 					if (!busy) setDetailsOpen(open);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+				<DialogContent className="sm:max-w-lg">
 					<DialogHeader>
 						<DialogTitle>成绩说明</DialogTitle>
 						<DialogDescription>
@@ -310,7 +310,7 @@ export function ResultView({
 					if (!busy && !uploading) setAppealOpen(open);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto">
+				<DialogContent>
 					<DialogHeader>
 						<DialogTitle>提出成绩异议</DialogTitle>
 						<DialogDescription>

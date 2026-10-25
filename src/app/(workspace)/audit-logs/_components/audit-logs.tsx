@@ -465,7 +465,7 @@ export function AuditLogs() {
       </Dialog>
 
       <Dialog open={policyOpen} onOpenChange={setPolicyOpen}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>日志与备份保留策略</DialogTitle>
             <DialogDescription>
@@ -494,7 +494,7 @@ export function AuditLogs() {
       </Dialog>
 
       <Dialog open={purgeOpen} onOpenChange={open => { setPurgeOpen(open); if (!open) { setPassword(""); setReason(""); setConfirmPhrase(""); } }}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>清理过期操作日志</DialogTitle>
             <DialogDescription>

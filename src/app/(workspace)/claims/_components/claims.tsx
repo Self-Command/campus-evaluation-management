@@ -435,7 +435,7 @@ export function Claims({
 						});
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+				<DialogContent className="sm:max-w-4xl">
 					<DialogHeader>
 						<DialogTitle>新建成果申报</DialogTitle>
 						<DialogDescription>

@@ -537,7 +537,7 @@ export function ActivityDetail({
 					setEdit(value);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+				<DialogContent className="sm:max-w-4xl">
 					<DialogHeader>
 						<DialogTitle>编辑活动</DialogTitle>
 						<DialogDescription>
@@ -586,7 +586,7 @@ export function ActivityDetail({
 					}
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto">
+				<DialogContent>
 					<DialogHeader>
 						<DialogTitle>上传活动证明</DialogTitle>
 						<DialogDescription>
@@ -755,7 +755,7 @@ export function ActivityDetail({
 					if (!busy) setPublishing(open);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto">
+				<DialogContent>
 					<DialogHeader>
 						<DialogTitle>确认范围并发布活动</DialogTitle>
 						<DialogDescription>

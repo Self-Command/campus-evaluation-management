@@ -309,7 +309,7 @@ export function Accounts({
 					}
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+				<DialogContent className="sm:max-w-xl">
 					<DialogHeader>
 						<DialogTitle>{current ? "编辑账号" : "新建账号"}</DialogTitle>
 						<DialogDescription>

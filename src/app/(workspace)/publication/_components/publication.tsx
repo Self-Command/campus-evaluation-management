@@ -1125,7 +1125,7 @@ export function Publication({ termId }: { termId: string }) {
 					if (!busy) setMissingOpen(open);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+				<DialogContent className="sm:max-w-4xl">
 					<DialogHeader>
 						<DialogTitle>成绩未录完名单</DialogTitle>
 						<DialogDescription>
@@ -1175,7 +1175,7 @@ export function Publication({ termId }: { termId: string }) {
 					if (!busy) setCohortDetail(open);
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
+				<DialogContent className="sm:max-w-4xl">
 					<DialogHeader>
 						<DialogTitle>参评名单变化</DialogTitle>
 						<DialogDescription>
@@ -1226,7 +1226,7 @@ export function Publication({ termId }: { termId: string }) {
 					if (!open) setSnapId("");
 				}}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+				<DialogContent className="sm:max-w-3xl">
 					<DialogHeader>
 						<DialogTitle>结算存档</DialogTitle>
 						<DialogDescription>查看锁定时保存的记录。</DialogDescription>

@@ -1002,7 +1002,7 @@ function RestoreWizard({
 
   return (
     <Dialog open onOpenChange={open => !open && !busy && onClose()}>
-      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-4xl" showCloseButton={!busy}>
+      <DialogContent className="sm:max-w-4xl" showCloseButton={!busy}>
         <DialogHeader>
           <DialogTitle>恢复数据库：{item.filename}</DialogTitle>
           <DialogDescription>

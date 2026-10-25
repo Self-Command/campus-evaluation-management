@@ -40,7 +40,7 @@ export function EvidenceViewer({
 				<Eye data-icon="inline-start" />
 				{compact ? "预览" : evidence.name}
 			</Button>
-			<DialogContent className="max-h-[95dvh] overflow-y-auto sm:max-w-5xl">
+			<DialogContent className="sm:max-w-5xl">
 				<DialogHeader>
 					<DialogTitle className="break-all pr-7">{evidence.name}</DialogTitle>
 					<DialogDescription>

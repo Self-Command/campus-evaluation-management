@@ -464,7 +464,7 @@ export function SourceRecords({
 				}}
 				open={!!detail}
 			>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+				<DialogContent className="sm:max-w-2xl">
 					{detail && (
 						<SourceDetailContent
 							detail={detail}

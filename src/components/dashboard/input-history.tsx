@@ -64,7 +64,7 @@ export function InputHistory({
 				查看{kind === "grade" ? "成绩" : "扣分"}变更历史
 			</Button>
 			<Dialog open={open} onOpenChange={setOpen}>
-				<DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+				<DialogContent className="sm:max-w-2xl">
 					<DialogHeader>
 						<DialogTitle>
 							{kind === "grade" ? "成绩" : "扣分"}变更历史
