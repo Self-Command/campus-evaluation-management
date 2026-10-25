@@ -255,7 +255,10 @@ html[data-font="geist"] body { --font-sans: "Segoe UI", "Microsoft YaHei", syste
 body { font-size: 14px; line-height: 1.6; }
 @media (max-width: 767px) {
   [data-slot="input"], [data-slot="input-group-control"], [data-slot="native-select"], [data-slot="textarea"] { font-size: 16px; min-height: 44px; }
-  [data-slot="button"], [data-slot="sidebar-menu-button"], [data-slot="select-trigger"] { min-height: 44px; }
+  [data-slot="input-group"] { height: auto; min-height: 44px; }
+  [data-slot="input-group-addon"] { padding-block: 0; }
+  [data-slot="tabs-list"] { height: auto; padding: 2px; }
+  [data-slot="tabs-list"][data-variant="default"] { gap: 2px; }
 }
 
 /* Approved business theme presets share the same semantic tokens on authentication and workspace pages. */

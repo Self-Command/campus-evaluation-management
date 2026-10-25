@@ -131,7 +131,7 @@ export function SearchableSelect({
 									type="button"
 									disabled={option.disabled}
 									onClick={() => choose(option.value)}
-									className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+									className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent max-md:min-h-11"
 								>
 									<Check
 										className={cn(

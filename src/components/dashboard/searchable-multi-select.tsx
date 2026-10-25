@@ -80,8 +80,8 @@ export function SearchableMultiSelect({
 								key={option.value}
 								className={
 									option.disabled
-										? "flex cursor-not-allowed items-start gap-2 rounded-md px-2 py-1.5 text-sm opacity-50"
-										: "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+										? "flex cursor-not-allowed items-start gap-2 rounded-md px-2 py-1.5 text-sm opacity-50 max-md:min-h-11"
+										: "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent max-md:min-h-11"
 								}
 							>
 								<Checkbox
