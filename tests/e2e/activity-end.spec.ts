@@ -148,10 +148,9 @@ test("学院结束活动后学生最新活动隐藏，参与记录保留，重�
 	const collegePage = await collegeContext.newPage();
 	await studentPage.setViewportSize({ width: 1440, height: 900 });
 	await collegePage.setViewportSize({ width: 1440, height: 900 });
-	await login(studentPage, "学生", `${prefix}-student`, password);
+	await login(studentPage, `${prefix}-student`, password);
 	await login(
 		collegePage,
-		"学院",
 		`${prefix}-college`,
 		password,
 	);

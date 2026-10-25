@@ -13,7 +13,7 @@ function skipWithoutStudentAccount() {
 }
 
 async function signInStudent(page: Page) {
-	await login(page, "学生", studentLogin!, studentPassword!);
+	await login(page, studentLogin!, studentPassword!);
 }
 
 async function openOwnResult(page: Page) {
@@ -347,7 +347,7 @@ test.describe("学生成绩页 - 管理员查看", () => {
 
 	test("管理员查看学生扣分依据与变更记录", async ({ page }) => {
 		test.skip(!adminLogin || !adminPassword, "未配置管理员验收账号");
-		await login(page, "管理员", adminLogin!, adminPassword!);
+		await login(page, adminLogin!, adminPassword!);
 		const terms = await page.evaluate(async () => {
 			const response = await fetch("/api/terms");
 			return (await response.json()) as { id: string; phase: string }[];

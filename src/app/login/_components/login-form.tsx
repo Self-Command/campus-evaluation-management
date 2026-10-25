@@ -18,13 +18,6 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Feedback } from "@/components/dashboard/feedback";
-import {
-	Select,
-	SelectTrigger,
-	SelectValue,
-	SelectContent,
-	SelectItem,
-} from "@/components/ui/select";
 
 const formSchema = z.object({
 	login: z
@@ -39,15 +32,7 @@ const formSchema = z.object({
 		.regex(/^[A-Za-z]{5}$/, "请输入图片中的五位英文字母"),
 });
 
-const roles = [
-	{ value: "STUDENT", label: "学生" },
-	{ value: "COUNSELOR", label: "辅导员" },
-	{ value: "COLLEGE", label: "二级学院" },
-	{ value: "ADMIN", label: "管理员" },
-];
-
-type CaptchaChallenge = { id: string; image: string; expiresAt: string };
-async function readCaptcha(signal?: AbortSignal): Promise<CaptchaChallenge> {
+type CaptchaChallenge = { id: string; image: string; expiresAt: string };async function readCaptcha(signal?: AbortSignal): Promise<CaptchaChallenge> {
 	const response = await fetch("/api/auth/captcha", {
 		cache: "no-store",
 		signal,
@@ -65,7 +50,6 @@ async function readCaptcha(signal?: AbortSignal): Promise<CaptchaChallenge> {
 export function LoginForm() {
 	const router = useRouter();
 	const [error, setError] = useState("");
-	const [role, setRole] = useState("STUDENT");
 	const [challenge, setChallenge] = useState<{
 		id: string;
 		image: string;
@@ -122,7 +106,6 @@ export function LoginForm() {
 		try {
 			const result = await signIn("credentials", {
 				...data,
-				role,
 				captchaId: challenge.id,
 				redirect: false,
 			});
@@ -133,7 +116,7 @@ export function LoginForm() {
 						: result?.error === "LoginLocked"
 							? "连续登录失败已达到限制，请稍后再试。"
 							: result?.error === "CredentialsSignin"
-								? "账号、密码或登录身份不正确，请核对后重试。"
+								? "账号或密码不正确，请核对后重试。"
 								: "暂时无法登录，请稍后重试。",
 				);
 				await refreshCaptcha();
@@ -154,32 +137,6 @@ export function LoginForm() {
 			className="flex flex-col gap-4"
 		>
 			<Feedback error={error} />
-			<Field className="gap-1.5">
-				<FieldLabel htmlFor="login-role">登录身份</FieldLabel>
-				<Select
-					items={roles}
-					value={role}
-					disabled={form.formState.isSubmitting}
-					onValueChange={(next) => {
-						if (!next) return;
-						setRole(next);
-						form.setValue("password", "", { shouldDirty: false });
-						form.clearErrors();
-						setError("");
-					}}
-				>
-					<SelectTrigger id="login-role" className="w-full">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{roles.map(({ value, label }) => (
-							<SelectItem key={value} value={value}>
-								{label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</Field>
 			<FieldGroup className="gap-4">
 				<Controller
 					control={form.control}

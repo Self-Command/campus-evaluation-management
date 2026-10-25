@@ -113,8 +113,6 @@ test("快速评分卡读取、修改、校验、恢复、移动和开启申报",
 }) => {
 	test.setTimeout(120_000);
 	await page.goto("/login");
-	await page.getByLabel("登录身份").click();
-	await page.getByRole("option", { name: "管理员" }).click();
 	await page.getByLabel("学号或账号").fill(`${prefix}-admin`);
 	await page.getByLabel("密码", { exact: true }).fill(password);
 	const captcha = page.getByAltText("英文验证码，点击可更换");

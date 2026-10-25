@@ -74,14 +74,14 @@ async function main() {
         await fixture.query('UPDATE "LoginCaptcha" SET "answerHash"=$1 WHERE id=$2', [answerHash, data.id]);
         return { captchaId: data.id, captcha: "abcde" };
       }
-      async credentials(login: string, selectedRole: string, inputPassword = password, captcha?: { captchaId: string; captcha: string }) {
+      async credentials(login: string, inputPassword = password, captcha?: { captchaId: string; captcha: string }) {
         const csrf = await this.json("/api/auth/csrf");
-        const body = new URLSearchParams({ csrfToken: csrf.csrfToken, login, password: inputPassword, role: selectedRole, ...captcha ?? await this.challenge(), callbackUrl: origin, json: "true" });
+        const body = new URLSearchParams({ csrfToken: csrf.csrfToken, login, password: inputPassword, ...captcha ?? await this.challenge(), callbackUrl: origin, json: "true" });
         const response = await this.fetch("/api/auth/callback/credentials", { method: "POST", body });
         return response.json();
       }
       async login(role: string) {
-        await this.credentials(`http-${role.toLowerCase()}`, role === "PUBLISHER" ? "COLLEGE" : role);
+        await this.credentials(`http-${role.toLowerCase()}`);
         const session = await this.json("/api/auth/session"); check(session.user?.role === role, `${role}登录失败`);
       }
       async page(path: string) {
@@ -96,7 +96,7 @@ async function main() {
     check((await anonymous.fetch("/")).status === 307, "匿名工作台须重定向");
     const login = await anonymous.fetch("/login"); check(login.status === 200, "登录页失败");
     const loginHtml = await login.text();
-    check(loginHtml.includes('id="login-role"') && loginHtml.includes('id="login-captcha"'), "实际登录页缺少角色下拉或验证码字段");
+    check(loginHtml.includes('id="login-account"') && loginHtml.includes('id="login-captcha"') && !loginHtml.includes('id="login-role"'), "实际登录页缺少账号或验证码字段，或仍保留身份下拉");
     const assets = [...new Set([...loginHtml.matchAll(/(?:src|href)="([^" ]+\.(?:js|css)(?:\?[^" ]*)?)"/g)].map(m => m[1]))].filter(p => p.startsWith("/_next/"));
     check(assets.length > 0, "缺少页面静态资源");
     for (const path of assets) check((await anonymous.fetch(path)).status === 200, "静态资源不可访问");
@@ -138,13 +138,11 @@ async function main() {
     const college = new Session(), counselor = new Session();
     await college.login("COLLEGE"); await counselor.login("COUNSELOR");
     const invalidEntry = new Session();
-    await invalidEntry.credentials("http-counselor", "ADMIN");
-    check(!(await invalidEntry.json("/api/auth/session")).user, "选择管理员入口不得获得权限");
     const invalidCaptcha = await invalidEntry.challenge();
-    await invalidEntry.credentials("http-counselor", "COUNSELOR", password, { ...invalidCaptcha, captcha: "WRONG" });
-    await invalidEntry.credentials("http-counselor", "COUNSELOR", password, invalidCaptcha);
+    await invalidEntry.credentials("http-counselor", password, { ...invalidCaptcha, captcha: "WRONG" });
+    await invalidEntry.credentials("http-counselor", password, invalidCaptcha);
     check(!(await invalidEntry.json("/api/auth/session")).user, "错误或重放验证码不应登录");
-    results.push({ label: "four role dropdown login, wrong role and CAPTCHA replay denied", status: 200 });
+    results.push({ label: "four roles login without identity selection, wrong and replayed CAPTCHA denied", status: 200 });
     for (const [role, session, title] of [["COLLEGE", college, "学院工作台"], ["COUNSELOR", counselor, "辅导员工作台"]] as const) {
       await workbench(session, role, title);
       check((await session.json("/api/account")).college.id === collegeId, `${role}本人账号归属接口错误`);
@@ -192,10 +190,10 @@ async function main() {
     check((await admin.fetch("/api/admin/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settingsPayload(originalSettings), reason: "过期保存应冲突" }) })).status === 409, "设置revision冲突保护失败");
     check((await student.fetch("/api/admin/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settingsPayload(reread), reason: "学生不可更新安全策略" }) })).status === 403, "安全设置越权未拒绝");
     const failedLogin = new Session();
-    await failedLogin.credentials("http-counselor", "COUNSELOR", "wrong-password");
-    const lockedLogin = await failedLogin.credentials("http-counselor", "COUNSELOR", "wrong-password");
+    await failedLogin.credentials("http-counselor", "wrong-password");
+    const lockedLogin = await failedLogin.credentials("http-counselor", "wrong-password");
     check(new URL(lockedLogin.url, origin).searchParams.get("error") === "LoginLocked", "达到失败次数未锁定");
-    await failedLogin.credentials("http-counselor", "COUNSELOR");
+    await failedLogin.credentials("http-counselor");
     check(!(await failedLogin.json("/api/auth/session")).user, "锁定期间正确密码不应登录");
     check((await counselor.json("/api/account")).role === "COUNSELOR", "失败限制不应撤销已有有效会话");
     await admin.json("/api/admin/settings", { ...settingsPayload(originalSettings), revision: reread.revision, reason: "验证后恢复原始设置" }, "PUT");

@@ -41,7 +41,7 @@ for (const role of roles) {
 		page.on("response", (response) => {
 			if (response.status() >= 400) errors.push(`http ${response.status()}: ${response.url()}`);
 		});
-		await login(page, role.label, role.login, role.password);
+		await login(page, role.login, role.password);
 		for (const route of role.routes) {
 			errors.length = 0;
 			const response = await page.goto(route, { waitUntil: "networkidle" });

@@ -17,7 +17,7 @@ export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
   pages: { signIn: "/login", error: "/login" },
-  providers: [credentialsProvider({ name: "账号密码", credentials: { login: {}, password: {}, role: {}, captchaId: {}, captcha: {} }, authorize: authenticateCredentials })],
+  providers: [credentialsProvider({ name: "账号密码", credentials: { login: {}, password: {}, captchaId: {}, captcha: {} }, authorize: authenticateCredentials })],
   callbacks: {
     async jwt({ token, user }) { if (user) token.sessionId = user.sessionId; return token; },
     async session({ session, token }) {
@@ -30,13 +30,10 @@ export const authOptions: NextAuthOptions = {
   logger: { error(code) { console.error("认证服务错误", code); }, warn(code) { console.warn("认证服务提示", code); }, debug() {} },
 };
 
-export function matchesLoginRole(actual: string, selected: string) {
-  return actual === selected || (actual === "PUBLISHER" && selected === "COLLEGE");
-}
 export async function authenticateCredentials(raw: unknown) {
-  const parsed = z.object({ login: z.string().trim().min(1).max(64), password: z.string().min(1).max(128), role: z.enum(["ADMIN", "COLLEGE", "COUNSELOR", "STUDENT"]).optional(), captchaId: z.string().uuid(), captcha: z.string().trim().regex(/^[a-zA-Z]{5}$/) }).safeParse(raw);
+  const parsed = z.object({ login: z.string().trim().min(1).max(64), password: z.string().min(1).max(128), captchaId: z.string().uuid(), captcha: z.string().trim().regex(/^[a-zA-Z]{5}$/) }).safeParse(raw);
   if (!parsed.success) return null;
-  const { login, password, role, captchaId, captcha } = parsed.data;
+  const { login, password, captchaId, captcha } = parsed.data;
   // Never trust proxy headers for authentication throttling. This is only a
   // coarse flood guard; per-account failure limits are configured in 系统设置.
   if (!(await consumeLimit("login-global", "local", 1200))) {
@@ -70,7 +67,7 @@ export async function authenticateCredentials(raw: unknown) {
       }
     }
     const current = user ? await tx.user.findUnique({ where: { id: user.id } }) : null;
-    if (!user || !valid || !current || current.disabled || current.authVersion !== user.authVersion || current.passwordHash !== user.passwordHash || (role && !matchesLoginRole(current.role, role))) {
+    if (!user || !valid || !current || current.disabled || current.authVersion !== user.authVersion || current.passwordHash !== user.passwordHash) {
       if (policy.loginFailureLimitEnabled) {
         failures += 1;
         const lockedUntil = failures >= policy.loginFailureMaxAttempts ? new Date(now.getTime() + policy.loginFailureLockMinutes * 60_000) : null;
@@ -80,7 +77,7 @@ export async function authenticateCredentials(raw: unknown) {
           return { kind: "locked" } as const;
         }
       }
-      await recordSecurityAuditBestEffort(tx, { action: "AUTH_LOGIN_FAILED", result: "FAILURE", details: { login: login.slice(0, 3) + "***", selectedRole: role ?? null, accountDisabled: current?.disabled ?? false } });
+      await recordSecurityAuditBestEffort(tx, { action: "AUTH_LOGIN_FAILED", result: "FAILURE", details: { login: login.slice(0, 3) + "***", accountDisabled: current?.disabled ?? false } });
       return { kind: "invalid" } as const;
     }
     await tx.loginFailureState.deleteMany({ where: { key } });

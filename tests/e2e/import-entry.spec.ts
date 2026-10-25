@@ -63,7 +63,7 @@ for (const role of [
 		test.skip(!ids.activity, "缺少可用周期、学院账号或活动计分项");
 		test.setTimeout(120_000);
 		await page.setViewportSize({ width: 1440, height: 900 });
-		await login(page, role.label, role.login, role.password);
+		await login(page, role.login, role.password);
 		await page.goto(`/activities/${ids.activity}?termId=${ids.term}`, {
 			waitUntil: "networkidle",
 		});
@@ -97,7 +97,7 @@ for (const role of [
 test("管理员可在导入页切换账号、成绩与参与名单", async ({ page }) => {
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 1440, height: 900 });
-	await login(page, "管理员", process.env.E2E_ADMIN_LOGIN!, process.env.E2E_ADMIN_PASSWORD!);
+	await login(page, process.env.E2E_ADMIN_LOGIN!, process.env.E2E_ADMIN_PASSWORD!);
 	await page.goto("/imports", { waitUntil: "networkidle" });
 	const tabs = page.getByRole("navigation", { name: "导入类型" });
 	await expect(tabs.getByRole("link", { name: "学生账号" })).toHaveAttribute("aria-current", "page");

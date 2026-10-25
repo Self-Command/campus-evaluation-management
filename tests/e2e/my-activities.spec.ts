@@ -122,7 +122,7 @@ test("学生从工作台进入我参加的活动可看到记录、查看详情�
 		if (response.status() >= 400) errors.push(`http ${response.status()}: ${response.url()}`);
 	});
 	await page.setViewportSize({ width: 1440, height: 900 });
-	await login(page, "学生", `${prefix}-student`, password);
+	await login(page, `${prefix}-student`, password);
 	await expect(page).toHaveURL(/\/$/);
 	await page.getByRole("link", { name: "我参加的活动" }).click();
 	await expect(page).toHaveURL(/view=joined/);

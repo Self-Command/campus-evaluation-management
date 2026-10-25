@@ -34,8 +34,8 @@ async function challenge(answer = "ABCDE", expiresAt = new Date(Date.now() + 300
   return { captchaId: id, captcha: answer.toLowerCase() };
 }
 const failureKey = (login: string) => createHmac("sha256", process.env.NEXTAUTH_SECRET!).update(`login-failure:${login.toLowerCase()}`).digest("hex");
-async function loginAttempt(login: string, input: { password?: string; role?: string } = {}) {
-  return authenticateCredentials({ login, password, role: "COUNSELOR", ...input, ...await challenge() });
+async function loginAttempt(login: string, input: { password?: string } = {}) {
+  return authenticateCredentials({ login, password, ...input, ...await challenge() });
 }
 async function policy(enabled: boolean, attempts = 2, minutes = 3) {
   const current = await readSiteSettings();
@@ -153,15 +153,14 @@ test("真实发布锁定后归档仍可查本人冻结结果，禁止作废及�
   expect(restored.phase).toBe("LOCKED"); expect(restored.disposition).toBe("NORMAL");
 });
 
-test("登录入口由真实角色校验，错误入口和密码不产生会话，历史身份仅兼容学院入口", async () => {
+test("登录入口按账号真实角色完成认证，错误密码不产生会话", async () => {
   for (const role of ["ADMIN", "COLLEGE", "COUNSELOR", "STUDENT", "PUBLISHER"] as const) {
     const identity = identities[role]!;
-    const result = await loginAttempt(identity.login, { role: role === "PUBLISHER" ? "COLLEGE" : role });
+    const result = await loginAttempt(identity.login);
     expect(result?.id).toBe(identity.id);
   }
   const identity = identities.COUNSELOR!;
   const before = await db.authSession.count({ where: { userId: identity.id } });
-  expect(await loginAttempt(identity.login, { role: "ADMIN" })).toBeNull();
   expect(await loginAttempt(identity.login, { password: "wrong" })).toBeNull();
   expect(await db.authSession.count({ where: { userId: identity.id } })).toBe(before);
   expect((await db.user.findUniqueOrThrow({ where: { id: identity.id } })).role).toBe("COUNSELOR");
@@ -214,18 +213,18 @@ test("关闭失败限制不锁账号，缺失或错误验证码不能登录也�
   for (let i = 0; i < 3; i++) expect(await loginAttempt(user.login, { password: "wrong" })).toBeNull();
   expect(await db.loginFailureState.findUnique({ where: { key: failureKey(user.login) } })).toBeNull();
   expect(await loginAttempt(user.login)).toMatchObject({ id: user.id });
-  expect(await authenticateCredentials({ login: user.login, password, role: "COUNSELOR" })).toBeNull();
+  expect(await authenticateCredentials({ login: user.login, password })).toBeNull();
   await policy(true);
   const bad = await challenge();
-  await expect(authenticateCredentials({ login: user.login, password, role: "COUNSELOR", ...bad, captcha: "WRONG" })).rejects.toThrow("CaptchaInvalid");
+  await expect(authenticateCredentials({ login: user.login, password, ...bad, captcha: "WRONG" })).rejects.toThrow("CaptchaInvalid");
   expect(await db.loginFailureState.findUnique({ where: { key: failureKey(user.login) } })).toBeNull();
   await policy(false);
 });
 
-test("失败达到自定义次数锁定，跨角色共享次数、未知账号相同处理，到期可重新登录", async () => {
+test("失败达到自定义次数锁定、未知账号相同处理，到期可重新登录", async () => {
   await policy(true, 2, 3);
   const user = identities.COUNSELOR!, key = failureKey(user.login), now = Date.now();
-  expect(await loginAttempt(user.login, { role: "ADMIN" })).toBeNull();
+  expect(await loginAttempt(user.login, { password: "wrong" })).toBeNull();
   await expect(loginAttempt(user.login, { password: "wrong" })).rejects.toThrow("LoginLocked");
   const state = await db.loginFailureState.findUniqueOrThrow({ where: { key } });
   expect(state.failures).toBe(2); expect(state.lockedUntil!.getTime()).toBeGreaterThanOrEqual(now + 3 * 60_000);
