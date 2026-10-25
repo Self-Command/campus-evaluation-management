@@ -4,12 +4,14 @@ import { applyPreference } from "@/lib/preferences/preference-runtime";
 import {
   PREFERENCE_DEFAULTS,
   PREFERENCE_KEYS,
+  SITE_DEFAULT_PREFERENCE_VALUE,
+  getPreferenceCookieName,
   type PreferenceKey,
   type PreferenceValueMap,
 } from "@/lib/preferences/preferences-config";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
 import type { ResolvedThemeMode } from "@/lib/preferences/theme";
-import { deleteClientCookie } from "@/lib/cookie.client";
+import { deleteClientCookie, setClientCookie } from "@/lib/cookie.client";
 
 export type PreferencesState = {
   values: PreferenceValueMap;
@@ -48,6 +50,8 @@ export const createPreferencesStore = (initialValues: Partial<PreferenceValueMap
     resetTheme: defaults => {
       applyPreference("theme_preset", defaults.theme_preset);
       const resolvedThemeMode = applyPreference("theme_mode", defaults.theme_mode);
+      setClientCookie(getPreferenceCookieName("theme_preset"), SITE_DEFAULT_PREFERENCE_VALUE, 365);
+      setClientCookie(getPreferenceCookieName("theme_mode"), SITE_DEFAULT_PREFERENCE_VALUE, 365);
       deleteClientCookie("theme_preset");
       deleteClientCookie("theme_mode");
       set(state => ({

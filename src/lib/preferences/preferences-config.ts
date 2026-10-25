@@ -34,6 +34,8 @@ type PreferenceDefinition<
   defaultValue: Values[number];
   persistence: Persistence;
   attribute: Attribute;
+  cookieName?: string;
+  legacyCookieName?: string;
 };
 
 function definePreference<
@@ -58,6 +60,8 @@ export const PREFERENCE_REGISTRY = {
     defaultValue: "light",
     persistence: "client-cookie",
     attribute: "data-theme-mode",
+    cookieName: "campus_theme_mode",
+    legacyCookieName: "theme_mode",
   }),
 
   theme_preset: definePreference({
@@ -65,6 +69,8 @@ export const PREFERENCE_REGISTRY = {
     defaultValue: "default",
     persistence: "client-cookie",
     attribute: "data-theme-preset",
+    cookieName: "campus_theme_preset",
+    legacyCookieName: "theme_preset",
   }),
 
   font: definePreference({
@@ -111,8 +117,14 @@ export type PreferenceValueMap = {
 
 export const PREFERENCE_KEYS = Object.freeze(Object.keys(PREFERENCE_REGISTRY) as PreferenceKey[]);
 
+export const SITE_DEFAULT_PREFERENCE_VALUE = "site";
+
 export function getPreferencePersistence(key: PreferenceKey): PreferencePersistence {
   return PREFERENCE_REGISTRY[key].persistence;
+}
+
+export function getPreferenceCookieName(key: PreferenceKey): string {
+  return (PREFERENCE_REGISTRY[key] as { cookieName?: string }).cookieName ?? key;
 }
 
 export const PREFERENCE_DEFAULTS = Object.fromEntries(

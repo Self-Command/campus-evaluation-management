@@ -302,6 +302,7 @@ body { font-size: 14px; line-height: 1.6; }
 /* Authentication fallback background: no external image request when the
    administrator has not uploaded one. It follows the active theme tokens. */
 .auth-default-background {
+  --auth-grid-line: color-mix(in oklab, var(--primary) 68%, var(--foreground));
   background-color: var(--background);
   background-image:
     radial-gradient(circle at 18% 12%, color-mix(in oklab, var(--primary) 24%, transparent), transparent 42%),
@@ -314,10 +315,10 @@ body { font-size: 14px; line-height: 1.6; }
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(to right, var(--border) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    linear-gradient(to right, var(--auth-grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--auth-grid-line) 1px, transparent 1px);
   background-size: 48px 48px;
-  opacity: 0.32;
+  opacity: 0.38;
   mask-image: radial-gradient(circle at center, black, transparent 78%);
 }
 

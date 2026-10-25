@@ -7,7 +7,7 @@
 | 交付物 | 说明 |
 | --- | --- |
 | `ghcr.io/self-command/campus-evaluation-management:latest` | 最新正式标签 |
-| `ghcr.io/self-command/campus-evaluation-management:<version>` | 语义化版本，如 `0.3.1` |
+| `ghcr.io/self-command/campus-evaluation-management:<version>` | 语义化版本，如 `0.3.2` |
 | `ghcr.io/self-command/campus-evaluation-management:sha-<short>` | 对应提交的不可变标签 |
 | `campus-evaluation-image-amd64` | Actions 离线产物，含 `docker save` 压缩包与 SHA-256 |
 | `compose.yaml` | 应用 + PostgreSQL 编排文件 |
@@ -66,7 +66,7 @@ POSTGRES_USER=campus
 POSTGRES_PASSWORD=<24 位以上随机字符串>
 NEXTAUTH_SECRET=<32 字节以上随机值>
 NEXTAUTH_URL=https://evaluation.example.edu.cn
-APP_IMAGE=ghcr.io/self-command/campus-evaluation-management:0.3.1
+APP_IMAGE=ghcr.io/self-command/campus-evaluation-management:0.3.2
 APP_BIND_ADDRESS=127.0.0.1
 APP_PORT=3200
 RUN_MIGRATIONS=true
@@ -154,7 +154,7 @@ docker run -d --name campus-db \
 ```bash
 docker run --rm --network campus-evaluation \
   -e DATABASE_URL="postgresql://campus:${POSTGRES_PASSWORD}@campus-db:5432/campus" \
-  ghcr.io/self-command/campus-evaluation-management:0.3.1 migrate
+  ghcr.io/self-command/campus-evaluation-management:0.3.2 migrate
 ```
 
 启动应用：
@@ -176,7 +176,7 @@ docker run -d --name campus-app \
   -e TZ=Asia/Shanghai \
   -v campus-evidence:/data/evidence \
   -v campus-attachments:/data/activity-attachments \
-  ghcr.io/self-command/campus-evaluation-management:0.3.1
+  ghcr.io/self-command/campus-evaluation-management:0.3.2
 ```
 
 镜像自带健康检查。连接外部托管数据库时，删除 `campus-db` 相关步骤，并把 `DATABASE_URL` 指向实际数据库；托管数据库需允许应用服务器访问并启用 TLS（按供应商要求附加连接参数）。
@@ -253,6 +253,7 @@ server {
     add_header X-Frame-Options SAMEORIGIN always;
 
     client_max_body_size 70m;
+    client_body_temp_path /var/lib/campus-evaluation/nginx-body 1 2;
     proxy_connect_timeout 10s;
     proxy_read_timeout 120s;
     proxy_send_timeout 120s;
@@ -273,9 +274,12 @@ server {
 ```
 
 ```bash
+install -d -o www-data -g www-data -m 0700 /var/lib/campus-evaluation/nginx-body
 nginx -t
 systemctl reload nginx
 ```
+
+将 `www-data` 替换为实际 Nginx worker 用户。`client_body_temp_path` 必须是该用户可写的目录；如果它被改成 `root` 且不可写，所有超过 `client_body_buffer_size`（常见为 8–16 KB）的请求体会在 Nginx 层返回 HTML 500，浏览器端可能显示为 JSON 解析错误，证明、附件、备份和登录背景上传都会失败。
 
 `NEXTAUTH_URL` 必须与 `https://evaluation.example.edu.cn` 完全一致（协议、主机、端口，无末尾斜杠）。更换域名或协议后必须同步修改并重启应用容器，否则登录回调会失败。
 
@@ -462,6 +466,7 @@ docker compose --env-file .env.docker exec -T db \
 | Nginx 502 | 应用未启动、绑定地址/端口不一致，或 `APP_PORT` 与 Nginx `proxy_pass` 不一致 |
 | 登录回调错误或登录后立即掉线 | `NEXTAUTH_URL` 与浏览器地址不一致；检查 `X-Forwarded-Proto` 和 HTTPS |
 | 上传返回 413 | Nginx `client_max_body_size` 至少 70m；备份上传按 8 MiB 分块，附件单个上限由附件设置控制 |
+| 上传返回 HTML 500，浏览器提示 `Unexpected token '<' ... is not valid JSON` | Nginx `client_body_temp_path` 对 worker 用户不可写；为本站点设置独立临时目录并授权（见“反向代理”），不要只调整 `client_max_body_size` |
 | 恢复后打开页面只显示维护页 | 上次恢复未终结；查看 `BACKUP_DIR/restore-state.json` 与恢复报告，完成后由管理员解除，不要直接删状态文件 |
 | 恢复预检提示缺少权限 | 外部 PostgreSQL 的应用账号需要 `CREATEDB` 且拥有目标数据库；内置 Compose 使用 `POSTGRES_USER`，通常无需额外授权 |
 | 附件 404 / 权限错误 | 卷未挂载、挂载点错误，或多副本未共享同一存储 |

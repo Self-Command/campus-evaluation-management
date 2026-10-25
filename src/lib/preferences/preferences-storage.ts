@@ -5,19 +5,26 @@ import { setValueToCookie } from "@/server/server-actions";
 import { setClientCookie } from "../cookie.client";
 import { setLocalStorageValue } from "../local-storage.client";
 import {
+  getPreferenceCookieName,
   getPreferencePersistence,
   type PreferenceKey,
   type PreferencePersistence,
   type PreferenceValueMap,
 } from "./preferences-config";
 
-async function persistByMode(mode: PreferencePersistence, key: string, value: string, days?: number): Promise<void> {
+async function persistByMode(
+  mode: PreferencePersistence,
+  key: string,
+  cookieName: string,
+  value: string,
+  days?: number,
+): Promise<void> {
   switch (mode) {
     case "none":
       return;
 
     case "client-cookie":
-      setClientCookie(key, value, days);
+      setClientCookie(cookieName, value, days);
       return;
 
     case "server-cookie":
@@ -32,5 +39,5 @@ async function persistByMode(mode: PreferencePersistence, key: string, value: st
 
 export function persistPreference<K extends PreferenceKey>(key: K, value: PreferenceValueMap[K]): Promise<void> {
   const days = key === "theme_mode" || key === "theme_preset" ? 365 : undefined;
-  return persistByMode(getPreferencePersistence(key), key, value, days);
+  return persistByMode(getPreferencePersistence(key), key, getPreferenceCookieName(key), value, days);
 }
