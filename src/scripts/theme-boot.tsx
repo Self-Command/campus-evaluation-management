@@ -34,11 +34,6 @@ export function ThemeBootScript() {
           }
         }
 
-        function writeCookie(name, value) {
-          var secure = window.location.protocol === "https:" ? "; secure" : "";
-          document.cookie = name + "=" + encodeURIComponent(value) + "; max-age=31536000; path=/; samesite=lax" + secure;
-        }
-
         function readLocal(name) {
           try {
             return window.localStorage.getItem(name);
@@ -60,26 +55,7 @@ export function ThemeBootScript() {
             return readServerDefault(key, definition);
           }
 
-          if (definition.values.indexOf(value) >= 0) {
-            return value;
-          }
-
-          if (value !== null) {
-            return null;
-          }
-
-          var legacyName = definition.legacyCookieName;
-          if (!legacyName) {
-            return null;
-          }
-
-          var legacyValue = readCookie(legacyName);
-          if (definition.values.indexOf(legacyValue) >= 0) {
-            writeCookie(cookieName, legacyValue);
-            return legacyValue;
-          }
-
-          return null;
+          return definition.values.indexOf(value) >= 0 ? value : null;
         }
 
         function readPreference(key, definition) {

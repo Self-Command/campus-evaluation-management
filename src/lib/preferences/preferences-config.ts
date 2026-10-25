@@ -35,7 +35,6 @@ type PreferenceDefinition<
   persistence: Persistence;
   attribute: Attribute;
   cookieName?: string;
-  legacyCookieName?: string;
 };
 
 function definePreference<
@@ -61,7 +60,6 @@ export const PREFERENCE_REGISTRY = {
     persistence: "client-cookie",
     attribute: "data-theme-mode",
     cookieName: "campus_theme_mode",
-    legacyCookieName: "theme_mode",
   }),
 
   theme_preset: definePreference({
@@ -70,7 +68,6 @@ export const PREFERENCE_REGISTRY = {
     persistence: "client-cookie",
     attribute: "data-theme-preset",
     cookieName: "campus_theme_preset",
-    legacyCookieName: "theme_preset",
   }),
 
   font: definePreference({

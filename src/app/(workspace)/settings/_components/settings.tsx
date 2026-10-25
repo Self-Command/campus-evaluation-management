@@ -37,6 +37,7 @@ import {
 	authGlowToneOptions,
 	type AuthGlowTone,
 } from "@/lib/auth-glass";
+import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 type SettingsData = {
 	siteName: string;
 	siteDescription: string;
@@ -124,7 +125,18 @@ export function Settings() {
 }
 function SettingsForm({ value }: { value: SettingsData }) {
 	const router = useRouter();
+	const resetTheme = usePreferencesStore((state) => state.resetTheme);
+	const personalThemePreset = usePreferencesStore(
+		(state) => state.values.theme_preset,
+	);
+	const personalThemeMode = usePreferencesStore(
+		(state) => state.values.theme_mode,
+	);
 	const [draft, setDraft] = useState(value);
+	const [savedTheme, setSavedTheme] = useState({
+		themePreset: value.themePreset,
+		themeMode: value.defaultThemeMode,
+	});
 	const [dirty, setDirty] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [uploading, setUploading] = useState<string | null>(null);
@@ -335,6 +347,14 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					);
 					setDirty(false);
 					setDraft(saved);
+					setSavedTheme({
+						themePreset: saved.themePreset,
+						themeMode: saved.defaultThemeMode,
+					});
+					resetTheme({
+						theme_preset: saved.themePreset,
+						theme_mode: saved.defaultThemeMode,
+					});
 					setSuccess("设置已保存并生效。");
 					router.refresh();
 				} catch (err) {
@@ -686,6 +706,28 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										);
 									})}
 								</div>
+								{(personalThemePreset !== savedTheme.themePreset ||
+									personalThemeMode !== savedTheme.themeMode) && (
+									<div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+										<span className="text-muted-foreground text-xs">
+											当前浏览器正在使用个人主题，会覆盖站点默认；保存设置后将自动恢复站点默认。
+										</span>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											disabled={busy}
+											onClick={() =>
+												resetTheme({
+													theme_preset: savedTheme.themePreset,
+													theme_mode: savedTheme.themeMode,
+												})
+											}
+										>
+											恢复站点默认
+										</Button>
+									</div>
+								)}
 								<FieldDescription>
 									主题会同时调整圆角、描边、阴影与主色，保存后全站生效；不影响已有成绩和结算记录。
 								</FieldDescription>
