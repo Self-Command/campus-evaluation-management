@@ -822,8 +822,13 @@ function DownloadDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>下载数据库备份</DialogTitle>
-          <DialogDescription>
-            {item ? `${item.filename} · ${bytesText(item.bytes)}。下载会记录到操作日志，链接两分钟内有效。` : ""}
+          <DialogDescription className="space-y-1">
+            {item ? (
+              <>
+                <span className="block font-mono text-xs [overflow-wrap:anywhere]">{item.filename}</span>
+                <span className="block">{bytesText(item.bytes)}。下载会记录到操作日志，链接两分钟内有效。</span>
+              </>
+            ) : null}
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
