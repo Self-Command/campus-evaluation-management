@@ -486,12 +486,15 @@ async function fileConsistency(client: Client) {
 }
 
 async function fingerprintOf(client: Client) {
-  const size = await client.query<{ bytes: string }>("SELECT pg_database_size(current_database())::text AS bytes");
   const counts = await keyCounts(client);
-  const latest = await client.query<{ id: string; createdAt: Date }>(`SELECT id, "createdAt" FROM "AuditEvent" ORDER BY "createdAt" DESC, id DESC LIMIT 1`);
+  // Login, logout and failed re-authentication write AUTH audit rows. They are
+  // not business data and must not invalidate an already-READY preflight.
+  delete counts.AuditEvent;
+  const latest = await client.query<{ id: string; createdAt: Date }>(
+    `SELECT id, "createdAt" FROM "AuditEvent" WHERE COALESCE(category, '') <> 'AUTH' ORDER BY "createdAt" DESC, id DESC LIMIT 1`,
+  );
   const settings = await settingsOf(client);
   const payload = {
-    bytes: size.rows[0]?.bytes ?? "0",
     counts,
     latestAudit: latest.rows[0] ? { id: latest.rows[0].id, createdAt: latest.rows[0].createdAt.toISOString() } : null,
     settingsRevision: settings?.revision ?? 0,

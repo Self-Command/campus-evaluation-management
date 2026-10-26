@@ -39,7 +39,7 @@ import {
 
 export const backupFilesRoot = () => join(backupRoot(), "backups");
 const volumeMaxBytes = Math.max(Number(process.env.BACKUP_VOLUME_MAX_BYTES ?? 5 * 1024 ** 3) || 5 * 1024 ** 3, 512 * 1024 ** 2);
-const appVersion = process.env.APP_VERSION?.trim() || process.env.npm_package_version?.trim() || "0.3.7";
+const appVersion = process.env.APP_VERSION?.trim() || process.env.npm_package_version?.trim() || "0.3.8";
 const gitRevision = process.env.GIT_SHA?.trim() || process.env.NEXT_PUBLIC_GIT_SHA?.trim() || "unknown";
 const staleRunningMs = 10 * 60_000;
 

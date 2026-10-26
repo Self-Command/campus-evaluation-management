@@ -161,6 +161,7 @@ type RestoreReport = {
 };
 
 const terminalPhases = new Set(["completed", "failed", "rolled-back"]);
+const executingRestorePhases = new Set(["confirmed", "snapshot", "exported", "swapping", "swapped"]);
 
 const phaseLabels: Record<string, string> = {
   preflight: "预检中",
@@ -294,13 +295,14 @@ export function Backups() {
   const running = Boolean(data?.items.some(item => item.status === "RUNNING"));
   const activeRestore = data?.summary.activeRestore ?? null;
   const activeRestoreBusy = Boolean(activeRestore && !terminalPhases.has(activeRestore.phase));
+  const restoreExecuting = Boolean(activeRestore && executingRestorePhases.has(activeRestore.phase));
   const reload = remote.reload;
 
   useEffect(() => {
-    if (!running && !activeRestoreBusy) return;
+    if (!running && !restoreExecuting) return;
     const timer = window.setInterval(() => reload(), 4000);
     return () => window.clearInterval(timer);
-  }, [running, activeRestoreBusy, reload]);
+  }, [running, restoreExecuting, reload]);
 
   function clearMessages() {
     setError("");
@@ -483,7 +485,7 @@ export function Backups() {
         </div>
       )}
 
-      <RemoteState loading={remote.loading} error={remote.error} reload={refresh} />
+      <RemoteState loading={remote.loading && !data} error={remote.error} reload={refresh} />
       {data && (
         <TemplateDirectory
           title="备份目录"
@@ -939,7 +941,7 @@ function RestoreWizard({
   const [abortOpen, setAbortOpen] = useState(false);
   const [abortReason, setAbortReason] = useState("");
 
-  const activeForThis = Boolean(activeRestore && activeRestore.backupId === item.id && !terminalPhases.has(activeRestore.phase));
+  const activeForThis = Boolean(activeRestore && activeRestore.backupId === item.id && activeRestore.phase === "ready");
   const canConfirm = report?.status === "READY" && activeForThis;
 
   async function preflight() {

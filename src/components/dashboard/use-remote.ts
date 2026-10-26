@@ -1,17 +1,15 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
+type RemoteState<T> = { url: string; data: T | null; error: string };
+
 export function useRemote<T>(url: string | null, initialData?: T) {
 	const router = useRouter();
 	const [version, setVersion] = useState(0);
-	const [state, setState] = useState<{
-		url: string;
-		version: number;
-		data: T | null;
-		error: string;
-	} | null>(() =>
+	const [state, setState] = useState<RemoteState<T> | null>(() =>
 		url && initialData !== undefined
-			? { url, version: 0, data: initialData, error: "" }
+			? { url, data: initialData, error: "" }
 			: null,
 	);
 	const reload = useCallback(() => setVersion((v) => v + 1), []);
@@ -28,19 +26,21 @@ export function useRemote<T>(url: string | null, initialData?: T) {
 				return value as T;
 			})
 			.then((data) => {
-				if (!controller.signal.aborted)
-					setState({ url, version, data, error: "" });
+				if (!controller.signal.aborted) setState({ url, data, error: "" });
 			})
 			.catch((error) => {
-				if (!controller.signal.aborted)
-					setState({ url, version, data: null, error: error.message });
+				if (controller.signal.aborted) return;
+				setState((current) =>
+					current?.url === url
+						? { ...current, error: error.message }
+						: { url, data: null, error: error.message },
+				);
 			});
 		return () => controller.abort();
 	}, [url, version, router]);
-	const current =
-		state?.url === url && state.version === version ? state : null;
+	const current = state?.url === url ? state : null;
 	return {
-		data: current?.data || null,
+		data: current?.data ?? null,
 		loading: !!url && !current,
 		error: current?.error || "",
 		reload,
