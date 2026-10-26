@@ -15,6 +15,7 @@ export function TemplateDirectory<T extends RowData>({
   description,
   actions,
   filters,
+  selectionBar,
   search,
   data,
   columns,
@@ -26,6 +27,7 @@ export function TemplateDirectory<T extends RowData>({
   description?: string;
   actions?: ReactNode;
   filters?: ReactNode;
+  selectionBar?: ReactNode;
   search?: { action: string; query: string; placeholder: string; hidden?: Record<string, string> };
   data: T[];
   columns: ColumnDef<DataTableFeatures, T>[];
@@ -68,6 +70,7 @@ export function TemplateDirectory<T extends RowData>({
       )}
       <CardContent className="flex min-w-0 flex-col gap-4 px-0">
         {filters && <div className="flex flex-wrap items-center justify-between gap-3 px-4">{filters}</div>}
+        {selectionBar && <div className="px-4">{selectionBar}</div>}
         <DataTable data={data} columns={columns} mobile={mobile} empty={empty} />
         {pagination && (
           <>

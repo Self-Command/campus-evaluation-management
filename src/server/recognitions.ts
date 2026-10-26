@@ -6,6 +6,7 @@ import { appendHistory, historyEntry } from "@/server/claims";
 import { canManageActivity } from "@/server/activity-policy";
 import { scopedStudentWhere } from "@/server/access-scope";
 import { recordAudit } from "@/server/audit";
+import { batchAuditDetails, type BatchContext } from "@/server/batch-context";
 
 export const recognitionStatusSchema = z.enum([
 	"PENDING_COUNSELOR",
@@ -165,6 +166,7 @@ export async function reviewParticipation(
 	sessionId: string,
 	termId: string,
 	input: unknown,
+	batch?: BatchContext,
 ) {
 	const data = reviewSchema.parse(input);
 	const targetStatus = {
@@ -319,6 +321,7 @@ export async function reviewParticipation(
 							after: next,
 							reason: data.reason ?? null,
 							role: actor.role,
+							...batchAuditDetails(batch),
 						}),
 					),
 				},
@@ -344,6 +347,7 @@ export async function reviewParticipation(
 						reason: data.reason ?? null,
 						activityId: source.participation.activityId,
 						studentId: source.participation.studentId,
+						...batchAuditDetails(batch),
 					},
 				});
 			return saved;

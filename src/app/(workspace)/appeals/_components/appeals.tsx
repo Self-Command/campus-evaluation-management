@@ -9,8 +9,13 @@ import { TemplateDirectory } from "@/components/dashboard/template-directory";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
+import {
+	useBatchReview,
+	type BatchAction,
+} from "@/components/dashboard/batch-review";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -48,11 +53,15 @@ export function Appeals({
 	role,
 	page,
 	status,
+	phase,
+	disposition,
 }: {
 	termId: string;
 	role: "ADMIN" | "STUDENT";
 	page: number;
 	status: string;
+	phase: string;
+	disposition: string;
 }) {
 	const remote = useRemote<{ items: Appeal[]; total: number; page: number }>(
 		`/api/appeals?termId=${termId}&page=${page}&status=${encodeURIComponent(status)}`,
@@ -65,6 +74,46 @@ export function Appeals({
 	const [error, setError] = useState("");
 	const [success, setSuccess] = useState("");
 	const [dirty, setDirty] = useState(false);
+	const batchActions: BatchAction[] =
+		role === "ADMIN"
+			? [
+					{
+						value: "process",
+						label: "批量开始处理",
+						reason: "none",
+						variant: "default",
+						description:
+							"将所选异议标记为处理中，便于逐条给出处理结论。已开始处理或已结束的异议会单条失败。",
+					},
+				]
+			: [];
+	const batch = useBatchReview({
+		rows: remote.data?.items ?? [],
+		enabled:
+			role === "ADMIN" &&
+			["ACTIVE", "CHECKING"].includes(phase) &&
+			disposition === "NORMAL" &&
+			batchActions.length > 0,
+		isEligible: (row) => role === "ADMIN" && row.status === "OPEN",
+		actions: batchActions,
+		url: "/api/appeals/batch",
+		termId,
+		rowLabel: (row) => `${row.student.name} · ${row.target}`,
+		onCompleted: (summary) => {
+			remote.reload();
+			setSuccess(
+				`批量处理完成：成功 ${summary.response.succeeded} 条${
+					summary.response.failed
+						? `，失败 ${summary.response.failed} 条`
+						: ""
+				}${
+					summary.response.notExecuted
+						? `，未执行 ${summary.response.notExecuted} 条`
+						: ""
+				}。`,
+			);
+		},
+	});
 	const columns: ColumnDef<DataTableFeatures, Appeal>[] = [
 		{
 			id: "student",
@@ -150,7 +199,12 @@ export function Appeals({
 				<TemplateDirectory
 					description={`共 ${remote.data.total} 条异议，保留提交时的发布版本和处理结果。`}
 					data={remote.data.items}
-					columns={columns}
+					columns={
+						batch.checkboxColumn
+							? [batch.checkboxColumn, ...columns]
+							: columns
+					}
+					selectionBar={batch.bar}
 					actions={
 						<Link
 							href={`/results?termId=${termId}`}
@@ -194,8 +248,19 @@ export function Appeals({
 					}}
 					mobile={(row) => (
 						<div className="flex flex-col gap-3">
-							<div className="flex justify-between gap-2">
-								<p className="font-medium">{row.target}</p>
+							<div className="flex flex-wrap items-start justify-between gap-2">
+								<div className="flex min-w-0 items-start gap-3">
+									{batch.canSelect(row) && (
+										<label className="flex cursor-pointer items-center gap-2 pt-0.5 text-xs text-muted-foreground max-md:min-h-11">
+											<Checkbox
+												checked={batch.isSelected(row.id)}
+												onCheckedChange={() => batch.toggle(row.id)}
+											/>
+											选择
+										</label>
+									)}
+									<p className="font-medium">{row.target}</p>
+								</div>
 								<Badge variant="outline">{statusLabels[row.status]}</Badge>
 							</div>
 							<p className="text-xs text-muted-foreground">
@@ -362,6 +427,7 @@ export function Appeals({
 					)}
 				</SheetContent>
 			</Sheet>
+			{batch.dialogs}
 		</>
 	);
 }

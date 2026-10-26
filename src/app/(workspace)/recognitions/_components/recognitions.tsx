@@ -9,6 +9,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { DataTableFeatures } from "@/lib/data-table-features";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
 	Field,
@@ -30,6 +31,10 @@ import {
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
+import {
+	useBatchReview,
+	type BatchAction,
+} from "@/components/dashboard/batch-review";
 import { dateText, statusLabels, type AppRole } from "@/lib/business-labels";
 type History = {
 	action: string;
@@ -210,6 +215,81 @@ export function Recognitions({
 	const active =
 		term.phase === "ACTIVE" &&
 		(!term.disposition || term.disposition === "NORMAL");
+	const batchActions: BatchAction[] =
+		role === "COUNSELOR"
+			? [
+					{
+						value: "counselorApprove",
+						label: "批量核对通过",
+						reason: "optional",
+						variant: "default",
+						reasonLabel: "审核意见（选填）",
+						description:
+							"通过后进入学院终审。参与记录须有当前有效活动证明，缺少证明或材料已变化的记录会单条失败。",
+					},
+					{
+						value: "counselorReturn",
+						label: "批量退回",
+						reason: "required",
+						variant: "outline",
+						reasonLabel: "统一退回理由",
+						warning:
+							"退回后由活动主办学院补充证明或更正参与信息，所选记录共用同一退回理由。",
+					},
+				]
+			: role === "COLLEGE"
+				? [
+						{
+							value: "collegeApprove",
+							label: "批量通过并计分",
+							reason: "optional",
+							variant: "default",
+							reasonLabel: "审核意见（选填）",
+							description:
+								"通过后计入活动得分。同一参与事实已有有效认定或同活动已有通过申报的记录会单条失败。",
+						},
+						{
+							value: "collegeReturn",
+							label: "批量退回",
+							reason: "required",
+							variant: "outline",
+							reasonLabel: "统一退回理由",
+							warning:
+								"退回后由活动主办学院补充材料或更正后重新提交，所选记录共用同一退回理由。",
+						},
+					]
+				: role === "ADMIN"
+					? [
+							{
+								value: "revoke",
+								label: "批量撤销认定",
+								reason: "required",
+								variant: "destructive",
+								reasonLabel: "统一撤销理由",
+								warning:
+									"撤销后立即停止计分并保留审核历史。仅用于重复来源、材料失实等情况。",
+							},
+						]
+					: [];
+	const batch = useBatchReview({
+		rows: data.items,
+		enabled: active && batchActions.length > 0,
+		isEligible: (row) => {
+			if (row.participation.removedAt) return false;
+			if (role === "COUNSELOR")
+				return row.canReview && row.status === "PENDING_COUNSELOR";
+			if (role === "COLLEGE")
+				return row.canReview && row.status === "PENDING_COLLEGE";
+			if (role === "ADMIN") return row.status === "APPROVED";
+			return false;
+		},
+		actions: batchActions,
+		url: "/api/recognitions/batch",
+		termId: term.id,
+		rowLabel: (row) =>
+			`${row.student.name} · ${row.participation.activity.name}`,
+		onCompleted: () => router.refresh(),
+	});
 	function open(row: Recognition) {
 		setSelected(row);
 		setError("");
@@ -339,7 +419,12 @@ export function Recognitions({
 									: `共 ${data.total} 条记录。查看你发布活动的参与审核进度。`
 				}
 				data={data.items}
-				columns={columns}
+				columns={
+					batch.checkboxColumn
+						? [batch.checkboxColumn, ...columns]
+						: columns
+				}
+				selectionBar={batch.bar}
 				empty={
 					role === "STUDENT"
 						? {
@@ -412,10 +497,21 @@ export function Recognitions({
 				}}
 				mobile={(row) => (
 					<div className="flex flex-col gap-3">
-						<div className="flex justify-between gap-2">
-							<p className="font-medium">
-								{row.student.name} · {row.student.login}
-							</p>
+						<div className="flex flex-wrap items-start justify-between gap-2">
+							<div className="flex min-w-0 items-start gap-3">
+								{batch.canSelect(row) && (
+									<label className="flex cursor-pointer items-center gap-2 pt-0.5 text-xs text-muted-foreground max-md:min-h-11">
+										<Checkbox
+											checked={batch.isSelected(row.id)}
+											onCheckedChange={() => batch.toggle(row.id)}
+										/>
+										选择
+									</label>
+								)}
+								<p className="font-medium">
+									{row.student.name} · {row.student.login}
+								</p>
+							</div>
 							<Badge variant="outline">
 								{statusLabels[row.status] || row.status}
 							</Badge>
@@ -842,6 +938,7 @@ export function Recognitions({
 					)}
 				</SheetContent>
 			</Sheet>
+			{batch.dialogs}
 		</>
 	);
 }

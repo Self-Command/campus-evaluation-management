@@ -33,6 +33,8 @@ export default async function Page({
           role={user.role}
           page={Math.max(1, Math.min(100000, Math.floor(Number(p.page) || 1)))}
           status={p.status || ""}
+          phase={term.phase}
+          disposition={term.disposition}
         />
       ) : (
         <MeasurementEmpty admin={user.role === "ADMIN"} />

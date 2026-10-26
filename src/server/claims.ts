@@ -6,6 +6,7 @@ import { decimalSchema } from "@/lib/scoring/types";
 import { Rational } from "@/lib/scoring/rational";
 import type { Prisma } from "@/generated/prisma/client";
 import { recordAudit } from "@/server/audit";
+import { batchAuditDetails, type BatchContext } from "@/server/batch-context";
 
 export const claimStatusSchema = z.enum(["PENDING_COUNSELOR", "PENDING_COLLEGE", "RETURNED", "RESCORING", "APPROVED", "ABANDONED", "REVOKED", "REJECTED"]);
 export const claimFilterSchema = z.enum(["PENDING", ...claimStatusSchema.options]);
@@ -83,7 +84,7 @@ const changeSchema = z.object({
   score: decimalSchema.optional(),
 }).strict();
 
-export async function changeClaim(sessionId: string, termId: string, id: string, input: unknown) {
+export async function changeClaim(sessionId: string, termId: string, id: string, input: unknown, batch?: BatchContext) {
   const data = changeSchema.parse(claimPayload(input));
   return termTransaction(sessionId, termId, ["ADMIN", "STUDENT", "COUNSELOR", "COLLEGE"], ["ACTIVE"], async (tx, term, actorId) => {
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
@@ -158,10 +159,10 @@ export async function changeClaim(sessionId: string, termId: string, id: string,
       fields.reviewReason = data.reason; fields.reviewerId = actorId; fields.reviewedAt = new Date();
       next = "REVOKED";
     }
-    const updated = await tx.personalClaim.update({ where: { id }, data: { ...fields, status: next, revision: { increment: 1 }, history: appendHistory(claim.history, historyEntry(actorId, data.action.toUpperCase(), { before: status, after: next, reason: data.reason, note: data.note, evidenceIds: ids, nodeId: data.nodeId, score: data.score })) } });
+    const updated = await tx.personalClaim.update({ where: { id }, data: { ...fields, status: next, revision: { increment: 1 }, history: appendHistory(claim.history, historyEntry(actorId, data.action.toUpperCase(), { before: status, after: next, reason: data.reason, note: data.note, evidenceIds: ids, nodeId: data.nodeId, score: data.score, ...batchAuditDetails(batch) })) } });
     if (ids.length) await tx.claimEvidence.createMany({ data: ids.map(evidenceId => ({ claimId: id, evidenceId })), skipDuplicates: true });
     if ((status === "APPROVED") !== (next === "APPROVED")) await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-    await recordAudit(tx, { actorId, action: "CLAIM_CHANGED", targetId: id, details: { termId, action: data.action, before: status, after: next, reason: data.reason ?? null } });
+    await recordAudit(tx, { actorId, action: "CLAIM_CHANGED", targetId: id, details: { termId, action: data.action, before: status, after: next, reason: data.reason ?? null, ...batchAuditDetails(batch) } });
     return updated;
   });
 }

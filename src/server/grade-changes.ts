@@ -12,6 +12,7 @@ import {
   staffNames, appendHistory, jsonValue, inputHistoryEntry, type InputActor,
 } from "@/server/input-review";
 import { recordAudit } from "@/server/audit";
+import { batchAuditDetails, type BatchContext } from "@/server/batch-context";
 
 const allPhases: TermPhase[] = ["CONFIGURATION", "ACTIVE", "CHECKING", "LOCKED"];
 
@@ -80,7 +81,7 @@ const changeSchema = z.object({
   value: decimalSchema.optional(),
 }).strict();
 
-export async function changeGradeChange(sessionId: string, termId: string, id: string, input: unknown) {
+export async function changeGradeChange(sessionId: string, termId: string, id: string, input: unknown, batch?: BatchContext) {
   const data = changeSchema.parse(payloadWithoutTermId(input));
   return termTransaction(sessionId, termId, ["COUNSELOR", "COLLEGE"], ["ACTIVE"], async (tx, term, actorId) => {
     const actor = await actorOf(tx, actorId);
@@ -106,7 +107,7 @@ export async function changeGradeChange(sessionId: string, termId: string, id: s
           ? await tx.gradeInput.update({ where: { id: current.id }, data: { value: change.value, revision: { increment: 1 } } })
           : await tx.gradeInput.create({ data: { termId, studentId: change.studentId, nodeId: change.nodeId, value: change.value } });
         await tx.term.update({ where: { id: termId }, data: { inputRevision: { increment: 1 } } });
-        await recordAudit(tx, { actorId, action: "GRADE_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, nodeId: change.nodeId, before: current?.value.toFixed() ?? null, after: saved.value.toFixed(), reason: change.reason }) });
+        await recordAudit(tx, { actorId, action: "GRADE_APPROVED", targetId: saved.id, details: jsonValue({ termId, changeId: change.id, studentId: change.studentId, nodeId: change.nodeId, before: current?.value.toFixed() ?? null, after: saved.value.toFixed(), reason: change.reason, ...batchAuditDetails(batch) }) });
         fields.reviewerId = actorId; fields.reviewedAt = new Date(); fields.reviewReason = data.reason ?? null;
         next = "APPROVED";
       }
@@ -137,9 +138,9 @@ export async function changeGradeChange(sessionId: string, termId: string, id: s
     }
     const updated = await tx.gradeChange.update({
       where: { id },
-      data: { ...fields, status: next, revision: { increment: 1 }, history: appendHistory(change.history, inputHistoryEntry(actorId, data.action.toUpperCase(), { before, after: next, reason: data.reason, value: data.value })) },
+      data: { ...fields, status: next, revision: { increment: 1 }, history: appendHistory(change.history, inputHistoryEntry(actorId, data.action.toUpperCase(), { before, after: next, reason: data.reason, value: data.value, ...batchAuditDetails(batch) })) },
     });
-    await recordAudit(tx, { actorId, action: "GRADE_CHANGE_CHANGED", targetId: id, details: jsonValue({ termId, action: data.action, before, after: next, reason: data.reason ?? null }) });
+    await recordAudit(tx, { actorId, action: "GRADE_CHANGE_CHANGED", targetId: id, details: jsonValue({ termId, action: data.action, before, after: next, reason: data.reason ?? null, ...batchAuditDetails(batch) }) });
     return updated;
   });
 }

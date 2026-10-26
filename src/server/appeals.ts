@@ -5,6 +5,7 @@ import { ownEvidence } from "@/server/claims";
 import { publicationSelect } from "@/server/publications";
 import { effectiveCheckingDeadline } from "@/server/publication-window";
 import { recordAudit } from "@/server/audit";
+import { batchAuditDetails, type BatchContext } from "@/server/batch-context";
 
 export async function createAppeal(sessionId: string, termId: string, input: unknown) {
   const data = z.object({ publicationId: z.string(), resultHash: z.string().regex(/^[a-f0-9]{64}$/), target: z.string().trim().min(1).max(120), reason: z.string().trim().min(2).max(2000), evidenceIds: z.array(z.string()).max(5).default([]) }).parse(input);
@@ -21,7 +22,7 @@ export async function createAppeal(sessionId: string, termId: string, input: unk
     return appeal;
   });
 }
-export async function changeAppeal(sessionId: string, termId: string, id: string, input: unknown) {
+export async function changeAppeal(sessionId: string, termId: string, id: string, input: unknown, batch?: BatchContext) {
   const data = z.object({ revision: z.number().int().nonnegative(), action: z.enum(["withdraw", "process", "reject", "resolve"]), resolution: z.string().trim().min(2).max(2000).optional(), resolvedPublicationId: z.string().optional() }).parse(input);
   return termTransaction(sessionId, termId, ["ADMIN", "STUDENT"], ["ACTIVE", "CHECKING"], async (tx, term, actorId) => {
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId } });
@@ -48,7 +49,7 @@ export async function changeAppeal(sessionId: string, termId: string, id: string
       }
     }
     const updated = await tx.resultAppeal.update({ where: { id }, data: { status, revision: { increment: 1 }, resolution: data.resolution, reviewerId: actor.role === "ADMIN" ? actorId : undefined, resolvedPublicationId: status === "RESOLVED" ? data.resolvedPublicationId : undefined } });
-    await recordAudit(tx, { actorId, action: "APPEAL_CHANGED", targetId: id, details: { termId, before: appeal.status, after: status, resolution: data.resolution ?? null, resolvedPublicationId: data.resolvedPublicationId ?? null } });
+    await recordAudit(tx, { actorId, action: "APPEAL_CHANGED", targetId: id, details: { termId, before: appeal.status, after: status, resolution: data.resolution ?? null, resolvedPublicationId: data.resolvedPublicationId ?? null, ...batchAuditDetails(batch) } });
     return updated;
   });
 }

@@ -13,8 +13,13 @@ import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
 import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
 import { SearchableSelect } from "@/components/dashboard/searchable-select";
+import {
+	useBatchReview,
+	type BatchAction,
+} from "@/components/dashboard/batch-review";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import {
 	Card,
@@ -146,6 +151,90 @@ export function Claims({
 	const active =
 		term.phase === "ACTIVE" &&
 		(!term.disposition || term.disposition === "NORMAL");
+	const batchActions: BatchAction[] =
+		role === "COUNSELOR"
+			? [
+					{
+						value: "return",
+						label: "批量退回学生",
+						reason: "required",
+						variant: "outline",
+						reasonLabel: "统一退回理由",
+						warning:
+							"退回后由学生补充材料或更正说明；所选申报共用同一退回理由。",
+					},
+				]
+			: role === "COLLEGE"
+				? [
+						{
+							value: "approve",
+							label: "批量通过",
+							reason: "optional",
+							variant: "default",
+							reasonLabel: "审核意见（选填）",
+							description:
+								"通过后计入成绩。缺少辅导员评分的申报会单条失败，请另行退回辅导员重评。",
+						},
+						{
+							value: "return",
+							label: "批量退回学生",
+							reason: "required",
+							variant: "outline",
+							reasonLabel: "统一退回理由",
+							warning:
+								"退回后由学生补充材料或更正说明；所选申报共用同一退回理由。",
+						},
+						{
+							value: "rescore",
+							label: "批量退回重评",
+							reason: "required",
+							variant: "outline",
+							reasonLabel: "统一重评理由",
+							warning:
+								"退回后由原辅导员重新评分，学生材料保持不变；所选申报共用同一重评理由。",
+						},
+					]
+				: role === "ADMIN"
+					? [
+							{
+								value: "revoke",
+								label: "批量撤销申报",
+								reason: "required",
+								variant: "destructive",
+								reasonLabel: "统一撤销理由",
+								warning:
+									"撤销后该申报不再计入成绩，审核历史保留。",
+							},
+						]
+					: [];
+	const batch = useBatchReview({
+		rows: claims.data?.items ?? [],
+		enabled: active && batchActions.length > 0,
+		isEligible: (row) => {
+			if (role === "COUNSELOR") return row.status === "PENDING_COUNSELOR";
+			if (role === "COLLEGE") return row.status === "PENDING_COLLEGE";
+			if (role === "ADMIN") return row.status === "APPROVED";
+			return false;
+		},
+		actions: batchActions,
+		url: "/api/claims/batch",
+		termId: term.id,
+		rowLabel: (row) => `${row.student.name} · ${row.title}`,
+		onCompleted: (summary) => {
+			claims.reload();
+			setSuccess(
+				`批量处理完成：成功 ${summary.response.succeeded} 条${
+					summary.response.failed
+						? `，失败 ${summary.response.failed} 条`
+						: ""
+				}${
+					summary.response.notExecuted
+						? `，未执行 ${summary.response.notExecuted} 条`
+						: ""
+				}。`,
+			);
+		},
+	});
 	const activityNodes = term.scheme.nodes.filter((n) => n.kind === "ACTIVITY");
 	const nodeName = (nodeId: string | null) =>
 		(nodeId && term.scheme.nodes.find((n) => n.id === nodeId)?.name) || "—";
@@ -334,7 +423,12 @@ export function Claims({
 				<TemplateDirectory
 					description={`共 ${claims.data.total} 条记录。${directoryDescription}`}
 					data={claims.data.items}
-					columns={columns}
+					columns={
+						batch.checkboxColumn
+							? [batch.checkboxColumn, ...columns]
+							: columns
+					}
+					selectionBar={batch.bar}
 					empty={
 						role === "STUDENT"
 							? {
@@ -394,7 +488,18 @@ export function Claims({
 					mobile={(row) => (
 						<div className="flex flex-col gap-3">
 							<div className="flex justify-between gap-2">
-								<p className="font-medium">{row.title}</p>
+								<div className="flex min-w-0 items-start gap-3">
+									{batch.canSelect(row) && (
+										<label className="flex cursor-pointer items-center gap-2 pt-0.5 text-xs text-muted-foreground max-md:min-h-11">
+											<Checkbox
+												checked={batch.isSelected(row.id)}
+												onCheckedChange={() => batch.toggle(row.id)}
+											/>
+											选择
+										</label>
+									)}
+									<p className="font-medium">{row.title}</p>
+								</div>
 								<Badge variant="outline">
 									{statusLabels[row.status] || row.status}
 								</Badge>
@@ -980,6 +1085,7 @@ export function Claims({
 					)}
 				</SheetContent>
 			</Sheet>
+			{batch.dialogs}
 		</>
 	);
 }

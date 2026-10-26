@@ -108,11 +108,13 @@ export const auditActions = {
   ACTIVITY_ATTACHMENT_DOWNLOADED: { category: "ACTIVITY", label: "下载活动附件", targetType: "ActivityAttachment" },
 
   PARTICIPATION_REVIEWED: { category: "PARTICIPATION", label: "审核活动参与", targetType: "Participation" },
+  PARTICIPATION_BATCH_REVIEWED: { category: "PARTICIPATION", label: "批量审核活动参与", targetType: "ReviewBatch" },
   PARTICIPATION_CHANGED: { category: "PARTICIPATION", label: "变更活动参与", targetType: "Participation" },
   PARTICIPATION_IMPORT_COMMITTED: { category: "IMPORT_EXPORT", label: "提交活动名单导入", targetType: "ParticipationImport", highRisk: true },
 
   CLAIM_SUBMITTED: { category: "CLAIM", label: "提交成果申报", targetType: "PersonalClaim" },
   CLAIM_CHANGED: { category: "CLAIM", label: "处理成果申报", targetType: "PersonalClaim" },
+  CLAIM_BATCH_CHANGED: { category: "CLAIM", label: "批量处理成果申报", targetType: "ReviewBatch" },
 
   GRADE_SAVED: { category: "GRADE", label: "保存成绩", targetType: "GradeInput", requiresReason: true, highRisk: true },
   GRADE_IMPORT_SUBMITTED: { category: "IMPORT_EXPORT", label: "提交成绩导入预检", targetType: "GradeImport" },
@@ -121,6 +123,7 @@ export const auditActions = {
   GRADE_CHANGE_SUBMITTED: { category: "GRADE", label: "提交成绩修改", targetType: "GradeChange", requiresReason: true, highRisk: true },
   GRADE_APPROVED: { category: "GRADE", label: "审核成绩修改", targetType: "GradeChange", requiresReason: true, highRisk: true },
   GRADE_CHANGE_CHANGED: { category: "GRADE", label: "处理成绩修改", targetType: "GradeChange" },
+  GRADE_BATCH_CHANGED: { category: "GRADE", label: "批量处理成绩修改", targetType: "ReviewBatch" },
   GRADE_DETAIL_EXPORTED: { category: "IMPORT_EXPORT", label: "导出成绩明细", targetType: "Term", highRisk: true },
   GRADE_STATEMENT_EXPORTED: { category: "IMPORT_EXPORT", label: "导出成绩单", targetType: "Term", highRisk: true },
   SCORING_CORRECTED: { category: "GRADE", label: "更正计分结果", targetType: "Term", requiresReason: true, highRisk: true },
@@ -132,11 +135,13 @@ export const auditActions = {
   DEDUCTION_APPROVED: { category: "DEDUCTION", label: "审核扣分申请", targetType: "DeductionChange", requiresReason: true, highRisk: true },
   DEDUCTION_REVOKED_APPROVED: { category: "DEDUCTION", label: "审核扣分撤销", targetType: "DeductionChange", requiresReason: true, highRisk: true },
   DEDUCTION_CHANGE_CHANGED: { category: "DEDUCTION", label: "处理扣分申请", targetType: "DeductionChange" },
+  DEDUCTION_BATCH_CHANGED: { category: "DEDUCTION", label: "批量处理扣分申请", targetType: "ReviewBatch" },
 
   RESULTS_PUBLISHED: { category: "PUBLICATION", label: "发布测评结果", targetType: "ResultPublication", highRisk: true },
   RESULT_CONFIRMED: { category: "PUBLICATION", label: "确认本人测评结果", targetType: "PublishedResult" },
   APPEAL_CREATED: { category: "APPEAL", label: "提交成绩异议", targetType: "ResultAppeal" },
   APPEAL_CHANGED: { category: "APPEAL", label: "处理成绩异议", targetType: "ResultAppeal" },
+  APPEAL_BATCH_CHANGED: { category: "APPEAL", label: "批量处理成绩异议", targetType: "ReviewBatch" },
 
   SETTINGS_CHANGED: { category: "SETTINGS", label: "保存系统设置", targetType: "SiteSettings", requiresReason: true, highRisk: true },
   BRAND_ASSET_UPLOADED: { category: "SETTINGS", label: "上传品牌资源", targetType: "BrandAsset" },

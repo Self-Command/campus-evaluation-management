@@ -10,8 +10,13 @@ import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
 import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
+import {
+	useBatchReview,
+	type BatchAction,
+} from "@/components/dashboard/batch-review";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -99,6 +104,70 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 	const queue = useRemote<Queue>(`/api/deduction-changes?${new URLSearchParams({ termId: term.id, status: queueStatus, page: String(queuePage) })}`);
 	const roster = useRemote<Roster>(`/api/deductions/roster?${new URLSearchParams({ termId: term.id, q: query, ...scope, page: String(rosterPage) })}`);
 	const detail = useRemote<Detail>(selectedId ? `/api/deductions/${selectedId}?termId=${term.id}` : null);
+	const batchActions: BatchAction[] =
+		role === "COLLEGE"
+			? [
+					{
+						value: "approve",
+						label: "批量审核通过",
+						reason: "optional",
+						variant: "default",
+						reasonLabel: "审核意见（选填）",
+						defaultReason: "学院审核通过",
+						description:
+							"通过后扣分或撤销申请立即生效。目标扣分已变化的记录会单条失败，请刷新后逐条核对。",
+					},
+					{
+						value: "return",
+						label: "批量退回辅导员修改",
+						reason: "required",
+						variant: "outline",
+						reasonLabel: "统一退回理由",
+						warning:
+							"退回后由原辅导员修改并重新提交学院审核；所选记录共用同一退回理由。",
+					},
+				]
+			: role === "COUNSELOR"
+				? [
+						{
+							value: "abandon",
+							label: "批量撤回我的申请",
+							reason: "optional",
+							variant: "outline",
+							reasonLabel: "撤回说明（选填）",
+							defaultReason: "批量撤回本次扣分申请",
+							warning:
+								"撤回后本次扣分申请作废；已通过或已撤回的记录会单条失败。",
+						},
+					]
+				: [];
+	const batch = useBatchReview({
+		rows: queue.data?.items ?? [],
+		enabled: !readOnly && batchActions.length > 0,
+		isEligible: (row) => {
+			if (role === "COLLEGE") return row.canDecide;
+			if (role === "COUNSELOR")
+				return ["PENDING_COLLEGE", "RETURNED"].includes(row.status);
+			return false;
+		},
+		actions: batchActions,
+		url: "/api/deduction-changes/batch",
+		termId: term.id,
+		resetKey: `${queueStatus}-${queuePage}`,
+		rowLabel: (row) => `${row.studentName} · ${row.projectName}`,
+		onCompleted: (summary) =>
+			refresh(
+				`批量处理完成：成功 ${summary.response.succeeded} 条${
+					summary.response.failed
+						? `，失败 ${summary.response.failed} 条`
+						: ""
+				}${
+					summary.response.notExecuted
+						? `，未执行 ${summary.response.notExecuted} 条`
+						: ""
+				}。`,
+			),
+	});
 
 	function refresh(message: string) {
 		setSuccess(message);
@@ -256,7 +325,12 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 				<TemplateDirectory
 					description={`共 ${queue.data.total} 条扣分记录`}
 					data={queue.data.items}
-					columns={queueColumns}
+					columns={
+						batch.checkboxColumn
+							? [batch.checkboxColumn, ...queueColumns]
+							: queueColumns
+					}
+					selectionBar={batch.bar}
 					empty={
 						role === "COUNSELOR"
 							? {
@@ -287,7 +361,18 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 					pagination={{ page: queue.data.page, total: queue.data.total, href: () => "#", onPageChange: setQueuePage }}
 					mobile={(row) => (
 						<div className="flex flex-col gap-2">
-							<p className="font-medium">{row.studentName} · {row.projectName}</p>
+							<div className="flex min-w-0 items-start gap-3">
+									{batch.canSelect(row) && (
+										<label className="flex cursor-pointer items-center gap-2 pt-0.5 text-xs text-muted-foreground max-md:min-h-11">
+											<Checkbox
+												checked={batch.isSelected(row.id)}
+												onCheckedChange={() => batch.toggle(row.id)}
+											/>
+											选择
+										</label>
+									)}
+									<p className="font-medium">{row.studentName} · {row.projectName}</p>
+								</div>
 							<p className="text-sm">{actionLabels[row.action]}{row.amount ? ` · ${row.amount}` : ""}</p>
 							<p className="text-xs text-muted-foreground">{row.reason}</p>
 							<Badge variant="outline" className="self-start">{statusLabels[row.status] || row.status}</Badge>
@@ -581,6 +666,7 @@ export function DeductionWorkspace({ term, role }: { term: { id: string; name: s
 					</form>
 				</DialogContent>
 			</Dialog>
+			{batch.dialogs}
 		</>
 	);
 }

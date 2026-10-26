@@ -10,8 +10,13 @@ import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
 import { useUnsavedChanges } from "@/components/dashboard/use-unsaved-changes";
+import {
+	useBatchReview,
+	type BatchAction,
+} from "@/components/dashboard/batch-review";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -97,6 +102,70 @@ export function GradeWorkspace({ term, role, initialLogin = "" }: { term: { id: 
 	const detail = useRemote<Detail>(activeStudentId ? `/api/grades/${activeStudentId}?termId=${term.id}` : null);
 	const selectedNodeId = node || detail.data?.nodes[0]?.id || "";
 	const current = detail.data?.nodes.find(item => item.id === selectedNodeId) || null;
+	const batchActions: BatchAction[] =
+		role === "COLLEGE"
+			? [
+					{
+						value: "approve",
+						label: "批量审核通过",
+						reason: "optional",
+						variant: "default",
+						reasonLabel: "审核意见（选填）",
+						defaultReason: "学院审核通过",
+						description:
+							"通过后按批准值生效。有效成绩已变化的记录会单条失败，请刷新后逐条核对。",
+					},
+					{
+						value: "return",
+						label: "批量退回辅导员修改",
+						reason: "required",
+						variant: "outline",
+						reasonLabel: "统一退回理由",
+						warning:
+							"退回后由原辅导员修改并重新提交学院审核；所选记录共用同一退回理由。",
+					},
+				]
+			: role === "COUNSELOR"
+				? [
+						{
+							value: "abandon",
+							label: "批量撤回我的修改",
+							reason: "optional",
+							variant: "outline",
+							reasonLabel: "撤回说明（选填）",
+							defaultReason: "批量撤回本次成绩修改",
+							warning:
+								"撤回后本次成绩修改作废，当前有效成绩保持不变；已通过或已撤回的记录会单条失败。",
+						},
+					]
+				: [];
+	const batch = useBatchReview({
+		rows: queue.data?.items ?? [],
+		enabled: !readOnly && batchActions.length > 0,
+		isEligible: (row) => {
+			if (role === "COLLEGE") return row.canDecide;
+			if (role === "COUNSELOR")
+				return ["PENDING_COLLEGE", "RETURNED"].includes(row.status);
+			return false;
+		},
+		actions: batchActions,
+		url: "/api/grade-changes/batch",
+		termId: term.id,
+		resetKey: `${queueStatus}-${queuePage}`,
+		rowLabel: (row) => `${row.studentName} · ${row.nodeName}`,
+		onCompleted: (summary) =>
+			refresh(
+				`批量处理完成：成功 ${summary.response.succeeded} 条${
+					summary.response.failed
+						? `，失败 ${summary.response.failed} 条`
+						: ""
+				}${
+					summary.response.notExecuted
+						? `，未执行 ${summary.response.notExecuted} 条`
+						: ""
+				}。`,
+			),
+	});
 
 	function refresh(message: string) {
 		setSuccess(message);
@@ -291,7 +360,12 @@ export function GradeWorkspace({ term, role, initialLogin = "" }: { term: { id: 
 				<TemplateDirectory
 					description={`共 ${queue.data.total} 条成绩修改`}
 					data={queue.data.items}
-					columns={queueColumns}
+					columns={
+						batch.checkboxColumn
+							? [batch.checkboxColumn, ...queueColumns]
+							: queueColumns
+					}
+					selectionBar={batch.bar}
 					empty={
 						role === "COUNSELOR"
 							? {
@@ -322,7 +396,18 @@ export function GradeWorkspace({ term, role, initialLogin = "" }: { term: { id: 
 					pagination={{ page: queue.data.page, total: queue.data.total, href: () => "#", onPageChange: setQueuePage }}
 					mobile={(row) => (
 						<div className="flex flex-col gap-2">
-							<p className="font-medium">{row.studentName} · {row.nodeName}</p>
+							<div className="flex min-w-0 items-start gap-3">
+									{batch.canSelect(row) && (
+										<label className="flex cursor-pointer items-center gap-2 pt-0.5 text-xs text-muted-foreground max-md:min-h-11">
+											<Checkbox
+												checked={batch.isSelected(row.id)}
+												onCheckedChange={() => batch.toggle(row.id)}
+											/>
+											选择
+										</label>
+									)}
+									<p className="font-medium">{row.studentName} · {row.nodeName}</p>
+								</div>
 							<p className="text-sm tabular-nums">{row.baseValue ?? "未录入"} → {row.value}</p>
 							<p className="text-xs text-muted-foreground">{row.reason}</p>
 							<Badge variant="outline" className="self-start">{statusLabels[row.status] || row.status}</Badge>
@@ -531,6 +616,7 @@ export function GradeWorkspace({ term, role, initialLogin = "" }: { term: { id: 
 					</form>
 				</DialogContent>
 			</Dialog>
+			{batch.dialogs}
 			<Separator className="my-2" />
 			<p className="text-xs text-muted-foreground">
 				{role === "COLLEGE"
