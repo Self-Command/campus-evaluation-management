@@ -37,7 +37,19 @@ export async function downloadEvidence(sessionId: string, id: string) {
   const file = await tx.evidence.findUnique({ where: { id }, include: { references: { include: { source: { include: { participation: { include: { activity: true } } } } } }, claimReferences: { select: { claim: { select: { studentId: true } } } }, appealReferences: { select: { appeal: { select: { studentId: true } } } }, activityEvidence: { include: { activity: { select: { ownerId: true, collegeId: true } }, sources: { select: { participation: { select: { studentId: true } } } } } } } });
   if (!file) throw new AccountError("证明不存在", 404);
   const activityStudentIds = file.activityEvidence.flatMap(row => row.sources.map(source => source.participation.studentId));
-  const allowedByReference = actor.role === "ADMIN" || file.ownerId === actor.id || (actor.role === "STUDENT" && (file.claimReferences.some(r => r.claim.studentId === actor.id) || file.appealReferences.some(r => r.appeal.studentId === actor.id) || activityStudentIds.includes(actor.id))) || file.references.some(reference => {
+  const activeActivityIds = [...new Set(file.activityEvidence.filter(row => row.active).map(row => row.activityId))];
+  const activeParticipation = actor.role === "STUDENT" && activeActivityIds.length
+    ? await tx.participation.findFirst({
+      where: {
+        studentId: actor.id,
+        activityId: { in: activeActivityIds },
+        registeredAt: { not: null },
+        removedAt: null,
+      },
+      select: { id: true },
+    })
+    : null;
+  const allowedByReference = actor.role === "ADMIN" || file.ownerId === actor.id || (actor.role === "STUDENT" && (!!activeParticipation || file.claimReferences.some(r => r.claim.studentId === actor.id) || file.appealReferences.some(r => r.appeal.studentId === actor.id))) || file.references.some(reference => {
     const participation = reference.source.participation;
     return actor.role === "STUDENT" ? participation.studentId === actor.id : participation.activity.ownerId === actor.id;
   }) || file.activityEvidence.some(row => row.activity.ownerId === actor.id || (actor.role === "COLLEGE" && canManageActivity(row.activity, actor)));

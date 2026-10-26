@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { AccountError } from "@/server/accounts";
 import { termTransaction } from "@/server/terms";
-import { assertActivityManager, canManageActivity } from "@/server/activity-policy";
+import { assertActivityManager } from "@/server/activity-policy";
 import { appendHistory, historyEntry, jsonValue } from "@/server/claims";
 import { recordAudit } from "@/server/audit";
 
@@ -243,20 +243,5 @@ export async function saveActivityEvidence(
 				activityRevision: activity.revision + 1,
 			};
 		},
-	);
-}
-
-export function canReadActivityEvidence(
-	actor: { id: string; role: string; collegeId?: string | null },
-	activity: { ownerId: string; collegeId: string | null },
-	studentIds: string[],
-	scopedStudentCount: number,
-) {
-	if (actor.role === "ADMIN") return true;
-	if (canManageActivity(activity, actor)) return true;
-	if (actor.role === "STUDENT") return studentIds.includes(actor.id);
-	return (
-		(actor.role === "COLLEGE" || actor.role === "COUNSELOR") &&
-		scopedStudentCount > 0
 	);
 }

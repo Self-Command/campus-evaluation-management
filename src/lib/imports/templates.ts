@@ -10,6 +10,8 @@ export const importRoles: Record<ImportKind, Role[]> = {
 };
 
 export const participationBaseHeaders = ["学号", "姓名", "学院", "专业", "班级"] as const;
+export const participationImportHeaders = ["学号", "姓名"] as const;
+export const gradeImportHeaders = ["学号", "姓名", "成绩"] as const;
 export const staffAccountHeaders = ["登录账号", "姓名", "学院编码", "学院名称"] as const;
 
 export const accountImportRoles = ["STUDENT", "COUNSELOR", "COLLEGE"] as const;
@@ -60,16 +62,16 @@ export function templateFor(
 	if (kind === "grades") {
 		return {
 			kind,
-			version: "grades-v3",
-			name: "成绩输入模板-v3.csv",
-			headers: [...participationBaseHeaders, "成绩"],
+			version: "grades-v4",
+			name: "成绩输入模板-v4.csv",
+			headers: [...gradeImportHeaders],
 		};
 	}
 	return {
 		kind,
-		version: "participation-v5-fixed",
-		name: "活动参与名单模板-v5.csv",
-		headers: [...participationBaseHeaders],
+		version: "participation-v6",
+		name: "活动参与名单模板-v6.csv",
+		headers: [...participationImportHeaders],
 	};
 }
 

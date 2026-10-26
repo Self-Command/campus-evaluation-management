@@ -56,6 +56,44 @@ export function identityNumberKey(value: string) {
 	return normalizeText(value).toLowerCase();
 }
 
+export function identityTextKey(value: string) {
+	return normalizeText(value).replace(WHITESPACE, " ").toLowerCase();
+}
+
+export function identityLoginVariants(value: string) {
+	const variants = new Set<string>();
+	const push = (item: string) => {
+		const trimmed = item.trim();
+		if (trimmed) variants.add(trimmed);
+	};
+	push(value);
+	push(value.normalize("NFKC"));
+	for (const item of [...variants]) push(item.replace(ZERO_WIDTH, ""));
+	for (const item of [...variants]) push(item.toLowerCase());
+	return [...variants];
+}
+
+export function organizationMismatchWarning(
+	file: { college?: string | null; major?: string | null; className?: string | null },
+	profile: { college: string; major: string; className: string },
+) {
+	const fields = [
+		file.college && identityTextKey(file.college) !== identityTextKey(profile.college)
+			? "学院"
+			: "",
+		file.major && identityTextKey(file.major) !== identityTextKey(profile.major)
+			? "专业"
+			: "",
+		file.className &&
+		identityTextKey(file.className) !== identityTextKey(profile.className)
+			? "班级"
+			: "",
+	].filter(Boolean);
+	return fields.length
+		? `文件中的${fields.join("、")}与系统档案不一致，已按系统档案处理`
+		: null;
+}
+
 function orgKey(ref: IdentityClassRef) {
 	return `org:${[
 		normalizeText(ref.college).replace(WHITESPACE, " "),

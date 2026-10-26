@@ -15,7 +15,6 @@ import {
 	previewParticipationImport,
 } from "@/server/participation-import";
 import {
-	participationBaseHeaders,
 	templateCsv,
 	templateFor,
 	type ImportTemplate,
@@ -139,14 +138,18 @@ function participationRows(
 			班级: row.className,
 		} as Record<string, string>;
 		const parsed = Object.fromEntries(
-			participationBaseHeaders.map((header) => [header, source[header]]),
+			template.headers.map((header) => [header, source[header]]),
 		);
 		return {
 			login: parsed["学号"],
 			name: parsed["姓名"],
-			college: parsed["学院"],
-			major: parsed["专业"],
-			className: parsed["班级"],
+			...(template.headers.includes("学院")
+				? { college: parsed["学院"] }
+				: {}),
+			...(template.headers.includes("专业") ? { major: parsed["专业"] } : {}),
+			...(template.headers.includes("班级")
+				? { className: parsed["班级"] }
+				: {}),
 		};
 	});
 }
@@ -171,13 +174,20 @@ function gradeRows(
 			班级: row.className,
 			成绩: row.value,
 		} as Record<string, string>;
+		const parsed = Object.fromEntries(
+			template.headers.map((header) => [header, source[header]]),
+		);
 		return {
-			login: source[template.headers[0]],
-			name: source[template.headers[1]],
-			college: source[template.headers[2]],
-			major: source[template.headers[3]],
-			className: source[template.headers[4]],
-			value: source[template.headers[5]],
+			login: parsed["学号"],
+			name: parsed["姓名"],
+			value: parsed["成绩"],
+			...(template.headers.includes("学院")
+				? { college: parsed["学院"] }
+				: {}),
+			...(template.headers.includes("专业") ? { major: parsed["专业"] } : {}),
+			...(template.headers.includes("班级")
+				? { className: parsed["班级"] }
+				: {}),
 		};
 	});
 }
@@ -427,7 +437,7 @@ test("账号模板按允许角色校验，管理员可预览并提交，其他�
 
 test("成绩模板按角色开放，管理员和辅导员均能实际写入，其他角色被拒绝", async () => {
 	const template = templateFor("grades");
-	expect(template.version).toBe("grades-v3");
+	expect(template.version).toBe("grades-v4");
 	const adminRows = gradeRows(template, [
 		{
 			...(await fixtureRows("grade-admin")),
@@ -486,8 +496,8 @@ test("成绩模板按角色开放，管理员和辅导员均能实际写入，�
 		"grades",
 		{ termId, nodeId: "grade" },
 	);
-	expect(adminTemplate.version).toBe("grades-v3");
-	expect(counselorTemplate.version).toBe("grades-v3");
+	expect(adminTemplate.version).toBe("grades-v4");
+	expect(counselorTemplate.version).toBe("grades-v4");
 	await expect(
 		resolveImportTemplate(users.college.session, "grades", {
 			termId,
@@ -498,8 +508,8 @@ test("成绩模板按角色开放，管理员和辅导员均能实际写入，�
 
 test("参与模板按角色开放，管理员、发布者、学院均能实际导入，其他角色被拒绝", async () => {
 	const template = templateFor("participation");
-	expect(template.version).toBe("participation-v5-fixed");
-	expect(template.headers).toEqual([...participationBaseHeaders]);
+	expect(template.version).toBe("participation-v6");
+	expect(template.headers).toEqual(["学号", "姓名"]);
 	const activities = await db.activity.findMany({
 		where: { termId },
 		orderBy: { name: "asc" },
@@ -574,9 +584,9 @@ test("参与模板按角色开放，管理员、发布者、学院均能实际�
 		"participation",
 		{ termId, activityId: actorFor.college.activityId },
 	);
-	expect(adminTemplate.version).toBe("participation-v5-fixed");
-	expect(publisherTemplate.version).toBe("participation-v5-fixed");
-	expect(collegeTemplate.version).toBe("participation-v5-fixed");
+	expect(adminTemplate.version).toBe("participation-v6");
+	expect(publisherTemplate.version).toBe("participation-v6");
+	expect(collegeTemplate.version).toBe("participation-v6");
 	await expect(
 		resolveImportTemplate(users.counselor.session, "participation", {
 			termId,
@@ -589,4 +599,126 @@ test("参与模板按角色开放，管理员、发布者、学院均能实际�
 			activityId: actorFor.admin.activityId,
 		}),
 	).rejects.toThrow("主办学院");
+});
+
+test("参与名单按学号姓名匹配，组织差异只提示并可按系统档案提交", async () => {
+	const relaxed = await student(
+		"participation-relaxed",
+		"90000011",
+		"参与放宽学生",
+	);
+	const activity = await createActivity(
+		"relaxed-activity",
+		users.admin.id,
+		org.college.id,
+	);
+	const evidence = await db.evidence.create({
+		data: {
+			ownerId: users.admin.id,
+			name: "放宽身份测试证明.pdf",
+			mime: "application/pdf",
+			size: 1,
+			sha256: "b".repeat(64),
+			storageKey: `${marker}-relaxed-evidence`,
+		},
+	});
+	await db.activityEvidence.create({
+		data: {
+			activityId: activity.id,
+			evidenceId: evidence.id,
+			version: 1,
+			active: true,
+			uploadedBy: users.admin.id,
+			note: "放宽身份测试证明",
+		},
+	});
+	const template = templateFor("participation");
+	expect(template.headers).toEqual(["学号", "姓名"]);
+	const preview = await previewParticipationImport(users.admin.session, termId, {
+		activityId: activity.id,
+		kind: "INITIAL",
+		rows: [
+			{
+				login: "９０００００１１",
+				name: "参与 放宽学生",
+				college: "错误学院",
+				major: "错误专业",
+				className: "错误班级",
+			},
+		],
+		note: "组织差异提示测试",
+	});
+	expect(preview.errors).toBe(0);
+	expect(preview.warnings).toBe(1);
+	expect(preview.rows[0].login).toBe("90000011");
+	expect(preview.rows[0].college).toBe(org.college.name);
+	expect(preview.rows[0].warnings[0]).toContain("已按系统档案处理");
+	const committed = await commitParticipationImport(
+		users.admin.session,
+		termId,
+		preview.id,
+	);
+	expect(committed.submitted).toBe(1);
+	expect(committed.warnings).toBe(1);
+	const fact = await db.participation.findFirstOrThrow({
+		where: { activityId: activity.id, studentId: relaxed.id },
+		include: { sources: true },
+	});
+	expect(fact.sources[0].status).toBe("PENDING_COUNSELOR");
+});
+
+test("成绩导入组织差异只提示，姓名不一致仍整批阻断", async () => {
+	const target = await student("grade-relaxed", "90000012", "成绩放宽学生");
+	const preview = await previewGradeImport(users.admin.session, termId, {
+		nodeId: "grade",
+		rows: [
+			{
+				login: target.login,
+				name: target.name,
+				college: "错误学院",
+				major: "错误专业",
+				className: "错误班级",
+				value: "93",
+			},
+		],
+		reason: "组织差异提示测试",
+	});
+	expect(preview.errors).toBe(0);
+	expect(preview.warnings).toBe(1);
+	expect(preview.rows[0].college).toBe(org.college.name);
+	const committed = await commitGradeImport(
+		users.admin.session,
+		termId,
+		preview.id,
+	);
+	expect(committed.written).toBe(1);
+	expect(committed.warnings).toBe(1);
+	const grade = await db.gradeInput.findFirstOrThrow({
+		where: { termId, nodeId: "grade", studentId: target.id },
+	});
+	expect(grade.value.toFixed()).toBe("93");
+	const mismatch = await previewGradeImport(users.admin.session, termId, {
+		nodeId: "grade",
+		rows: [{ login: target.login, name: "错误姓名", value: "94" }],
+		reason: "姓名不一致测试",
+	});
+	expect(mismatch.errors).toBe(1);
+	expect(mismatch.rows[0].message).toContain("学号与姓名不一致");
+	const activity = await createActivity(
+		"name-mismatch-activity",
+		users.admin.id,
+		org.college.id,
+	);
+	const participationMismatch = await previewParticipationImport(
+		users.admin.session,
+		termId,
+		{
+			activityId: activity.id,
+			kind: "INITIAL",
+			rows: [{ login: target.login, name: "错误姓名" }],
+			note: "姓名不一致测试",
+		},
+	);
+	expect(participationMismatch.errors).toBe(1);
+	expect(participationMismatch.rows[0].message).toContain("学号与姓名不一致");
 });

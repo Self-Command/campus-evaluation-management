@@ -28,7 +28,7 @@ import {
 	DialogDescription,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
 import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
@@ -90,6 +90,11 @@ export function ActivityDetail({
 	const owner = !!activity.canManage;
 	const canSeeParticipation =
 		user.role !== "STUDENT" && (user.role !== "PUBLISHER" || owner);
+	const canSeeEvidence =
+		canSeeParticipation ||
+		(user.role === "STUDENT" &&
+			!!activity.ownParticipation?.registeredAt &&
+			!activity.ownParticipation.removedAt);
 	const endedAt = activity.endedAt ? new Date(activity.endedAt).getTime() : null;
 	const endsAtTime = new Date(activity.endsAt).getTime();
 	const nowTime = new Date(now).getTime();
@@ -165,7 +170,7 @@ export function ActivityDetail({
 	const requestedTab = params.get("tab");
 	const initialTab =
 		(requestedTab === "participants" && canSeeParticipation) ||
-		(requestedTab === "evidence" && canSeeParticipation) ||
+		(requestedTab === "evidence" && canSeeEvidence) ||
 		(requestedTab === "participation" && !!activity.ownParticipation)
 			? requestedTab
 			: params.has("participantPage") ||
@@ -238,7 +243,7 @@ export function ActivityDetail({
 							{canSeeParticipation && (
 								<TabsTrigger value="participants">参与名单</TabsTrigger>
 							)}
-							{canSeeParticipation && (
+							{canSeeEvidence && (
 								<TabsTrigger value="evidence">活动证明</TabsTrigger>
 							)}
 							{activity.ownParticipation && (
@@ -461,14 +466,16 @@ export function ActivityDetail({
 								/>
 							</TabsContent>
 						)}
-						{canSeeParticipation && (
+						{canSeeEvidence && (
 							<TabsContent value="evidence" className="py-4">
 								<section className="flex flex-col gap-4">
 									<div className="flex flex-wrap items-end justify-between gap-3">
 										<div>
 											<h2 className="text-base font-medium">活动证明</h2>
 											<p className="mt-1 text-sm text-muted-foreground">
-												同一活动共用一份有效证明。更换后，按旧证明通过的活动参与会重新进入审核。
+												{user.role === "STUDENT"
+													? "主办学院上传的活动证明，仅供已登记参加本活动的学生查看和下载当前有效版本。"
+													: "同一活动共用一份有效证明。更换后，按旧证明通过的活动参与会重新进入审核。"}
 											</p>
 										</div>
 										{owner && (
@@ -507,7 +514,9 @@ export function ActivityDetail({
 											))
 										) : (
 											<p className="text-sm text-muted-foreground">
-												尚未上传活动证明。导入参与名单前请先上传。
+												{user.role === "STUDENT"
+													? "主办学院尚未上传活动证明。"
+													: "尚未上传活动证明。导入参与名单前请先上传。"}
 											</p>
 										)}
 									</div>
@@ -640,6 +649,9 @@ export function ActivityDetail({
 									rows={3}
 									placeholder="说明证明对应的活动场次、名单或成绩"
 								/>
+								<FieldDescription>
+									该说明会展示给参加活动的学生，请勿填写内部备注。
+								</FieldDescription>
 							</Field>
 							{activity.evidence?.some((row) => row.active) && (
 								<Field>

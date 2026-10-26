@@ -52,6 +52,7 @@ type PreviewRow = {
 	before: string | null;
 	state: string;
 	message: string;
+	warnings: string[];
 	duplicateCandidates?: {
 		userId: string;
 		login: string;
@@ -66,6 +67,7 @@ type Preview = {
 	id: string;
 	kind: "INITIAL" | "CORRECTION";
 	errors: number;
+	warnings: number;
 	changes: number;
 	unresolved: number;
 	expiresAt: string;
@@ -81,6 +83,7 @@ type ImportResult = {
 	updated?: number;
 	unchanged?: number;
 	skipped: number;
+	warnings?: number;
 	kind?: "INITIAL" | "CORRECTION";
 	rosterRevision?: number;
 	replay: boolean;
@@ -121,10 +124,11 @@ const states: Record<string, string> = {
 	ERROR: "错误",
 	DUPLICATE: "待确认重复",
 };
-const participationHeaders = ["学号", "姓名", "学院", "专业", "班级"];
+const participationHeaders = ["学号", "姓名"];
 type RawPreview = {
 	id: string;
 	errors: number;
+	warnings?: number;
 	unresolved?: number;
 	expiresAt: string;
 	changes?: number;
@@ -156,6 +160,11 @@ function normalizePreview(
 			: Array.isArray(identity.duplicateCandidates)
 				? identity.duplicateCandidates
 				: [];
+		const rawWarnings = Array.isArray(raw.warnings)
+			? raw.warnings
+			: Array.isArray(identity.warnings)
+				? identity.warnings
+				: [];
 		return {
 			line: Number(raw.line ?? 0),
 			login: text(identity.login),
@@ -168,6 +177,7 @@ function normalizePreview(
 			before: before == null ? null : text(before),
 			state: text(raw.state),
 			message: text(raw.message),
+			warnings: rawWarnings.map(text).filter(Boolean),
 			duplicateCandidates: rawCandidates
 				.filter(
 					(candidate): candidate is Record<string, unknown> =>
@@ -190,6 +200,8 @@ function normalizePreview(
 	return {
 		id: data.id,
 		errors: data.errors,
+		warnings:
+			data.warnings ?? rows.reduce((total, row) => total + row.warnings.length, 0),
 		changes:
 			data.changes ??
 			rows.filter((row) =>
@@ -247,11 +259,39 @@ export function ImportWizard({
 				? ["login", "name", "collegeCode", "college"]
 				: ["login", "name", "college", "major", "className"]
 			: kind === "grades"
-				? ["login", "name", "college", "major", "className", "value"]
+				? ["login", "name", "value"]
 				: [];
 	function fieldLabel(field: string) {
 		if (field === "login" && staffBatch) return "登录账号";
 		return labels[field] ?? field;
+	}
+	const headerAliases: Record<string, string[]> = {
+		login: ["学号"],
+		name: ["姓名"],
+		college: ["学院", "学院名称"],
+		collegeCode: ["学院编码"],
+		major: ["专业"],
+		className: ["班级"],
+		value: ["成绩", "得分"],
+	};
+	function initialMapping(source: string[]) {
+		const used = new Set<number>();
+		const result: Record<string, number> = {};
+		for (const field of fields) {
+			const aliases =
+				field === "login" && staffBatch
+					? ["登录账号", "学号"]
+					: (headerAliases[field] ?? [field]);
+			let position = source.findIndex(
+				(header, i) => !used.has(i) && aliases.includes(header.trim()),
+			);
+			if (position < 0)
+				position = source.findIndex((_, i) => !used.has(i));
+			if (position < 0) position = 0;
+			used.add(position);
+			result[field] = position;
+		}
+		return result;
 	}
 	const endpoint = {
 		accounts: "/api/admin/account-import",
@@ -277,6 +317,9 @@ export function ImportWizard({
 				: "每批最多100条、1MB";
 	const duplicateRows =
 		preview?.rows.filter((row) => row.state === "DUPLICATE") ?? [];
+	const warningTexts = [
+		...new Set(preview?.rows.flatMap((row) => row.warnings) ?? []),
+	];
 	const duplicateReady = duplicateRows.every((row) => {
 		const resolution = resolutions[row.line];
 		return (
@@ -373,9 +416,17 @@ export function ImportWizard({
 			accessorKey: "message",
 			header: "说明",
 			cell: ({ row }) => (
-				<span className="block max-w-80 whitespace-normal break-words">
-					{row.original.message}
-				</span>
+				<div className="block min-w-64 max-w-80 whitespace-normal break-words">
+					<p>{row.original.message}</p>
+					{row.original.warnings.map((warning) => (
+						<p
+							key={warning}
+							className="mt-1 text-xs text-amber-600 dark:text-amber-400"
+						>
+							{warning}
+						</p>
+					))}
+				</div>
 			),
 		},
 	];
@@ -436,14 +487,7 @@ export function ImportWizard({
 			const data = await send(action);
 			if (action === "columns") {
 				setHeaders(data.headers);
-				setMapping(
-					Object.fromEntries(
-						fields.map((field, i) => [
-							field,
-							Math.min(i, data.headers.length - 1),
-						]),
-					),
-				);
+				setMapping(initialMapping(data.headers));
 				setPreview(null);
 			} else if (action === "preview")
 				{ setPreview(normalizePreview(kind, data as RawPreview)); setResolutions({}); }
@@ -517,9 +561,9 @@ export function ImportWizard({
 									? staffBatch
 										? `支持 CSV 或 XLSX，${limits}。登录账号列须为文本；学院编码与学院名称须匹配同一所已启用学院。CSV 请使用 UTF-8。`
 										: `支持 CSV 或 XLSX，${limits}。学号列须为文本，保留前导零；学院、专业、班级须匹配已启用班级。CSV 请使用 UTF-8。`
-									: `支持 CSV 或 XLSX，${limits}。学号列须为文本，保留前导零；CSV 请使用 UTF-8。`}
+									: `支持 CSV 或 XLSX，${limits}。学号列须为文本，保留前导零；系统按学号与姓名匹配学生。学院、专业、班级列可留空，以系统档案为准。CSV 请使用 UTF-8。`}
 								{kind === "participation" &&
-									" 名单只读取模板中的中文表头，整批检查学号、班级、辅导员和活动范围，有任一错误则整批不写入。"}
+									" 名单只强制读取学号、姓名两列，整批检查账号、班级责任辅导员和活动范围，有任一错误则整批不写入。"}
 							</CardDescription>
 							<CardAction>
 								<a
@@ -644,7 +688,7 @@ export function ImportWizard({
 											</p>
 										) : (
 											<p className="text-sm text-muted-foreground">
-												表头完整。系统将逐人核对学号、姓名、学院、专业、班级、班级责任辅导员和活动范围。
+												表头完整。系统按学号与姓名匹配学生，并核对账号、班级责任辅导员和活动范围；学院、专业、班级列可选，不一致时只提示并采用系统档案。
 											</p>
 										)}
 									</div>
@@ -814,7 +858,7 @@ export function ImportWizard({
 								<CardTitle>核对导入内容</CardTitle>
 								<CardDescription>
 									共 {preview.rows.length} 条记录，{preview.changes} 条新增或更新，
-									{preview.errors} 条错误
+									{preview.errors} 条错误{preview.warnings > 0 ? `，${preview.warnings} 条组织提示` : ""}
 									{preview.unresolved > 0
 										? `，${preview.unresolved} 条待确认重复`
 										: ""}
@@ -840,6 +884,21 @@ export function ImportWizard({
 									<p className="text-sm text-destructive">
 										存在 {preview.errors} 条错误，本批次不会写入任何一行。每条错误标明逻辑行号与原因；修正对应单元格后重新检查。
 									</p>
+								)}
+								{warningTexts.length > 0 && (
+									<div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+										<p className="font-medium text-amber-700 dark:text-amber-400">
+											组织提示（不阻止导入）
+										</p>
+										{warningTexts.map((text) => (
+											<p key={text} className="mt-1 text-muted-foreground">
+												{text}
+											</p>
+										))}
+										<p className="mt-1 text-xs text-muted-foreground">
+											共 {preview.warnings} 条记录，已按系统档案匹配学生，不影响本批导入。
+										</p>
+									</div>
 								)}
 								{duplicateRows.length > 0 && (
 									<div className="flex flex-col gap-3 rounded-lg border border-dashed p-4">
@@ -983,7 +1042,7 @@ export function ImportWizard({
 									data={preview.rows}
 									columns={previewColumns}
 									searchText={(row) =>
-										`${row.login} ${row.name} ${row.college} ${row.collegeCode} ${row.major} ${row.className} ${row.message}`
+										`${row.login} ${row.name} ${row.college} ${row.collegeCode} ${row.major} ${row.className} ${row.message} ${row.warnings.join(" ")}`
 									}
 									searchPlaceholder={
 										staffBatch
@@ -1009,6 +1068,16 @@ export function ImportWizard({
 											label: `错误 ${preview.errors}`,
 											match: (row) => row.state === "ERROR",
 										},
+										...(preview.warnings > 0
+											? [
+													{
+														value: "warnings",
+														label: `组织提示 ${preview.warnings}`,
+														match: (row: PreviewRow) =>
+															row.warnings.length > 0,
+													},
+												]
+											: []),
 										...(preview.unresolved > 0
 											? [
 													{
@@ -1021,7 +1090,7 @@ export function ImportWizard({
 											: []),
 									]}
 									emptyTitle="没有匹配的记录"
-									emptyDescription="请调整搜索，或切换全部、有变更与错误。"
+									emptyDescription="请调整搜索，或切换全部、有变更、错误与组织提示。"
 									tableClassName="max-h-[28rem]"
 									mobile={(row) => (
 										<div className="flex flex-col gap-2">
@@ -1057,6 +1126,14 @@ export function ImportWizard({
 											<p className="text-sm text-muted-foreground">
 												{row.message}
 											</p>
+											{row.warnings.map((warning) => (
+												<p
+													key={warning}
+													className="text-xs text-amber-600 dark:text-amber-400"
+												>
+													{warning}
+												</p>
+											))}
 										</div>
 									)}
 								/>
@@ -1069,7 +1146,11 @@ export function ImportWizard({
 									}
 									onClick={() => void run("commit")}
 								>
-									{busy ? "正在提交…" : "确认导入"}
+									{busy
+										? "正在提交…"
+										: preview.warnings > 0
+											? `确认导入（含 ${preview.warnings} 条组织提示）`
+											: "确认导入"}
 								</Button>
 							</CardContent>
 						</Card>
@@ -1080,7 +1161,7 @@ export function ImportWizard({
 								<CardDescription>
 									{kind === "accounts"
 										? "读取文件并核对表格列后，会列出新增、沿用、待确认重复和错误。"
-										: "读取文件并核对表格列后，会列出新增、沿用、更新和错误。"}
+										: "读取文件并核对表格列后，会列出新增、沿用、更新、组织提示和错误。"}
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
@@ -1108,6 +1189,8 @@ export function ImportWizard({
 									: kind === "accounts"
 										? `创建${accountRoleLabels[result.targetRole ?? accountRole]}账号 ${result.created ?? 0} 个，跳过 ${result.skipped} 条。`
 										: `写入 ${result.created ?? result.written ?? 0} 条，跳过 ${result.skipped} 条。`}
+								{!!result.warnings &&
+									` 其中 ${result.warnings} 条组织提示已按系统档案处理。`}
 							{result.kind === "INITIAL" &&
 								" 该活动首次名单已保存，后续漏报或错报请使用补录。"}
 							{result.rosterRevision !== undefined &&

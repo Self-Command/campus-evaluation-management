@@ -216,6 +216,10 @@ beforeAll(async () => {
 		organization: orgA,
 		classId: orgA.schoolClass.id,
 	});
+	await identity("student-d", "STUDENT", {
+		organization: orgA,
+		classId: orgA.schoolClass.id,
+	});
 	await identity("unbound", "STUDENT", { organization: orgA });
 	await identity("outsider", "STUDENT", {
 		organization: orgA,
@@ -357,7 +361,7 @@ test("主办学院维护活动与共享证明，发布即确认分值，班级�
 		errors: string[];
 		token?: string;
 	};
-	expect(preview.count).toBe(4);
+	expect(preview.count).toBe(5);
 	expect(preview.collegeCount).toBe(2);
 	expect(preview.majorCount).toBe(2);
 	expect(preview.classCount).toBe(2);
@@ -373,7 +377,13 @@ test("主办学院维护活动与共享证明，发布即确认分值，班级�
 	expect(published.confirmed).toBe(true);
 	expect(published.publishRevision).toBe(1);
 	expect(published.contentText).toBe("跨学院联合实践活动");
-	for (const label of ["student-a", "student-b", "student-c", "unbound"]) {
+	for (const label of [
+		"student-a",
+		"student-b",
+		"student-c",
+		"student-d",
+		"unbound",
+	]) {
 		expect(
 			(await pageActivityFeed(users[label].session, termId)).total,
 		).toBe(1);
@@ -521,14 +531,14 @@ test("范围方式三选一并集匹配，切换方式清理未使用名单，�
 	expect(allPreview.majorCount).toBeGreaterThanOrEqual(2);
 	expect(allPreview.classCount).toBeGreaterThanOrEqual(3);
 	expect(await preview(collegeScope)).toMatchObject({
-		count: 4,
+		count: 5,
 		collegeCount: 1,
 		majorCount: 1,
 		classCount: 2,
 		errors: [],
 	});
 	expect(await preview(classScope)).toMatchObject({
-		count: 3,
+		count: 4,
 		collegeCount: 1,
 		majorCount: 1,
 		classCount: 1,
@@ -1523,6 +1533,49 @@ test("共享证明换版使已通过认定替代重审，管理员移交主办�
 			)
 		).total,
 	).toBe(1);
+});
+
+test("参与学生只读当前有效活动证明，未登记或已移除学生无权查看", async () => {
+	const active = await db.activityEvidence.findFirstOrThrow({
+		where: { activityId, active: true },
+	});
+	const inactive = await db.activityEvidence.findMany({
+		where: { activityId, active: false },
+	});
+	expect(inactive.length).toBeGreaterThan(0);
+
+	const registered = await getActivity(users["student-b"].session, activityId);
+	expect(registered.evidence?.map((row) => row.id)).toEqual([active.id]);
+	expect(
+		(
+			await downloadEvidence(users["student-b"].session, active.evidenceId)
+		).bytes.equals(png),
+	).toBe(true);
+	await expect(
+		downloadEvidence(users["student-b"].session, inactive[0].evidenceId),
+	).rejects.toThrow("权限");
+
+	const unregistered = await getActivity(users["student-d"].session, activityId);
+	expect(unregistered.evidence).toEqual([]);
+	await expect(
+		downloadEvidence(users["student-d"].session, active.evidenceId),
+	).rejects.toThrow("权限");
+
+	const removed = await getActivity(users["student-a"].session, activityId);
+	expect(removed.evidence).toEqual([]);
+	await expect(
+		downloadEvidence(users["student-a"].session, active.evidenceId),
+	).rejects.toThrow("权限");
+
+	const manager = await getActivity(users["college-b"].session, activityId);
+	expect(new Set(manager.evidence?.map((row) => row.id))).toEqual(
+		new Set([active.id, ...inactive.map((row) => row.id)]),
+	);
+	expect(
+		(
+			await downloadEvidence(users["college-b"].session, inactive[0].evidenceId)
+		).bytes.equals(png),
+	).toBe(true);
 });
 
 test("周期锁定后拒绝继续审核参与记录", async () => {

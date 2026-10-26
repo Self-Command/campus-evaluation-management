@@ -34,24 +34,28 @@ export async function POST(request: Request) {
         const mapping = z.object({
           login: z.coerce.number().int().min(0).max(table.headers.length - 1),
           name: z.coerce.number().int().min(0).max(table.headers.length - 1),
-          college: z.coerce.number().int().min(0).max(table.headers.length - 1),
-          major: z.coerce.number().int().min(0).max(table.headers.length - 1),
-          className: z.coerce.number().int().min(0).max(table.headers.length - 1),
           value: z.coerce.number().int().min(0).max(table.headers.length - 1),
         }).parse(rawMapping);
-        if (new Set(Object.values(mapping)).size !== 6) throw new AccountError("学号、姓名、学院、专业、班级、成绩必须分别对应不同的列");
+        if (new Set(Object.values(mapping)).size !== 3) throw new AccountError("学号、姓名、成绩必须分别对应不同的列");
+        const optionalColumn = (header: string) => {
+          const index = table.headers.findIndex((value) => value.trim() === header);
+          return index < 0 ? null : index;
+        };
+        const collegeColumn = optionalColumn("学院");
+        const majorColumn = optionalColumn("专业");
+        const classNameColumn = optionalColumn("班级");
         const rows = table.rows.map((row, index) => {
           if (row[mapping.login]?.numeric) throw new AccountError(`第${index + 2}行学号必须为文本单元格`);
           return {
             login: row[mapping.login]?.value ?? "",
             name: row[mapping.name]?.value ?? "",
-            college: row[mapping.college]?.value ?? "",
-            major: row[mapping.major]?.value ?? "",
-            className: row[mapping.className]?.value ?? "",
+            college: collegeColumn == null ? "" : (row[collegeColumn]?.value ?? ""),
+            major: majorColumn == null ? "" : (row[majorColumn]?.value ?? ""),
+            className: classNameColumn == null ? "" : (row[classNameColumn]?.value ?? ""),
             value: row[mapping.value]?.value ?? "",
           };
         });
-        result = await previewGradeImport(auth.user.sessionId, termId, { nodeId: form.get("nodeId"), rows, reason: form.get("reason") }, { fileHash, templateVersion: "grades-v3" });
+        result = await previewGradeImport(auth.user.sessionId, termId, { nodeId: form.get("nodeId"), rows, reason: form.get("reason") }, { fileHash, templateVersion: "grades-v4" });
       } else throw new AccountError("操作无效");
     }
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });

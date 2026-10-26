@@ -92,7 +92,7 @@ export async function getActivity(sessionId: string, id: string) {
   if (!found) throw new AccountError("活动不存在或无权查看", 404);
   return termTransaction(sessionId, found.termId, ["ADMIN", "COLLEGE", "COUNSELOR", "PUBLISHER", "STUDENT"], [...phases], async (tx, _term, actorId) => {
     const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, include: { studentProfile: true, college: { select: { id: true, name: true, code: true } } } });
-    const activity = await tx.activity.findUniqueOrThrow({ where: { id }, include: { college: { select: { id: true, name: true, code: true } }, evidence: { include: evidenceInclude, orderBy: [{ version: "desc" }, { id: "desc" }] } } });
+    const activity = await tx.activity.findUniqueOrThrow({ where: { id }, include: { college: { select: { id: true, name: true, code: true } } } });
     const canManage = canManageActivity(activity, actor);
     const own = actor.role === "STUDENT" ? await tx.participation.findUnique({ where: { activityId_studentId: { activityId: id, studentId: actorId } }, include: ownEvidenceInclude }) : null;
     const scoped = actor.role === "COUNSELOR" || actor.role === "COLLEGE" ? await tx.user.count({ where: { AND: [scopedStudentWhere(actor), { participations: { some: { activityId: id } } }] } }) : 0;
@@ -108,7 +108,16 @@ export async function getActivity(sessionId: string, id: string) {
       (activity.audienceScope === "CLASS" && activity.audienceClasses.some(key => classKeys.includes(key)));
     const visible = actor.role === "ADMIN" || canManage || (actor.role === "PUBLISHER" && activity.ownerId === actorId) || (actor.role === "STUDENT" && (!!own?.registeredAt || !!await tx.activity.findFirst({ where: { id, ...studentEligibleWhere(actor) }, select: { id: true } }))) || (actor.role === "COUNSELOR" && (scoped > 0 || audienceVisible)) || (actor.role === "COLLEGE" && (audienceVisible || scoped > 0));
     if (!visible) throw new AccountError("活动不存在或无权查看", 404);
-    return { ...activityView(activity, actor.role, own?.registeredAt ? own : null, { canManage, college: activity.college, evidence: activity.evidence, includeEvidenceHistory: canManage, canReview: actor.role === "COUNSELOR" || actor.role === "COLLEGE", attachments: await listActivityAttachments(tx, id) }), canSubmit: false };
+    const canSeeEvidence =
+      canManage ||
+      actor.role === "ADMIN" ||
+      actor.role === "COUNSELOR" ||
+      actor.role === "COLLEGE" ||
+      (actor.role === "STUDENT" && !!own?.registeredAt && !own.removedAt);
+    const evidence = canSeeEvidence
+      ? await tx.activityEvidence.findMany({ where: { activityId: id }, include: evidenceInclude, orderBy: [{ version: "desc" }, { id: "desc" }] })
+      : [];
+    return { ...activityView(activity, actor.role, own?.registeredAt ? own : null, { canManage, college: activity.college, evidence, includeEvidenceHistory: canManage, canReview: actor.role === "COUNSELOR" || actor.role === "COLLEGE", attachments: await listActivityAttachments(tx, id) }), canSubmit: false };
   }, "read");
 }
 export async function endActivity(

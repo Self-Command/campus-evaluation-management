@@ -40,7 +40,7 @@ services:
       context: .
       target: runner
       args:
-        VERSION: ${APP_VERSION:-0.3.8}
+        VERSION: ${APP_VERSION:-0.4.0}
         REVISION: ${APP_REVISION:-local}
     restart: unless-stopped
     depends_on:

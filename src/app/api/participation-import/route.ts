@@ -13,7 +13,8 @@ import { boundedForm } from "@/server/upload-form";
 import { apiError, sameOrigin } from "@/server/http";
 import { consumeLimit } from "@/server/rate-limit";
 
-const requiredHeaders = ["学号", "姓名", "学院", "专业", "班级"] as const;
+const requiredHeaders = ["学号", "姓名"] as const;
+const optionalHeaders = ["学院", "专业", "班级"] as const;
 
 function rowsFromTable(
 	headers: string[],
@@ -27,14 +28,14 @@ function rowsFromTable(
 	return rows.map((row, line) => {
 		if (row[loginIndex]?.numeric)
 			throw new AccountError(`第${line + 2}行学号必须为文本单元格`);
-		const cell = (header: (typeof requiredHeaders)[number]) =>
-			row[index.get(header)!]?.value ?? "";
+		const cell = (header: string) =>
+			index.has(header) ? (row[index.get(header)!]?.value ?? "") : "";
 		const parsed: ParticipationImportRow = {
 			login: cell("学号"),
 			name: cell("姓名"),
-			college: cell("学院"),
-			major: cell("专业"),
-			className: cell("班级"),
+			college: cell(optionalHeaders[0]),
+			major: cell(optionalHeaders[1]),
+			className: cell(optionalHeaders[2]),
 		};
 		return parsed;
 	});

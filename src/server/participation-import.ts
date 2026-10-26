@@ -6,16 +6,23 @@ import { termTransaction } from "@/server/terms";
 import { assertActivityManager, eligible } from "@/server/activity-policy";
 import { registerFact } from "@/server/activity-participants";
 import { historyEntry, jsonValue } from "@/server/claims";
-import { duplicateIdentityMessage, loadIdentityIndex } from "@/server/student-identity";
+import {
+	duplicateIdentityMessage,
+	identityLoginVariants,
+	identityNameKey,
+	identityNumberKey,
+	loadIdentityIndex,
+	organizationMismatchWarning,
+} from "@/server/student-identity";
 import { recordAudit } from "@/server/audit";
 
 const rowSchema = z
 	.object({
 		login: z.string().trim().min(1).max(64),
 		name: z.string().trim().min(1).max(80),
-		college: z.string().trim().min(1).max(80),
-		major: z.string().trim().min(1).max(80),
-		className: z.string().trim().min(1).max(80),
+		college: z.string().trim().max(80).optional().default(""),
+		major: z.string().trim().max(80).optional().default(""),
+		className: z.string().trim().max(80).optional().default(""),
 	})
 	.strict();
 const rowsSchema = z.array(rowSchema).min(1).max(2000);
@@ -31,6 +38,7 @@ export type ParticipationPreviewRow = {
 	className: string;
 	state: "NEW" | "EXISTING" | "UNCHANGED" | "UPDATE" | "ERROR";
 	message: string;
+	warnings: string[];
 };
 
 const studentInclude = {
@@ -76,11 +84,8 @@ function identityError(
 		profile.className !== schoolClass.name
 	)
 		return "学生档案归属与班级组织不一致，请先由管理员更正组织归属";
-	if (student.login !== row.login) return "学号与权威档案不一致";
-	if (student.name.trim() !== row.name) return "姓名与权威档案不一致";
-	if (profile.college !== row.college) return "学院与权威档案不一致";
-	if (profile.major !== row.major) return "专业与权威档案不一致";
-	if (profile.className !== row.className) return "班级与权威档案不一致";
+	if (identityNameKey(student.name) !== identityNameKey(row.name))
+		return "学号与姓名不一致，请核对后重新导出模板";
 	if (!eligible(activity, student))
 		return "学生不属于活动面向的学院和班级";
 	return null;
@@ -121,16 +126,31 @@ async function inspect(
 		where: { id: termId },
 		select: { revision: true, inputRevision: true, scheme: true },
 	});
-	const logins = input.rows.map((row) => row.login);
+	const loginKeys = input.rows.map((row) => identityNumberKey(row.login));
 	const counts = new Map<string, number>();
-	for (const login of logins)
-		counts.set(login, (counts.get(login) ?? 0) + 1);
+	for (const key of loginKeys)
+		counts.set(key, (counts.get(key) ?? 0) + 1);
+	const queryLogins = [
+		...new Set(input.rows.flatMap((row) => identityLoginVariants(row.login))),
+	];
 	const students = await tx.user.findMany({
-		where: { login: { in: [...new Set(logins)] } },
+		where: { login: { in: queryLogins, mode: "insensitive" } },
 		include: studentInclude,
 		orderBy: { id: "asc" },
 	});
-	const known = new Map(students.map((student) => [student.login, student]));
+	const studentsByLogin = new Map<string, ImportStudent[]>();
+	for (const student of students) {
+		const key = identityNumberKey(student.login);
+		const list = studentsByLogin.get(key) ?? [];
+		list.push(student);
+		studentsByLogin.set(key, list);
+	}
+	const known = new Map<string, ImportStudent>();
+	const ambiguous = new Set<string>();
+	for (const [key, list] of studentsByLogin) {
+		if (list.length === 1) known.set(key, list[0]);
+		else ambiguous.add(key);
+	}
 	const identityIndex = await loadIdentityIndex(
 		tx,
 		students
@@ -162,54 +182,65 @@ async function inspect(
 		facts.map((fact) => [fact.studentId, fact]),
 	);
 	const rows: ParticipationPreviewRow[] = input.rows.map((row, index) => {
-		const student = known.get(row.login);
+		const key = identityNumberKey(row.login);
+		const student = known.get(key);
+		const profile = student?.studentProfile;
 		const fact = student ? factsByStudent.get(student.id) : undefined;
 		const base: ParticipationPreviewRow = {
 			line: index + 1,
-			login: row.login,
-			name: row.name,
-			college: row.college,
-			major: row.major,
-			className: row.className,
+			login: student?.login ?? row.login,
+			name: student?.name ?? row.name,
+			college: profile?.college ?? row.college,
+			major: profile?.major ?? row.major,
+			className: profile?.className ?? row.className,
 			state: "NEW",
 			message: "",
+			warnings: [],
 		};
-		if ((counts.get(row.login) ?? 0) > 1)
+		if ((counts.get(key) ?? 0) > 1)
 			return {
 				...base,
 				state: "ERROR",
 				message: "文件内学号重复，整份名单不写入",
 			};
+		if (ambiguous.has(key))
+			return {
+				...base,
+				state: "ERROR",
+				message: "学号存在多个匹配账号，请先在账号管理中处置重复账号",
+			};
 		const invalidIdentity = identityError(row, student, activity);
 		if (invalidIdentity)
 			return { ...base, state: "ERROR", message: invalidIdentity };
-		if (student?.studentProfile) {
-			const duplicateCandidates = identityIndex.candidatesFor({
-				userId: student.id,
-				studentNumber: student.studentProfile.studentNumber,
-				name: student.name,
-				classId: student.studentProfile.classId,
-				college: student.studentProfile.college,
-				major: student.studentProfile.major,
-				className: student.studentProfile.className,
-			});
-			if (duplicateCandidates.length)
-				return {
-					...base,
-					state: "ERROR",
-					message: `${duplicateIdentityMessage(duplicateCandidates)} 参与名单在重复账号处置前不可写入。`,
-				};
-		}
+		if (!student || !profile)
+			return { ...base, state: "ERROR", message: "学生尚未建立档案" };
+		const warning = organizationMismatchWarning(row, profile);
+		const checked = warning ? { ...base, warnings: [warning] } : base;
+		const duplicateCandidates = identityIndex.candidatesFor({
+			userId: student.id,
+			studentNumber: profile.studentNumber,
+			name: student.name,
+			classId: profile.classId,
+			college: profile.college,
+			major: profile.major,
+			className: profile.className,
+		});
+		if (duplicateCandidates.length)
+			return {
+				...checked,
+				state: "ERROR",
+				message: `${duplicateIdentityMessage(duplicateCandidates)} 参与名单在重复账号处置前不可写入。`,
+			};
 		if (fact?.removedAt)
 			return {
-				...base,
+				...checked,
 				state: "ERROR",
 				message:
 					"该学生参与事实已移除；如需恢复，请在补录更正中说明理由并重新提交审核",
 			};
 		if (!fact || !fact.registeredAt) {
 			return {
-				...base,
+				...checked,
 				state: "NEW",
 				message:
 					input.kind === "INITIAL"
@@ -219,12 +250,12 @@ async function inspect(
 		}
 		if (fact.sources.length)
 			return {
-				...base,
+				...checked,
 				state: "UNCHANGED",
 				message: "名单已包含该学生，本次无变更",
 			};
 		return {
-			...base,
+			...checked,
 			state: "EXISTING",
 			message: "沿用已有参与事实，并补充待审核来源",
 		};
@@ -270,6 +301,7 @@ async function inspect(
 		factsByStudent,
 		snapshot,
 		errors: rows.filter((row) => row.state === "ERROR").length,
+		warnings: rows.reduce((total, row) => total + row.warnings.length, 0),
 		changes: rows.filter(
 			(row) => row.state === "NEW" || row.state === "EXISTING",
 		).length,
@@ -306,7 +338,7 @@ export async function previewParticipationImport(
 		async (tx, term, actorId) => {
 			const preview = await inspect(tx, term.id, actorId, data);
 			const requestId = meta.requestId ?? randomUUID();
-			const templateVersion = meta.templateVersion ?? "participation-v5-fixed";
+			const templateVersion = meta.templateVersion ?? "participation-v6";
 			const batch = await tx.participationImport.create({
 				data: {
 					termId,
@@ -335,6 +367,7 @@ export async function previewParticipationImport(
 				expiresAt: batch.expiresAt,
 				rows: preview.rows,
 				errors: preview.errors,
+				warnings: preview.warnings,
 				changes: preview.changes,
 				baselineRevision: preview.activity.rosterRevision,
 				rosterCommitted: !!preview.activity.rosterCommittedAt,
@@ -348,6 +381,7 @@ export type ParticipationImportResult = {
 	updated: number;
 	unchanged: number;
 	skipped: number;
+	warnings: number;
 	kind: "INITIAL" | "CORRECTION";
 	rosterRevision: number;
 	replay: boolean;
@@ -443,7 +477,7 @@ export async function commitParticipationImport(
 					unchanged++;
 					continue;
 				}
-				const student = preview.known.get(row.login)!;
+				const student = preview.known.get(identityNumberKey(row.login))!;
 				const fact = preview.factsByStudent.get(student.id);
 				const registered = await registerFact(
 					tx,
@@ -507,6 +541,7 @@ export async function commitParticipationImport(
 				updated: 0,
 				unchanged,
 				skipped: 0,
+				warnings: preview.warnings,
 				kind,
 				rosterRevision,
 				replay: false,
