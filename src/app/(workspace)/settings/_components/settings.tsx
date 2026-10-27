@@ -145,6 +145,8 @@ function SettingsForm({ value }: { value: SettingsData }) {
 	const [reason, setReason] = useState("");
 	const [tab, setTab] = useState("brand");
 	const [invalid, setInvalid] = useState<Record<string, string>>({});
+	const [failedBackgroundId, setFailedBackgroundId] = useState<string | null>(null);
+	const [failedFaviconId, setFailedFaviconId] = useState<string | null>(null);
 	const [extensionsText, setExtensionsText] = useState(
 		value.activityAttachmentAllowedExtensions.join(", "),
 	);
@@ -405,7 +407,8 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								className="relative flex min-h-80 items-center justify-center overflow-hidden rounded-b-xl bg-muted p-6"
 								data-theme-preset={draft.themePreset}
 							>
-								{draft.loginBackgroundAssetId ? (
+								{draft.loginBackgroundAssetId &&
+								failedBackgroundId !== draft.loginBackgroundAssetId ? (
 									<>
 										<Image
 											src={`/api/brand-assets/${draft.loginBackgroundAssetId}`}
@@ -414,6 +417,9 @@ function SettingsForm({ value }: { value: SettingsData }) {
 											unoptimized
 											sizes="(min-width: 1280px) 40vw, 100vw"
 											className="object-cover"
+											onError={() =>
+												setFailedBackgroundId(draft.loginBackgroundAssetId)
+											}
 										/>
 										<div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/30 to-black/65" />
 									</>
@@ -499,15 +505,26 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								<p className="break-words text-sm">页面标题：{draft.pageTitle}</p>
 								{draft.faviconAssetId && (
 									<div className="flex items-center gap-2">
-										<Image
-											src={`/api/brand-assets/${draft.faviconAssetId}`}
-											alt="网站图标"
-											width={20}
-											height={20}
-											unoptimized
-										/>
+										{failedFaviconId === draft.faviconAssetId ? (
+											<span className="flex size-5 items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">
+												无
+											</span>
+										) : (
+											<Image
+												src={`/api/brand-assets/${draft.faviconAssetId}`}
+												alt="网站图标"
+												width={20}
+												height={20}
+												unoptimized
+												onError={() =>
+													setFailedFaviconId(draft.faviconAssetId)
+												}
+											/>
+										)}
 										<span className="text-sm text-muted-foreground">
-											网站图标
+											{failedFaviconId === draft.faviconAssetId
+												? "网站图标加载失败"
+												: "网站图标"}
 										</span>
 									</div>
 								)}
@@ -763,7 +780,8 @@ function SettingsForm({ value }: { value: SettingsData }) {
 									登录页背景图
 								</FieldLabel>
 								<div className="relative aspect-video w-full overflow-hidden rounded-lg border bg-muted">
-									{draft.loginBackgroundAssetId ? (
+									{draft.loginBackgroundAssetId &&
+									failedBackgroundId !== draft.loginBackgroundAssetId ? (
 										<Image
 											src={`/api/brand-assets/${draft.loginBackgroundAssetId}`}
 											alt="登录页背景当前图片"
@@ -771,11 +789,16 @@ function SettingsForm({ value }: { value: SettingsData }) {
 											unoptimized
 											sizes="(min-width: 1280px) 40vw, 100vw"
 											className="object-cover"
+											onError={() =>
+												setFailedBackgroundId(draft.loginBackgroundAssetId)
+											}
 										/>
 									) : (
 										<div className="auth-default-background absolute inset-0 flex items-center justify-center p-4">
 											<span className="rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground">
-												未上传背景，使用主题渐变
+												{failedBackgroundId === draft.loginBackgroundAssetId
+													? "背景图加载失败，当前使用主题渐变"
+													: "未上传背景，使用主题渐变"}
 											</span>
 										</div>
 									)}

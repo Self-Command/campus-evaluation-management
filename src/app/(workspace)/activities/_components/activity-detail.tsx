@@ -95,6 +95,11 @@ export function ActivityDetail({
 		(user.role === "STUDENT" &&
 			!!activity.ownParticipation?.registeredAt &&
 			!activity.ownParticipation.removedAt);
+	const visibleTabCount =
+		1 +
+		(canSeeParticipation ? 1 : 0) +
+		(canSeeEvidence ? 1 : 0) +
+		(activity.ownParticipation ? 1 : 0);
 	const endedAt = activity.endedAt ? new Date(activity.endedAt).getTime() : null;
 	const endsAtTime = new Date(activity.endsAt).getTime();
 	const nowTime = new Date(now).getTime();
@@ -234,23 +239,25 @@ export function ActivityDetail({
 					className="min-h-0 min-w-0 max-w-full flex-1 gap-0"
 					defaultValue={initialTab}
 				>
-					<div className="scrollbar-none touch-pan-x overflow-x-auto overscroll-x-contain border-y">
-						<TabsList
-							variant="line"
-							className="w-max min-w-full justify-start gap-4"
-						>
-							<TabsTrigger value="overview">活动详情</TabsTrigger>
-							{canSeeParticipation && (
-								<TabsTrigger value="participants">参与名单</TabsTrigger>
-							)}
-							{canSeeEvidence && (
-								<TabsTrigger value="evidence">活动证明</TabsTrigger>
-							)}
-							{activity.ownParticipation && (
-								<TabsTrigger value="participation">我的参与</TabsTrigger>
-							)}
-						</TabsList>
-					</div>
+					{visibleTabCount > 1 && (
+						<div className="scrollbar-none touch-pan-x overflow-x-auto overscroll-x-contain border-y">
+							<TabsList
+								variant="line"
+								className="w-max min-w-full justify-start gap-4"
+							>
+								<TabsTrigger value="overview">活动详情</TabsTrigger>
+								{canSeeParticipation && (
+									<TabsTrigger value="participants">参与名单</TabsTrigger>
+								)}
+								{canSeeEvidence && (
+									<TabsTrigger value="evidence">活动证明</TabsTrigger>
+								)}
+								{activity.ownParticipation && (
+									<TabsTrigger value="participation">我的参与</TabsTrigger>
+								)}
+							</TabsList>
+						</div>
+					)}
 					<div className="min-w-0 max-w-full">
 						<TabsContent value="overview">
 							<div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_auto_18rem]">

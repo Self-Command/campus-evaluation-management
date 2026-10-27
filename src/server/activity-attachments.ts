@@ -74,6 +74,34 @@ function safeName(name: string) {
 	const base = name.replace(/[\\/\x00-\x1f]/g, "_").trim().slice(0, 120);
 	return base || "附件";
 }
+export type AttachmentDownloadHeaders = {
+	"Content-Type": string;
+	"Content-Disposition": string;
+	"X-Content-Type-Options": "nosniff";
+	"Cache-Control": string;
+	Vary: "Cookie";
+	ETag: string;
+	"Content-Length": string;
+};
+export function attachmentDownloadHeaders(file: { name: string; mime: string; size: number; sha256: string }): AttachmentDownloadHeaders {
+	const inline = file.mime.startsWith("image/") || file.mime === "application/pdf";
+	return {
+		"Content-Type": file.mime,
+		"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+		"X-Content-Type-Options": "nosniff",
+		"Cache-Control": "private, max-age=300",
+		Vary: "Cookie",
+		ETag: `"${file.sha256}"`,
+		"Content-Length": String(file.size),
+	};
+}
+export function attachmentEtagMatches(header: string | null, etag: string) {
+	if (!header) return false;
+	return header.split(",").some((value) => {
+		const tag = value.trim();
+		return tag === "*" || tag.replace(/^W\//, "") === etag;
+	});
+}
 export type AttachmentView = { id: string; name: string; mime: string; size: number; kind: string; createdAt: Date; url: string };
 export function attachmentView(row: { id: string; name: string; mime: string; size: number; kind: string; createdAt: Date }): AttachmentView {
 	return { ...row, url: `/api/activity-attachments/${row.id}` };
@@ -152,7 +180,7 @@ export async function bindActivityAttachments(tx: Prisma.TransactionClient, acti
 	if (bound + alreadyBound + toBind.length > limits.maxFiles) throw new AccountError(`每个活动最多 ${limits.maxFiles} 个附件`);
 	if (toBind.length) await tx.activityAttachment.updateMany({ where: { id: { in: toBind }, uploaderId }, data: { activityId } });
 }
-export async function downloadActivityAttachment(sessionId: string, id: string) {
+async function accessibleActivityAttachment(sessionId: string, id: string) {
 	const current = await getCurrentSession(sessionId);
 	if (!current || current.user.mustChangePassword) throw new AccountError("请重新登录", 401);
 	const file = await db.activityAttachment.findUnique({ where: { id } });
@@ -162,6 +190,14 @@ export async function downloadActivityAttachment(sessionId: string, id: string) 
 		await getActivity(sessionId, file.activityId);
 	} else if (file.uploaderId !== current.userId && current.user.role !== "ADMIN") throw new AccountError("附件不存在", 404);
 	if (!/^[a-f0-9]{48}\.[a-z0-9]{1,10}$/.test(file.storageKey)) throw new AccountError("附件存储标识无效", 500);
+	return { current, file };
+}
+export async function describeActivityAttachment(sessionId: string, id: string) {
+	const { file } = await accessibleActivityAttachment(sessionId, id);
+	return { file };
+}
+export async function downloadActivityAttachment(sessionId: string, id: string) {
+	const { current, file } = await accessibleActivityAttachment(sessionId, id);
 	const bytes = await readFile(/* turbopackIgnore: true */ join(/* turbopackIgnore: true */ attachmentRoot(), file.storageKey));
 	if (createHash("sha256").update(bytes).digest("hex") !== file.sha256) throw new AccountError("附件校验失败", 500);
 	if (current.user.role !== "STUDENT") {

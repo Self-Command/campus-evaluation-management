@@ -2,8 +2,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import rehypeSanitize from "rehype-sanitize";
+import { ResilientImage } from "./resilient-image";
 
 export function MarkdownContent({ markdown, className = "" }: { markdown: string; className?: string }) {
+	const firstImageOffset = markdown.match(/!\[[^\]]*\](?:\(|\[)|<img\b/i)?.index ?? -1;
 	return (
 		<div
 			className={[
@@ -23,7 +25,6 @@ export function MarkdownContent({ markdown, className = "" }: { markdown: string
 				"[&_th]:border [&_th]:bg-muted/60 [&_th]:p-2 [&_th]:text-left",
 				"[&_td]:border [&_td]:p-2",
 				"[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4",
-				"[&_img]:my-3 [&_img]:max-w-full [&_img]:rounded-md [&_img]:border",
 				"[&_hr]:my-5 [&_hr]:border-border",
 				className,
 			].join(" ")}
@@ -37,10 +38,13 @@ export function MarkdownContent({ markdown, className = "" }: { markdown: string
 							{children}
 						</a>
 					),
-					img: ({ src, alt, ...props }) => {
-						// eslint-disable-next-line @next/next/no-img-element -- 附件图片必须经鉴权接口读取，不能交给会缓存/改写 URL 的图片优化器。
-						return <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} loading="lazy" {...props} />;
-					},
+					img: ({ src, alt, node }) => (
+						<ResilientImage
+							src={typeof src === "string" ? src : undefined}
+							alt={alt ?? ""}
+							priority={node?.position?.start.offset === firstImageOffset}
+						/>
+					),
 				}}
 			>
 				{markdown}

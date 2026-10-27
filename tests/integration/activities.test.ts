@@ -30,8 +30,11 @@ import {
 } from "@/server/recognitions";
 import { getStudentResult } from "@/server/results";
 import {
-	uploadActivityAttachment,
+	attachmentDownloadHeaders,
+	attachmentEtagMatches,
+	describeActivityAttachment,
 	downloadActivityAttachment,
+	uploadActivityAttachment,
 } from "@/server/activity-attachments";
 import { nodeSchema } from "@/lib/scoring/types";
 
@@ -959,6 +962,23 @@ test("活动附件按发布范围鉴权下载，重复绑定同一活动不重�
 		attachment.id,
 	);
 	expect(downloaded.bytes.equals(pdf)).toBe(true);
+	const described = await describeActivityAttachment(
+		users["student-a"].session,
+		attachment.id,
+	);
+	const headers = attachmentDownloadHeaders(described.file);
+	expect(headers.ETag).toBe(`"${downloaded.file.sha256}"`);
+	expect(headers["Cache-Control"]).toBe("private, max-age=300");
+	expect(headers.Vary).toBe("Cookie");
+	expect(headers["Content-Length"]).toBe(String(pdf.length));
+	expect(attachmentEtagMatches(headers.ETag, headers.ETag)).toBe(true);
+	expect(attachmentEtagMatches(`W/${headers.ETag}`, headers.ETag)).toBe(true);
+	expect(attachmentEtagMatches(`"stale", ${headers.ETag}`, headers.ETag)).toBe(true);
+	expect(attachmentEtagMatches('"stale"', headers.ETag)).toBe(false);
+	expect(attachmentEtagMatches(null, headers.ETag)).toBe(false);
+	await expect(
+		describeActivityAttachment(users.outsider.session, attachment.id),
+	).rejects.toThrow("无权");
 	await expect(
 		downloadActivityAttachment(users.outsider.session, attachment.id),
 	).rejects.toThrow("无权");
