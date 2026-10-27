@@ -1,13 +1,16 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { db } from "@/server/db";
 import { organizationFixture } from "./organization-fixture";
 import { uploadEvidence, downloadEvidence } from "@/server/evidence";
+import { saveSettings, readSiteSettings } from "@/server/settings";
+import { defaultSettings } from "@/lib/settings-schema";
 import { createTerm, activateTerm } from "@/server/terms";
 import { submitClaim } from "@/server/claims";
+import sharp from "sharp";
 import type { Role } from "@/generated/prisma/client";
 
 const address = new URL(process.env.DATABASE_URL!);
@@ -89,4 +92,45 @@ test("图片/PDF类型来自文件签名，篡改文件及已撤销会话不能�
   await writeFile(join(directory, file.storageKey), png);
   await db.authSession.update({ where: { id: users["counselor-a"].session }, data: { revokedAt: new Date() } });
   await expect(downloadEvidence(users["counselor-a"].session, fileId)).rejects.toThrow("失效");
+});
+
+function noiseBigPng() {
+  return sharp(randomBytes(1400 * 800 * 3), { raw: { width: 1400, height: 800, channels: 3 } }).png().toBuffer();
+}
+
+test("证明大小上限与类型白名单按系统设置执行", async () => {
+  const admin = users.admin.session;
+  try {
+    const saved = await saveSettings(admin, { ...defaultSettings, evidenceMaxSizeMb: 1, evidenceAllowPdf: false, revision: (await readSiteSettings()).revision, reason: "收紧证明上传设置" });
+    const big = await noiseBigPng();
+    expect(big.length).toBeGreaterThan(1024 * 1024);
+    await expect(uploadEvidence(users["student-a"].session, "超限大图.png", big)).rejects.toThrow("每份证明需在1MB以内");
+    await expect(uploadEvidence(users["student-a"].session, "证明.pdf", Buffer.from("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n"))).rejects.toThrow("系统已关闭 PDF 证明上传");
+    await saveSettings(admin, { ...defaultSettings, evidenceMaxSizeMb: 1, evidenceAllowImage: false, revision: saved.revision, reason: "关闭图片证明" });
+    await expect(uploadEvidence(users["student-a"].session, "图片.png", png)).rejects.toThrow("系统已关闭图片证明上传");
+  } finally {
+    await saveSettings(admin, { ...defaultSettings, revision: (await readSiteSettings()).revision, reason: "恢复默认上传设置" });
+  }
+});
+
+test("证明图片超过阈值自动压缩为 WebP，开关关闭时保留原样", async () => {
+  const admin = users.admin.session;
+  try {
+    const big = await noiseBigPng();
+    expect(big.length).toBeGreaterThan(300 * 1024);
+    const uploaded = await uploadEvidence(users["student-a"].session, "大图证明.png", big);
+    expect(uploaded.mime).toBe("image/webp");
+    expect(uploaded.size).toBeLessThan(big.length);
+    const { bytes } = await downloadEvidence(users["student-a"].session, uploaded.id);
+    expect(bytes.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    expect(bytes.subarray(8, 12).toString("ascii")).toBe("WEBP");
+    await saveSettings(admin, { ...defaultSettings, imageCompressionEnabled: false, revision: (await readSiteSettings()).revision, reason: "关闭图片压缩" });
+    const raw = await uploadEvidence(users["student-a"].session, "原图证明.png", big);
+    expect(raw.mime).toBe("image/png");
+    expect(raw.size).toBe(big.length);
+    const small = await uploadEvidence(users["student-a"].session, "小图证明.png", png);
+    expect(small.mime).toBe("image/png");
+  } finally {
+    await saveSettings(admin, { ...defaultSettings, revision: (await readSiteSettings()).revision, reason: "恢复默认上传设置" });
+  }
 });

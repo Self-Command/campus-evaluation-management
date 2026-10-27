@@ -56,6 +56,7 @@ export async function readSettings(sessionId: string) {
 export async function saveSettings(sessionId: string, input: unknown) {
   const { revision, reason, ...raw } = z.object({ ...settingsSchema.shape, revision: z.number().int().nonnegative(), reason: z.string().trim().min(2).max(500) }).strict().parse(input);
   const content = settingsSchema.parse(raw);
+  if (!content.evidenceAllowImage && !content.evidenceAllowPdf) throw new AccountError("证明类型不能全部关闭，至少保留一种");
   return adminTransaction(sessionId, async (tx, actorId) => {
     const previous = await tx.siteSettings.findUnique({ where: { id: "site" } });
     if ((previous?.revision ?? 0) !== revision) throw new AccountError("系统设置已变化，请刷新后核对", 409);

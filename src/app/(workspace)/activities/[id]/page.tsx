@@ -5,6 +5,7 @@ import { listTerms } from "@/server/terms";
 import { listOrganizations } from "@/server/organizations";
 import { ActivityDetail } from "../_components/activity-detail";
 import { attachmentLimits } from "@/server/activity-attachments";
+import { evidenceLimits } from "@/server/evidence";
 export default async function ActivityPage({
 	params,
 	searchParams,
@@ -26,6 +27,7 @@ export default async function ActivityPage({
 	if (!term) notFound();
 	const { returnTo } = await searchParams;
 	const limits = await attachmentLimits();
+	const evidence = await evidenceLimits();
 	const colleges =
 		user.role === "ADMIN"
 			? (await listOrganizations(user.sessionId)).colleges.map((college) => ({
@@ -62,6 +64,7 @@ export default async function ActivityPage({
 			user={{ id: user.id, role: user.role }}
 			colleges={colleges}
 			limits={limits}
+			evidenceLimits={evidence}
 			now={new Date().toISOString()}
 			returnHref={returnHref}
 		/>

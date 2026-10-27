@@ -410,7 +410,7 @@ async function settingsOf(client: Client) {
   return result.rows[0] ?? null;
 }
 
-const settingKeys = ["siteName", "siteDescription", "pageTitle", "themePreset", "loginFailureLimitEnabled", "loginFailureMaxAttempts", "loginFailureLockMinutes", "activityAttachmentMaxFiles", "activityAttachmentMaxSizeMb"];
+const settingKeys = ["siteName", "siteDescription", "pageTitle", "themePreset", "loginFailureLimitEnabled", "loginFailureMaxAttempts", "loginFailureLockMinutes", "activityAttachmentMaxFiles", "activityAttachmentMaxSizeMb", "evidenceAllowImage", "evidenceAllowPdf", "evidenceMaxSizeMb", "imageCompressionEnabled", "imageCompressionQuality"];
 
 function settingsDiff(current: unknown, restored: unknown) {
   const currentRecord = current && typeof current === "object" ? current as Record<string, unknown> : {};

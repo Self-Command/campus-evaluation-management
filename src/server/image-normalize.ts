@@ -21,8 +21,14 @@ export type NormalizedImage = {
 	originalSize: number;
 };
 
-export async function normalizeUploadedImage(bytes: Buffer, mime: string): Promise<NormalizedImage> {
-	if (!NORMALIZABLE_MIME.has(mime)) {
+export type ImageCompressionOptions = {
+	enabled?: boolean;
+	quality?: number;
+};
+
+export async function normalizeUploadedImage(bytes: Buffer, mime: string, options: ImageCompressionOptions = {}): Promise<NormalizedImage> {
+	const { enabled = true, quality = QUALITY } = options;
+	if (!enabled || !NORMALIZABLE_MIME.has(mime)) {
 		return { bytes, mime, normalized: false, originalMime: mime, originalSize: bytes.length };
 	}
 	try {
@@ -37,7 +43,7 @@ export async function normalizeUploadedImage(bytes: Buffer, mime: string): Promi
 		const output = await sharp(bytes)
 			.rotate()
 			.resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
-			.webp({ quality: QUALITY })
+			.webp({ quality })
 			.timeout({ seconds: PROCESS_TIMEOUT_SECONDS })
 			.toBuffer();
 		if (output.length >= bytes.length) {

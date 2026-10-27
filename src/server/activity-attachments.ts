@@ -114,6 +114,7 @@ export async function attachmentLimits() {
 		maxBytes: settings.activityAttachmentMaxSizeMb * 1024 * 1024,
 		maxSizeMb: settings.activityAttachmentMaxSizeMb,
 		allowed: settings.activityAttachmentAllowedExtensions,
+		compression: { enabled: settings.imageCompressionEnabled, quality: settings.imageCompressionQuality },
 	};
 }
 export async function uploadActivityAttachment(sessionId: string, rawName: string, bytes: Buffer, activityId?: string) {
@@ -128,7 +129,7 @@ export async function uploadActivityAttachment(sessionId: string, rawName: strin
 	if (!limits.allowed.includes(extension)) throw new AccountError(`不支持 ${extension ? `.${extension}` : "无后缀"} 文件，请上传：${limits.allowed.join("、")}`);
 	const mime = identify(extension, bytes);
 	if (!mime) throw new AccountError("文件内容与后缀不匹配，或文件已损坏");
-	const normalized = await normalizeUploadedImage(bytes, mime);
+	const normalized = await normalizeUploadedImage(bytes, mime, limits.compression);
 	const stored = normalized.bytes;
 	const storedMime = normalized.mime;
 	const storedSha256 = createHash("sha256").update(stored).digest("hex");

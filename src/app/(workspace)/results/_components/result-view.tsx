@@ -30,7 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
-import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
+import { EvidenceUpload, type EvidenceLimits } from "@/components/dashboard/evidence-upload";
 import { dateText } from "@/lib/business-labels";
 import { ResultSummary } from "./result-summary";
 import { ScoreBreakdown } from "./score-breakdown";
@@ -50,10 +50,12 @@ export function ResultView({
 	termId,
 	role,
 	login,
+	evidenceLimits,
 }: {
 	termId: string;
 	role: "ADMIN" | "STUDENT";
 	login: string;
+	evidenceLimits: EvidenceLimits;
 }) {
 	const search = useSearchParams();
 	const directoryHref = `/results?${new URLSearchParams({
@@ -367,7 +369,7 @@ export function ResultView({
 									rows={4}
 								/>
 							</Field>
-							<EvidenceUpload onChange={setIds} onBusy={setUploading} />
+							<EvidenceUpload onChange={setIds} onBusy={setUploading} limits={evidenceLimits} />
 						</FieldGroup>
 						<Button
 							className="min-h-11 sm:min-h-8"

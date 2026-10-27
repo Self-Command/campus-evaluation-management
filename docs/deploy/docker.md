@@ -7,7 +7,7 @@
 | 交付物 | 说明 |
 | --- | --- |
 | `ghcr.io/self-command/campus-evaluation-management:latest` | 最新正式标签 |
-| `ghcr.io/self-command/campus-evaluation-management:<version>` | 语义化版本，如 `0.5.2` |
+| `ghcr.io/self-command/campus-evaluation-management:<version>` | 语义化版本，如 `0.6.0` |
 | `ghcr.io/self-command/campus-evaluation-management:sha-<short>` | 对应提交的不可变标签 |
 | `campus-evaluation-image-amd64` | Actions 离线产物，含 `docker save` 压缩包与 SHA-256 |
 | `compose.yaml` | 应用 + PostgreSQL 编排文件 |
@@ -66,7 +66,7 @@ POSTGRES_USER=campus
 POSTGRES_PASSWORD=<24 位以上随机字符串>
 NEXTAUTH_SECRET=<32 字节以上随机值>
 NEXTAUTH_URL=https://evaluation.example.edu.cn
-APP_IMAGE=ghcr.io/self-command/campus-evaluation-management:0.5.2
+APP_IMAGE=ghcr.io/self-command/campus-evaluation-management:0.6.0
 APP_BIND_ADDRESS=127.0.0.1
 APP_PORT=3200
 RUN_MIGRATIONS=true
@@ -154,7 +154,7 @@ docker run -d --name campus-db \
 ```bash
 docker run --rm --network campus-evaluation \
   -e DATABASE_URL="postgresql://campus:${POSTGRES_PASSWORD}@campus-db:5432/campus" \
-  ghcr.io/self-command/campus-evaluation-management:0.5.2 migrate
+  ghcr.io/self-command/campus-evaluation-management:0.6.0 migrate
 ```
 
 启动应用：
@@ -176,7 +176,7 @@ docker run -d --name campus-app \
   -e TZ=Asia/Shanghai \
   -v campus-evidence:/data/evidence \
   -v campus-attachments:/data/activity-attachments \
-  ghcr.io/self-command/campus-evaluation-management:0.5.2
+  ghcr.io/self-command/campus-evaluation-management:0.6.0
 ```
 
 镜像自带健康检查。连接外部托管数据库时，删除 `campus-db` 相关步骤，并把 `DATABASE_URL` 指向实际数据库；托管数据库需允许应用服务器访问并启用 TLS（按供应商要求附加连接参数）。

@@ -11,12 +11,15 @@ type Upload = {
 	state: "uploading" | "success" | "failed";
 	error?: string;
 };
+export type EvidenceLimits = { maxSizeMb: number; allowImage: boolean; allowPdf: boolean };
 export function EvidenceUpload({
 	onChange,
 	onBusy,
+	limits,
 }: {
 	onChange: (ids: string[]) => void;
 	onBusy?: (busy: boolean) => void;
+	limits: EvidenceLimits;
 }) {
 	const inputId = useId();
 	const [items, setItems] = useState<Upload[]>([]);
@@ -34,7 +37,7 @@ export function EvidenceUpload({
 			),
 		);
 		try {
-			if (item.file.size > 5 * 1024 * 1024) throw new Error("文件需在5MB以内");
+			if (item.file.size > limits.maxSizeMb * 1024 * 1024) throw new Error(`文件需在${limits.maxSizeMb}MB以内`);
 			const res = await fetch("/api/evidence", {
 				method: "POST",
 				headers: {
@@ -68,7 +71,13 @@ export function EvidenceUpload({
 			<Input
 				id={inputId}
 				type="file"
-				accept="image/png,image/jpeg,application/pdf"
+				accept={
+					limits.allowImage && limits.allowPdf
+						? "image/png,image/jpeg,application/pdf"
+						: limits.allowImage
+							? "image/png,image/jpeg"
+							: "application/pdf"
+				}
 				multiple
 				disabled={items.length >= 5}
 				onChange={(e) => {
@@ -87,7 +96,10 @@ export function EvidenceUpload({
 				}}
 			/>
 			<FieldDescription>
-				PNG、JPEG或PDF，每份不超过5MB，最多5份。请等待上传完成后提交。
+				{[limits.allowImage && "PNG、JPEG", limits.allowPdf && "PDF"]
+					.filter(Boolean)
+					.join("或")}
+				，每份不超过{limits.maxSizeMb}MB，最多5份。请等待上传完成后提交。
 			</FieldDescription>
 			<div className="flex flex-col gap-2" aria-live="polite">
 				{items.map((item) => (

@@ -11,7 +11,7 @@ import { TemplateEditor } from "@/components/dashboard/template-editor";
 import { useRemote } from "@/components/dashboard/use-remote";
 import { RemoteState } from "@/components/dashboard/remote-state";
 import { Feedback, requestJson } from "@/components/dashboard/feedback";
-import { EvidenceUpload } from "@/components/dashboard/evidence-upload";
+import { EvidenceUpload, type EvidenceLimits } from "@/components/dashboard/evidence-upload";
 import { SearchableSelect } from "@/components/dashboard/searchable-select";
 import {
 	useBatchReview,
@@ -121,6 +121,7 @@ export function Claims({
 	page,
 	status,
 	initialClaims,
+	evidenceLimits,
 }: {
 	term: {
 		id: string;
@@ -133,6 +134,7 @@ export function Claims({
 	page: number;
 	status: string;
 	initialClaims: { items: Claim[]; total: number; page: number };
+	evidenceLimits: EvidenceLimits;
 }) {
 	const claims = useRemote<{ items: Claim[]; total: number; page: number }>(
 		`/api/claims?termId=${term.id}&page=${page}&status=${encodeURIComponent(status)}`,
@@ -632,6 +634,7 @@ export function Claims({
 									/>
 								</Field>
 								<EvidenceUpload
+									limits={evidenceLimits}
 									onChange={(nextIds) => {
 										setIds(nextIds);
 										setDirty(true);
@@ -805,6 +808,7 @@ export function Claims({
 										</Field>
 										<EvidenceUpload
 											key={selected.id}
+											limits={evidenceLimits}
 											onChange={setIds}
 											onBusy={setUploading}
 										/>

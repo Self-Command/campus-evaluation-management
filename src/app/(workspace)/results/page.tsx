@@ -6,6 +6,7 @@ import { measurementContext } from "@/lib/measurement-context";
 import { PageHeading, NoData } from "@/components/dashboard/page-heading";
 import { TermContext } from "@/components/dashboard/term-context";
 import { ResultView } from "./_components/result-view";
+import { evidenceLimits } from "@/server/evidence";
 export default async function Page({
   searchParams,
 }: {
@@ -15,6 +16,7 @@ export default async function Page({
   if (user.role !== "ADMIN" && user.role !== "STUDENT") notFound();
   const p = await searchParams;
   const { terms, term } = await measurementContext(user.sessionId, p.termId);
+  const evidence = await evidenceLimits();
   return (
     <>
       <PageHeading
@@ -33,7 +35,7 @@ export default async function Page({
       ) : term.phase === "CONFIGURATION" ? (
         <NoData title="评分方案配置中" description="评分方案生效后，可以查看成绩和计分依据。" />
       ) : (
-        <ResultView key={`${term.id}-${p.login || ""}`} termId={term.id} role={user.role} login={p.login || ""} />
+        <ResultView key={`${term.id}-${p.login || ""}`} termId={term.id} role={user.role} login={p.login || ""} evidenceLimits={evidence} />
       )}
     </>
   );

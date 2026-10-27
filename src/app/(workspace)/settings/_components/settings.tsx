@@ -57,6 +57,11 @@ type SettingsData = {
 	activityAttachmentMaxFiles: number;
 	activityAttachmentMaxSizeMb: number;
 	activityAttachmentAllowedExtensions: string[];
+	evidenceAllowImage: boolean;
+	evidenceAllowPdf: boolean;
+	evidenceMaxSizeMb: number;
+	imageCompressionEnabled: boolean;
+	imageCompressionQuality: number;
 	logoAssetId: string | null;
 	logoDarkAssetId: string | null;
 	logoSize: number;
@@ -260,6 +265,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 				for (const [key, label, max] of [
 					["activityAttachmentMaxFiles", "附件数量上限", 20],
 					["activityAttachmentMaxSizeMb", "单个附件大小上限", 50],
+					["evidenceMaxSizeMb", "证明文件大小上限", 50],
 				] as const) {
 					if (
 						!Number.isInteger(draft[key]) ||
@@ -267,6 +273,16 @@ function SettingsForm({ value }: { value: SettingsData }) {
 						draft[key] > max
 					)
 						issues[key] = `${label}需填写1至${max}的整数。`;
+				}
+				if (
+					!Number.isInteger(draft.imageCompressionQuality) ||
+					draft.imageCompressionQuality < 50 ||
+					draft.imageCompressionQuality > 95
+				)
+					issues.imageCompressionQuality = "压缩质量需填写50至95的整数。";
+				if (!draft.evidenceAllowImage && !draft.evidenceAllowPdf) {
+					issues.evidenceAllowImage = "证明类型不能全部关闭，至少保留一种。";
+					issues.evidenceAllowPdf = "证明类型不能全部关闭，至少保留一种。";
 				}
 				if (reason.trim().length < 2 || reason.trim().length > 500)
 					issues.reason = "请填写2至500个字符的修改理由。";
@@ -276,7 +292,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 					setTab(
 						first.startsWith("loginFailure")
 							? "security"
-							: ["extensions", "activityAttachmentMaxFiles", "activityAttachmentMaxSizeMb"].includes(first)
+							: ["extensions", "activityAttachmentMaxFiles", "activityAttachmentMaxSizeMb", "evidenceAllowImage", "evidenceAllowPdf", "evidenceMaxSizeMb", "imageCompressionEnabled", "imageCompressionQuality"].includes(first)
 								? "activity"
 								: first === "logoSize"
 								? "assets"
@@ -301,6 +317,10 @@ function SettingsForm({ value }: { value: SettingsData }) {
 										activityAttachmentMaxFiles: "settings-attachment-files",
 										activityAttachmentMaxSizeMb: "settings-attachment-size",
 										extensions: "settings-attachment-extensions",
+										evidenceAllowImage: "settings-evidence-image",
+										evidenceAllowPdf: "settings-evidence-pdf",
+										evidenceMaxSizeMb: "settings-evidence-size",
+										imageCompressionQuality: "settings-compression-quality",
 										logoSize: "settings-logo-size",
 										loginNotice: "settings-login-notice",
 										loginCardBlur: "settings-login-card-blur",
@@ -339,6 +359,11 @@ function SettingsForm({ value }: { value: SettingsData }) {
 							activityAttachmentMaxFiles: draft.activityAttachmentMaxFiles,
 							activityAttachmentMaxSizeMb: draft.activityAttachmentMaxSizeMb,
 							activityAttachmentAllowedExtensions: extensions,
+							evidenceAllowImage: draft.evidenceAllowImage,
+							evidenceAllowPdf: draft.evidenceAllowPdf,
+							evidenceMaxSizeMb: draft.evidenceMaxSizeMb,
+							imageCompressionEnabled: draft.imageCompressionEnabled,
+							imageCompressionQuality: draft.imageCompressionQuality,
 							logoAssetId: draft.logoAssetId,
 							logoDarkAssetId: draft.logoDarkAssetId,
 							logoSize: draft.logoSize,
@@ -539,7 +564,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 						<TabsTrigger value="assets">标识与主题</TabsTrigger>
 						<TabsTrigger value="login">登录页</TabsTrigger>
 						<TabsTrigger value="security">登录安全</TabsTrigger>
-						<TabsTrigger value="activity">活动附件</TabsTrigger>
+						<TabsTrigger value="activity">附件与上传</TabsTrigger>
 					</TabsList>
 					<TabsContent className="mt-4" value="brand">
 						<FieldGroup>
@@ -1031,6 +1056,7 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								[
 									["activityAttachmentMaxFiles", "每个活动最多附件数", "settings-attachment-files", 20],
 									["activityAttachmentMaxSizeMb", "单个附件大小上限（MB）", "settings-attachment-size", 50],
+									["evidenceMaxSizeMb", "证明文件大小上限（MB）", "settings-evidence-size", 50],
 								] as const
 							).map(([key, label, id, max]) => (
 								<Field key={key} data-invalid={!!invalid[key]}>
@@ -1074,6 +1100,110 @@ function SettingsForm({ value }: { value: SettingsData }) {
 								{invalid.extensions && <FieldError>{invalid.extensions}</FieldError>}
 								<FieldDescription>
 									小写、不带点，用逗号分隔。默认：png, jpg, jpeg, webp, gif, pdf, doc, docx, xls, xlsx, ppt, pptx, zip, txt, md。
+								</FieldDescription>
+							</Field>
+							<Field data-invalid={!!invalid.evidenceAllowImage}>
+								<FieldLabel htmlFor="settings-evidence-image">
+									允许图片证明
+								</FieldLabel>
+								<NativeSelect
+									id="settings-evidence-image"
+									value={draft.evidenceAllowImage ? "enabled" : "disabled"}
+									disabled={busy}
+									onChange={(e) =>
+										change(
+											"evidenceAllowImage",
+											e.target.value === "enabled",
+										)
+									}
+								>
+									<NativeSelectOption value="enabled">允许</NativeSelectOption>
+									<NativeSelectOption value="disabled">关闭</NativeSelectOption>
+								</NativeSelect>
+								{invalid.evidenceAllowImage && (
+									<FieldError>{invalid.evidenceAllowImage}</FieldError>
+								)}
+								<FieldDescription>
+									关闭后，学生与辅导员无法上传 PNG、JPEG 图片作为申报、异议或活动证明；图片与 PDF 至少保留一种。
+								</FieldDescription>
+							</Field>
+							<Field data-invalid={!!invalid.evidenceAllowPdf}>
+								<FieldLabel htmlFor="settings-evidence-pdf">
+									允许 PDF 证明
+								</FieldLabel>
+								<NativeSelect
+									id="settings-evidence-pdf"
+									value={draft.evidenceAllowPdf ? "enabled" : "disabled"}
+									disabled={busy}
+									onChange={(e) =>
+										change(
+											"evidenceAllowPdf",
+											e.target.value === "enabled",
+										)
+									}
+								>
+									<NativeSelectOption value="enabled">允许</NativeSelectOption>
+									<NativeSelectOption value="disabled">关闭</NativeSelectOption>
+								</NativeSelect>
+								{invalid.evidenceAllowPdf && (
+									<FieldError>{invalid.evidenceAllowPdf}</FieldError>
+								)}
+								<FieldDescription>
+									关闭后，无法上传 PDF 证明；图片与 PDF 至少保留一种。
+								</FieldDescription>
+							</Field>
+							<Field>
+								<FieldLabel htmlFor="settings-compression">
+									图片自动压缩
+								</FieldLabel>
+								<NativeSelect
+									id="settings-compression"
+									value={draft.imageCompressionEnabled ? "enabled" : "disabled"}
+									disabled={busy}
+									onChange={(e) =>
+										change(
+											"imageCompressionEnabled",
+											e.target.value === "enabled",
+										)
+									}
+								>
+									<NativeSelectOption value="enabled">开启</NativeSelectOption>
+									<NativeSelectOption value="disabled">关闭</NativeSelectOption>
+								</NativeSelect>
+								<FieldDescription>
+									开启后，上传的活动附件图片与证明图片超过 300KB 或最长边超过 1920 像素时自动转存为 WebP，动图与无法识别的图片保留原样；附件大小上限放宽后，大图仍会被压缩。关闭则保留原始文件。
+								</FieldDescription>
+							</Field>
+							<Field data-invalid={!!invalid.imageCompressionQuality}>
+								<FieldLabel htmlFor="settings-compression-quality">
+									WebP 压缩质量
+								</FieldLabel>
+								<Input
+									id="settings-compression-quality"
+									type="number"
+									inputMode="numeric"
+									min={50}
+									max={95}
+									step={1}
+									value={
+										Number.isNaN(draft.imageCompressionQuality)
+											? ""
+											: draft.imageCompressionQuality
+									}
+									disabled={busy}
+									aria-invalid={!!invalid.imageCompressionQuality}
+									onChange={(e) =>
+										change(
+											"imageCompressionQuality",
+											e.target.value === "" ? Number.NaN : Number(e.target.value),
+										)
+									}
+								/>
+								{invalid.imageCompressionQuality && (
+									<FieldError>{invalid.imageCompressionQuality}</FieldError>
+								)}
+								<FieldDescription>
+									压缩生成的 WebP 图片质量，50至95的整数，数值越高越清晰、文件越大。默认 80。
 								</FieldDescription>
 							</Field>
 						</FieldGroup>

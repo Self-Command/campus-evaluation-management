@@ -7,6 +7,7 @@ import { MeasurementEmpty } from "@/components/dashboard/measurement-empty";
 import { Claims, type Claim } from "./_components/claims";
 import { schemeSchema } from "@/lib/scoring/types";
 import { pageClaims, claimFilterSchema } from "@/server/claims";
+import { evidenceLimits } from "@/server/evidence";
 
 const titles = {
 	ADMIN: "成果申报监督",
@@ -110,6 +111,7 @@ export default async function Page({
 	const claims = term
 		? await pageClaims(user.sessionId, term.id, page, p.status)
 		: null;
+	const evidence = await evidenceLimits();
 	return (
 		<>
 			<PageHeading title={titles[role]} description={descriptions[role]} />
@@ -136,6 +138,7 @@ export default async function Page({
 								}
 							: { items: [], total: 0, page }
 					}
+					evidenceLimits={evidence}
 				/>
 			) : (
 				<MeasurementEmpty admin={user.role === "ADMIN"} />

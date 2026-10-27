@@ -196,3 +196,34 @@ test("可保存的主题值全覆盖，未知主题被拒绝", async () => {
   ).rejects.toThrow();
   expect((await readSiteSettings()).themePreset).toBe("mono");
 });
+
+test("上传与证明设置可保存回读，证明类型不能全部关闭", async () => {
+  const revision = (await readSiteSettings()).revision;
+  const saved = await saveSettings(sessionId, {
+    ...defaultSettings,
+    evidenceMaxSizeMb: 8,
+    evidenceAllowPdf: false,
+    imageCompressionEnabled: false,
+    imageCompressionQuality: 90,
+    revision,
+    reason: "上传与证明设置验证",
+  });
+  expect(saved.evidenceMaxSizeMb).toBe(8);
+  expect(saved.evidenceAllowImage).toBe(true);
+  expect(saved.evidenceAllowPdf).toBe(false);
+  expect(saved.imageCompressionEnabled).toBe(false);
+  expect(saved.imageCompressionQuality).toBe(90);
+  const read = await readSiteSettings();
+  expect(read.evidenceMaxSizeMb).toBe(8);
+  expect(read.evidenceAllowPdf).toBe(false);
+  expect(read.imageCompressionQuality).toBe(90);
+  await expect(
+    saveSettings(sessionId, { ...defaultSettings, evidenceAllowImage: false, evidenceAllowPdf: false, revision: saved.revision, reason: "证明类型全关" }),
+  ).rejects.toThrow("证明类型不能全部关闭");
+  await expect(
+    saveSettings(sessionId, { ...defaultSettings, evidenceMaxSizeMb: 51, revision: saved.revision, reason: "证明上限超范围" }),
+  ).rejects.toThrow();
+  await expect(
+    saveSettings(sessionId, { ...defaultSettings, imageCompressionQuality: 49, revision: saved.revision, reason: "压缩质量超范围" }),
+  ).rejects.toThrow();
+});

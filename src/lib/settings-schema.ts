@@ -41,6 +41,11 @@ export const settingsSchema = z.object({
   activityAttachmentMaxFiles: z.number().int().min(1).max(20).default(5),
   activityAttachmentMaxSizeMb: z.number().int().min(1).max(50).default(10),
   activityAttachmentAllowedExtensions: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9]{1,10}$/)).min(1).max(20).default([...defaultAttachmentExtensions]),
+  evidenceAllowImage: z.boolean().default(true),
+  evidenceAllowPdf: z.boolean().default(true),
+  evidenceMaxSizeMb: z.number().int().min(1).max(50).default(5),
+  imageCompressionEnabled: z.boolean().default(true),
+  imageCompressionQuality: z.number().int().min(50).max(95).default(80),
 }).strict();
 
 // Reading already-saved records tolerates values that are no longer offered

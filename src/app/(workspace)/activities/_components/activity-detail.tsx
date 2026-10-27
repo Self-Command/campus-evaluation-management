@@ -49,12 +49,14 @@ import { ScoringCorrection } from "@/components/dashboard/scoring-correction";
 import { MarkdownContent } from "@/components/dashboard/markdown-content";
 import { formatBytes } from "@/lib/format-bytes";
 import type { UploadLimits } from "@/components/dashboard/rich-text-editor";
+import type { EvidenceLimits } from "@/components/dashboard/evidence-upload";
 export function ActivityDetail({
 	activity,
 	term,
 	user,
 	colleges = [],
 	limits,
+	evidenceLimits,
 	now,
 	returnHref,
 }: {
@@ -70,6 +72,7 @@ export function ActivityDetail({
 	user: { id: string; role: AppRole };
 	colleges?: { id: string; name: string; code?: string }[];
 	limits: UploadLimits;
+	evidenceLimits: EvidenceLimits;
 	now: string;
 	returnHref?: string;
 }) {
@@ -675,7 +678,7 @@ export function ActivityDetail({
 									/>
 								</Field>
 							)}
-							<EvidenceUpload onChange={setIds} onBusy={setUploading} />
+							<EvidenceUpload onChange={setIds} onBusy={setUploading} limits={evidenceLimits} />
 							{ids.length > 1 && (
 								<p className="text-sm text-destructive">
 									每次只能保存一份有效证明，请只保留一个文件。
