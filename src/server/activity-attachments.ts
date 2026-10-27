@@ -8,6 +8,7 @@ import { AccountError } from "@/server/accounts";
 import { readSiteSettings } from "@/server/settings";
 import { canManageActivity } from "@/server/activity-policy";
 import { recordAudit } from "@/server/audit";
+import { normalizeUploadedImage } from "@/server/image-normalize";
 
 export const attachmentRoot = () =>
 	resolve(/* turbopackIgnore: true */ process.env.ACTIVITY_ATTACHMENT_DIR ?? ".local/activity-attachments");
@@ -127,6 +128,10 @@ export async function uploadActivityAttachment(sessionId: string, rawName: strin
 	if (!limits.allowed.includes(extension)) throw new AccountError(`不支持 ${extension ? `.${extension}` : "无后缀"} 文件，请上传：${limits.allowed.join("、")}`);
 	const mime = identify(extension, bytes);
 	if (!mime) throw new AccountError("文件内容与后缀不匹配，或文件已损坏");
+	const normalized = await normalizeUploadedImage(bytes, mime);
+	const stored = normalized.bytes;
+	const storedMime = normalized.mime;
+	const storedSha256 = createHash("sha256").update(stored).digest("hex");
 	if (activityId) {
 		const activity = await db.activity.findUnique({ where: { id: activityId } });
 		if (!activity) throw new AccountError("活动不存在", 404);
@@ -135,14 +140,15 @@ export async function uploadActivityAttachment(sessionId: string, rawName: strin
 	const since = new Date(Date.now() - 86400_000);
 	const used = await db.activityAttachment.count({ where: activityId ? { activityId } : { uploaderId: current.userId, activityId: null, createdAt: { gt: since } } });
 	if (used >= limits.maxFiles) throw new AccountError(`每个活动最多 ${limits.maxFiles} 个附件`);
-	const storageKey = `${randomBytes(24).toString("hex")}.${extension}`;
+	const storageExtension = storedMime === "image/webp" ? "webp" : extension;
+	const storageKey = `${randomBytes(24).toString("hex")}.${storageExtension}`;
 	await mkdir(attachmentRoot(), { recursive: true });
 	const path = join(/* turbopackIgnore: true */ attachmentRoot(), storageKey);
-	await writeFile(path, bytes, { flag: "wx" });
+	await writeFile(path, stored, { flag: "wx" });
 	try {
 		const saved = await db.$transaction(async (tx) => {
 			const created = await tx.activityAttachment.create({
-				data: { activityId: activityId || null, uploaderId: current.userId, name, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), storageKey, kind: mime.startsWith("image/") ? "IMAGE" : "FILE" },
+				data: { activityId: activityId || null, uploaderId: current.userId, name, mime: storedMime, size: stored.length, sha256: storedSha256, storageKey, kind: storedMime.startsWith("image/") ? "IMAGE" : "FILE" },
 				select: { id: true, name: true, mime: true, size: true, kind: true, createdAt: true },
 			});
 			await recordAudit(tx, {
@@ -150,7 +156,15 @@ export async function uploadActivityAttachment(sessionId: string, rawName: strin
 				action: "ACTIVITY_ATTACHMENT_UPLOADED",
 				targetId: created.id,
 				targetLabel: name,
-				details: { activityId: activityId || null, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") },
+				details: {
+					activityId: activityId || null,
+					mime: storedMime,
+					size: stored.length,
+					sha256: storedSha256,
+					normalized: normalized.normalized,
+					originalMime: normalized.originalMime,
+					originalSize: normalized.originalSize,
+				},
 			});
 			return created;
 		});

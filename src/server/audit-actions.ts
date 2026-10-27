@@ -106,6 +106,7 @@ export const auditActions = {
   ACTIVITY_ATTACHMENT_UPLOADED: { category: "ACTIVITY", label: "上传活动附件", targetType: "ActivityAttachment" },
   ACTIVITY_ATTACHMENT_DELETED: { category: "ACTIVITY", label: "删除活动附件", targetType: "ActivityAttachment" },
   ACTIVITY_ATTACHMENT_DOWNLOADED: { category: "ACTIVITY", label: "下载活动附件", targetType: "ActivityAttachment" },
+  ACTIVITY_ATTACHMENT_RECOMPRESSED: { category: "ACTIVITY", label: "压缩活动附件图片", targetType: "ActivityAttachment" },
 
   PARTICIPATION_REVIEWED: { category: "PARTICIPATION", label: "审核活动参与", targetType: "Participation" },
   PARTICIPATION_BATCH_REVIEWED: { category: "PARTICIPATION", label: "批量审核活动参与", targetType: "ReviewBatch" },

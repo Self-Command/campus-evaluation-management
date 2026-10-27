@@ -21,7 +21,7 @@ const failureMessages: Record<FailureKind, string> = {
 	server: "服务器暂时无法提供图片。",
 	network: "网络连接中断，图片没有加载。",
 	timeout: "网络较慢，图片加载超时。",
-	unknown: "图片内容无法显示。",
+	unknown: "网络传输中断，图片没有完整加载。",
 };
 
 function attemptUrl(url: string, attempt: number) {

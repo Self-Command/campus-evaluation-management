@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 import { db } from "@/server/db";
 import { organizationFixture } from "./organization-fixture";
 import { createTerm, saveScheme, activateTerm } from "@/server/terms";
@@ -992,6 +993,60 @@ test("活动附件按发布范围鉴权下载，重复绑定同一活动不重�
 		attachmentIds: [attachment.id],
 	});
 	expect(rebound.attachments).toHaveLength(1);
+});
+
+test("大图上传自动重编码为 WebP 并保留原始文件名", async () => {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1400"><rect width="2400" height="1400" fill="#f5f6f8"/><rect x="0" y="0" width="2400" height="88" fill="#1f2b3d"/><rect x="48" y="140" width="560" height="360" rx="16" fill="#ffffff" stroke="#d8dee6"/><rect x="648" y="140" width="800" height="360" rx="16" fill="#ffffff" stroke="#d8dee6"/><rect x="48" y="540" width="1400" height="280" rx="16" fill="#ffffff" stroke="#d8dee6"/><circle cx="2100" cy="400" r="180" fill="#3b82f6" opacity="0.85"/></svg>`;
+	const base = await sharp(Buffer.from(svg)).png().toBuffer();
+	let seed = 20261027;
+	const noise = Buffer.alloc(720 * 460 * 3);
+	for (let i = 0; i < noise.length; i += 1) {
+		seed = (seed * 1103515245 + 12345) % 2147483648;
+		noise[i] = (seed >> 16) & 0xff;
+	}
+	const bigPng = await sharp(base)
+		.composite([{ input: noise, raw: { width: 720, height: 460, channels: 3 }, left: 1500, top: 860 }])
+		.png()
+		.toBuffer();
+	expect(bigPng.length).toBeGreaterThan(300 * 1024);
+
+	const uploaded = await uploadActivityAttachment(
+		users["college-a"].session,
+		"活动照片.png",
+		bigPng,
+	);
+	expect(uploaded.mime).toBe("image/webp");
+	expect(uploaded.name).toBe("活动照片.png");
+	expect(uploaded.size).toBeLessThan(bigPng.length);
+	expect(uploaded.size).toBeGreaterThan(0);
+
+	const downloaded = await downloadActivityAttachment(
+		users["college-a"].session,
+		uploaded.id,
+	);
+	expect(downloaded.bytes.equals(bigPng)).toBe(false);
+	const meta = await sharp(downloaded.bytes).metadata();
+	expect(meta.format).toBe("webp");
+	expect(meta.width).toBeLessThanOrEqual(1920);
+	expect(meta.height).toBeLessThanOrEqual(1920);
+	expect(createHash("sha256").update(downloaded.bytes).digest("hex")).toBe(
+		downloaded.file.sha256,
+	);
+});
+
+test("小图上传不做重编码保持原样", async () => {
+	const uploaded = await uploadActivityAttachment(
+		users["college-a"].session,
+		"占位.png",
+		png,
+	);
+	expect(uploaded.mime).toBe("image/png");
+	expect(uploaded.size).toBe(png.length);
+	const downloaded = await downloadActivityAttachment(
+		users["college-a"].session,
+		uploaded.id,
+	);
+	expect(downloaded.bytes.equals(png)).toBe(true);
 });
 
 test("无归属历史活动只能由管理员移交主办学院，发布者不能自行认领", async () => {

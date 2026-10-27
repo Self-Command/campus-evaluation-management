@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { hash } from "bcryptjs";
+import sharp from "sharp";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
 import { login } from "./login";
@@ -269,5 +270,78 @@ test("图片短暂断网时自动重试并恢复显示", async ({ browser }) => 
 		})
 		.toBeGreaterThan(0);
 	expect(blocked).toBe(2);
+	await context.close();
+});
+
+test("大图经上传接口自动压缩后学生端正常显示", async ({ browser }) => {
+	test.skip(!ids.attachment, "当前没有可用的进行中测评周期");
+	test.setTimeout(240_000);
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1400"><rect width="2400" height="1400" fill="#eef2f7"/><rect x="0" y="0" width="2400" height="96" fill="#243247"/><rect x="64" y="160" width="640" height="420" rx="20" fill="#ffffff" stroke="#cfd8e3"/><rect x="752" y="160" width="900" height="420" rx="20" fill="#ffffff" stroke="#cfd8e3"/><circle cx="2150" cy="420" r="200" fill="#2563eb" opacity="0.9"/></svg>`;
+	const base = await sharp(Buffer.from(svg)).png().toBuffer();
+	let seed = 20261027;
+	const noise = Buffer.alloc(720 * 460 * 3);
+	for (let i = 0; i < noise.length; i += 1) {
+		seed = (seed * 1103515245 + 12345) % 2147483648;
+		noise[i] = (seed >> 16) & 0xff;
+	}
+	const bigPng = await sharp(base)
+		.composite([
+			{ input: noise, raw: { width: 720, height: 460, channels: 3 }, left: 1500, top: 860 },
+		])
+		.png()
+		.toBuffer();
+	expect(bigPng.length).toBeGreaterThan(300 * 1024);
+
+	const context = await browser.newContext();
+	const page = await context.newPage();
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await login(page, `${prefix}-college`, password);
+	const origin = new URL(process.env.E2E_BASE_URL ?? "http://localhost:3000").origin;
+	const response = await context.request.post("/api/activity-attachments", {
+		headers: {
+			"x-file-name": encodeURIComponent("大图示例.png"),
+			"x-activity-id": ids.activity,
+			"content-type": "application/octet-stream",
+			origin,
+		},
+		data: bigPng,
+	});
+	expect(response.status()).toBe(201);
+	const uploaded = (await response.json()) as { id: string; mime: string; size: number };
+	expect(uploaded.mime).toBe("image/webp");
+	expect(uploaded.size).toBeLessThan(bigPng.length);
+
+	const originalContent = `图片加载验证。\n\n![示例图片](/api/activity-attachments/${ids.attachment})\n\n![已删除图片](/api/activity-attachments/${missingId})`;
+	await db.activity.update({
+		where: { id: ids.activity },
+		data: {
+			content: `${originalContent}\n\n![大图示例](/api/activity-attachments/${uploaded.id})`,
+		},
+	});
+
+	const studentContext = await browser.newContext();
+	const studentPage = await studentContext.newPage();
+	await studentPage.setViewportSize({ width: 1440, height: 900 });
+	await login(studentPage, `${prefix}-student`, password);
+	await studentPage.goto(`/activities/${ids.activity}?termId=${ids.term}`, {
+		waitUntil: "domcontentloaded",
+	});
+	const big = studentPage.getByAltText("大图示例");
+	await expect(big).toBeVisible({ timeout: 30_000 });
+	await expect
+		.poll(() => big.evaluate((image) => (image as HTMLImageElement).naturalWidth), {
+			timeout: 30_000,
+		})
+		.toBeGreaterThan(0);
+	await studentContext.close();
+
+	await db.activity.update({ where: { id: ids.activity }, data: { content: originalContent } });
+	const stored = await db.activityAttachment.findUniqueOrThrow({
+		where: { id: uploaded.id },
+		select: { storageKey: true },
+	});
+	await unlink(join(attachmentDir, stored.storageKey)).catch(() => {});
+	await db.auditEvent.deleteMany({ where: { targetId: uploaded.id } });
+	await db.activityAttachment.deleteMany({ where: { id: uploaded.id } });
 	await context.close();
 });
